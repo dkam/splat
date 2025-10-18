@@ -1,0 +1,82 @@
+#!/usr/bin/env ruby
+
+require 'net/http'
+require 'json'
+require 'securerandom'
+require 'dotenv/load'
+
+# Parse DSN: https://public_key@host/project_id
+dsn = ENV.fetch('SPLAT_DSN', 'http://f6301207182352d857c9d53d9a804fd3@localhost:3030/booko')
+
+def parse_dsn(dsn)
+  # Extract components from DSN
+  match = dsn.match(/(https?):\/\/([^@]+)@([^\/]+)\/(.+)/)
+  raise "Invalid DSN format" unless match
+  
+  {
+    protocol: match[1],
+    public_key: match[2], 
+    host: match[3],
+    project_id: match[4]
+  }
+end
+
+def generate_envelope_headers(event_id, dsn_info)
+  headers = {
+    event_id: event_id,
+    sent_at: Time.now.utc.iso8601
+  }
+  
+  # Add DSN to envelope headers for authentication
+  headers[:dsn] = "#{dsn_info[:protocol]}://#{dsn_info[:public_key]}@#{dsn_info[:host]}/#{dsn_info[:project_id]}"
+  
+  headers
+end
+
+# Parse DSN
+dsn_info = parse_dsn(dsn)
+puts "Sending to: #{dsn_info[:host]}/#{dsn_info[:project_id]}"
+
+# Generate event ID
+event_id = SecureRandom.uuid.gsub('-', '')
+
+# Test event payload
+event_payload = {
+  message: "Test from Ruby script",
+  level: "error",
+  timestamp: Time.now.utc.iso8601,
+  platform: "other",
+  sdk: {
+    name: "test-script",
+    version: "1.0.0"
+  }
+}
+
+# Build envelope
+envelope_headers = generate_envelope_headers(event_id, dsn_info)
+item_headers = {
+  type: "event",
+  length: event_payload.to_json.bytesize
+}
+
+envelope = [
+  envelope_headers.to_json,
+  item_headers.to_json,
+  event_payload.to_json
+].join("\n")
+
+# Send request
+uri = URI("#{dsn_info[:protocol]}://#{dsn_info[:host]}/api/#{dsn_info[:project_id]}/envelope/")
+
+puts "Sending envelope..."
+puts "Event ID: #{event_id}"
+puts "Payload size: #{envelope.bytesize} bytes"
+
+response = Net::HTTP.post(uri, envelope, { 
+  "Content-Type" => "application/x-sentry-envelope",
+  "User-Agent" => "splat-test-script/1.0.0"
+})
+
+puts "Response: #{response.code} #{response.message}"
+puts "Body: #{response.body}" if response.body && !response.body.empty?
+
