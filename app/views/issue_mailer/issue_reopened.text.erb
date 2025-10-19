@@ -1,0 +1,16 @@
+⚠️ Issue Reopened
+
+Issue: <%= @issue.title %>
+
+Details:
+- Exception Type: <%= @issue.exception_type || 'Unknown' %>
+- Last Seen: <%= @issue.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') %>
+- Total Occurrences: <%= @issue.count %>
+- Project: <%= @project.name %>
+
+This issue was previously resolved but has reoccurred. It may need further investigation.
+
+View Issue Details: <%= @url %>
+
+---
+This notification was sent by Splat - your lightweight error tracker.

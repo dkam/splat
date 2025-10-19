@@ -1,0 +1,29 @@
+<%= link_to project_event_path(project.slug, event), class: "block hover:bg-gray-50 p-4 transition-colors", id: "event-#{event.id}" do %>
+  <div class="flex justify-between items-start">
+    <div class="flex-1">
+      <div class="font-medium text-gray-900 mb-2">
+        <%= event.message || event.exception_value %>
+      </div>
+      <div class="flex items-center gap-4 text-sm text-gray-600">
+        <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
+          <%= event.event_id %>
+        </span>
+        <% if event.environment.present? %>
+          <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
+            <%= event.environment %>
+          </span>
+        <% end %>
+        <% if event.release.present? %>
+          <span class="text-gray-500"><%= event.release %></span>
+        <% end %>
+        <% if event.server_name.present? %>
+          <span class="text-gray-500"><%= event.server_name %></span>
+        <% end %>
+      </div>
+    </div>
+    <div class="text-right text-sm text-gray-500">
+      <%= event.timestamp.strftime("%Y-%m-%d") %>
+      <div class="text-xs"><%= event.timestamp.strftime("%H:%M:%S") %></div>
+    </div>
+  </div>
+<% end %>

@@ -1,0 +1,173 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← Performance", project_transactions_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <div class="mb-6">
+    <h1 class="text-3xl font-bold text-gray-900 mb-2"><%= @transaction.transaction_name %></h1>
+    <div class="flex items-center gap-3 text-sm text-gray-600">
+      <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= @transaction.transaction_id %></span>
+      <span>•</span>
+      <span><%= @transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S.%L") %></span>
+    </div>
+  </div>
+
+  <!-- Duration Overview -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">Total Duration</div>
+      <div class="text-3xl font-bold <%= duration_color_class(@transaction.duration) %>">
+        <%= format_duration(@transaction.duration) %>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">Database Time</div>
+      <div class="text-2xl font-bold text-gray-900">
+        <% if @transaction.db_time.present? %>
+          <%= format_duration(@transaction.db_time) %>
+          <div class="text-xs text-gray-500 mt-1">
+            <%= (@transaction.db_time.to_f / @transaction.duration * 100).round(1) %>% of total
+          </div>
+        <% else %>
+          <span class="text-gray-400">N/A</span>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">View Time</div>
+      <div class="text-2xl font-bold text-gray-900">
+        <% if @transaction.view_time.present? %>
+          <%= format_duration(@transaction.view_time) %>
+          <div class="text-xs text-gray-500 mt-1">
+            <%= (@transaction.view_time.to_f / @transaction.duration * 100).round(1) %>% of total
+          </div>
+        <% else %>
+          <span class="text-gray-400">N/A</span>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">Operation</div>
+      <div class="text-lg font-bold text-gray-900">
+        <%= @transaction.op || "N/A" %>
+      </div>
+    </div>
+  </div>
+
+  <!-- HTTP Context -->
+  <% if @transaction.http_method.present? || @transaction.http_status.present? || @transaction.http_url.present? %>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 mb-4">HTTP Request</h2>
+      <dl class="grid grid-cols-1 gap-4">
+        <% if @transaction.http_method.present? %>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Method</dt>
+            <dd class="mt-1 font-mono text-sm text-gray-900"><%= @transaction.http_method %></dd>
+          </div>
+        <% end %>
+
+        <% if @transaction.http_status.present? %>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Status</dt>
+            <dd class="mt-1">
+              <span class="px-2 py-1 text-sm font-medium rounded <%= @transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800' : @transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
+                <%= @transaction.http_status %>
+              </span>
+            </dd>
+          </div>
+        <% end %>
+
+        <% if @transaction.http_url.present? %>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">URL</dt>
+            <dd class="mt-1 font-mono text-sm text-gray-900 break-all"><%= @transaction.http_url %></dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+  <% end %>
+
+  <!-- Context -->
+  <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
+    <h2 class="text-lg font-bold text-gray-900 mb-4">Context</h2>
+    <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <% if @transaction.environment.present? %>
+        <div>
+          <dt class="text-sm font-medium text-gray-600">Environment</dt>
+          <dd class="mt-1">
+            <span class="px-2 py-1 text-sm bg-blue-100 text-blue-800 rounded">
+              <%= @transaction.environment %>
+            </span>
+          </dd>
+        </div>
+      <% end %>
+
+      <% if @transaction.release.present? %>
+        <div>
+          <dt class="text-sm font-medium text-gray-600">Release</dt>
+          <dd class="mt-1 font-mono text-sm text-gray-900"><%= @transaction.release %></dd>
+        </div>
+      <% end %>
+
+      <% if @transaction.server_name.present? %>
+        <div>
+          <dt class="text-sm font-medium text-gray-600">Server</dt>
+          <dd class="mt-1 text-sm text-gray-900"><%= @transaction.server_name %></dd>
+        </div>
+      <% end %>
+
+      <div>
+        <dt class="text-sm font-medium text-gray-600">Transaction ID</dt>
+        <dd class="mt-1">
+          <button
+            data-controller="clipboard"
+            data-clipboard-text-value="<%= @transaction.transaction_id %>"
+            data-action="click->clipboard#copy"
+            class="font-mono text-sm text-gray-900 hover:text-blue-600 cursor-pointer">
+            <%= @transaction.transaction_id %>
+            <span data-clipboard-target="feedback" class="text-xs text-green-600 ml-2 hidden">Copied!</span>
+          </button>
+        </dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- Tags -->
+  <% if @transaction.tags.present? && @transaction.tags.any? %>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 mb-4">Tags</h2>
+      <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <% @transaction.tags.each do |key, value| %>
+          <div>
+            <dt class="text-sm font-medium text-gray-600"><%= key %></dt>
+            <dd class="mt-1 font-mono text-sm text-gray-900"><%= value %></dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+  <% end %>
+
+  <!-- Measurements -->
+  <% if @transaction.measurements.present? && @transaction.measurements.any? %>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 mb-4">Measurements</h2>
+      <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <% @transaction.measurements.each do |key, data| %>
+          <div>
+            <dt class="text-sm font-medium text-gray-600"><%= key.gsub('_', ' ').titleize %></dt>
+            <dd class="mt-1 text-sm text-gray-900">
+              <% if data.is_a?(Hash) %>
+                <%= data['value'] %> <%= data['unit'] %>
+              <% else %>
+                <%= data %>
+              <% end %>
+            </dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+  <% end %>
+</div>

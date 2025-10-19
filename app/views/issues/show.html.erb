@@ -1,0 +1,99 @@
+<%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%= turbo_stream_from @issue %>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+  <div class="mb-8">
+    <%= link_to "← Issues", project_issues_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <!-- Issue Header -->
+  <div class="mb-8">
+    <div class="flex items-start justify-between mb-4">
+      <div class="flex-1">
+        <div class="flex items-center gap-3 mb-2">
+          <h1 class="text-3xl font-bold text-gray-900"><%= @issue.title %></h1>
+          <div id="issue-status">
+            <% if @issue.resolved? %>
+              <span class="px-3 py-1 text-sm font-medium bg-green-100 text-green-800 rounded">Resolved</span>
+            <% elsif @issue.ignored? %>
+              <span class="px-3 py-1 text-sm font-medium bg-gray-100 text-gray-800 rounded">Ignored</span>
+            <% else %>
+              <span class="px-3 py-1 text-sm font-medium bg-red-100 text-red-800 rounded">Open</span>
+            <% end %>
+          </div>
+        </div>
+        <p class="text-gray-600">
+          <span class="font-mono text-sm bg-gray-100 px-2 py-1 rounded"><%= @issue.exception_type %></span>
+        </p>
+      </div>
+
+      <!-- Action Buttons -->
+      <div id="issue-actions" class="flex gap-2">
+        <% if @issue.resolved? %>
+          <%= button_to "Reopen", reopen_project_issue_path(@project.slug, @issue),
+              method: :patch,
+              class: "bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg",
+              form: { data: { turbo: true } } %>
+        <% else %>
+          <%= button_to "Resolve", resolve_project_issue_path(@project.slug, @issue),
+              method: :patch,
+              class: "bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg",
+              form: { data: { turbo: true } } %>
+          <%= button_to "Ignore", ignore_project_issue_path(@project.slug, @issue),
+              method: :patch,
+              class: "bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg",
+              form: { data: { turbo: true } } %>
+        <% end %>
+      </div>
+    </div>
+    <%= turbo_stream_from @issue, "updates" %>
+    <!-- Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="text-sm text-gray-600 mb-1">Total Events</div>
+        <div id="issue-count" class="text-3xl font-bold text-gray-900"><%= @issue.count %></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="text-sm text-gray-600 mb-1">First Seen</div>
+        <div class="text-lg font-semibold text-gray-900"><%= @issue.first_seen.strftime("%Y-%m-%d %H:%M:%S") %></div>
+      </div>
+      <div id="last-seen" class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="text-sm text-gray-600 mb-1">Last Seen</div>
+        <div class="text-lg font-semibold text-gray-900">
+          <%= time_ago_in_words(@issue.last_seen) %> ago
+          <div class="text-sm text-gray-500 mt-1"><%= @issue.last_seen.strftime("%Y-%m-%d %H:%M:%S") %></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fingerprint (for debugging) -->
+  <details class="mb-8">
+    <summary class="cursor-pointer text-sm text-gray-600 hover:text-gray-900">Show fingerprint</summary>
+    <div class="mt-2 bg-gray-50 rounded p-3 border border-gray-200">
+      <code class="text-xs font-mono text-gray-700"><%= @issue.fingerprint %></code>
+    </div>
+  </details>
+
+  <!-- Events List -->
+  <div>
+    <h2 class="text-2xl font-bold text-gray-900 mb-4">
+      Events (<span id="events-count"><%= @events.size %></span>)
+    </h2>
+
+    <% if @events.any? %>
+      <div id="events-list" class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+        <% @events.each do |event| %>
+          <%= render 'events/event_row', event: event, project: @project %>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-white rounded-lg shadow p-8 text-center border border-gray-200">
+        <p class="text-gray-600">No events for this issue</p>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+

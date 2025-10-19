@@ -15,6 +15,18 @@ class Project < ApplicationRecord
   before_validation :generate_slug, if: :name?
   before_validation :generate_public_key, if: -> { public_key.blank? }
 
+  def broadcast_issues_refresh
+    # Broadcast to the issues stream for this project
+    # Turbo::StreamsChannel.broadcast_refresh_to([self, "issues"])
+    broadcast_refresh_to(self, "issues")
+  end
+
+  def broadcast_events_refresh
+    # Broadcast to the issues stream for this project
+    # Turbo::StreamsChannel.broadcast_refresh_to([self, "issues"])
+    broadcast_refresh_to(self, "events")
+  end
+
   def self.find_by_dsn(dsn)
     # Parse DSN: https://public_key@host/project_id
     return nil unless dsn.present?
@@ -46,8 +58,8 @@ class Project < ApplicationRecord
     transactions.recent.limit(limit)
   end
 
-  def unresolved_issues
-    issues.unresolved.recent
+  def open_issues
+    issues.open.recent
   end
 
   def event_count(time_range = nil)

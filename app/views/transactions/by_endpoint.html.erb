@@ -1,0 +1,140 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← Performance", project_transactions_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <div class="mb-6">
+    <h1 class="text-3xl font-bold text-gray-900 mb-2"><%= @endpoint %></h1>
+  </div>
+
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">Average Duration</div>
+      <div class="text-3xl font-bold <%= duration_color_class(@avg_duration) %>">
+        <%= format_duration(@avg_duration) %>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">P95 Duration</div>
+      <div class="text-3xl font-bold <%= duration_color_class(@p95_duration) %>">
+        <%= format_duration(@p95_duration) %>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm font-medium text-gray-600 mb-1">P99 Duration</div>
+      <div class="text-3xl font-bold <%= duration_color_class(@p99_duration) %>">
+        <%= format_duration(@p99_duration) %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
+    <%= form_with url: by_endpoint_project_transactions_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
+      <%= f.hidden_field :endpoint, value: @endpoint %>
+
+      <div class="flex-1 min-w-[150px]">
+        <%= f.label :time_range, "Time Range", class: "block text-sm font-medium text-gray-700 mb-1" %>
+        <%= f.select :time_range,
+            options_for_select([["Last Hour", "1h"], ["Last 6 Hours", "6h"], ["Last 24 Hours", "24h"], ["Last 7 Days", "7d"]], @time_range),
+            {},
+            class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+      </div>
+
+      <div class="flex items-end">
+        <%= f.submit "Filter", class: "bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg" %>
+      </div>
+    <% end %>
+  </div>
+
+  <!-- Transactions Table -->
+  <% if @transactions.any? %>
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">DB Time</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">View Time</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Environment</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <% @transactions.each do |transaction| %>
+            <tr class="hover:bg-gray-50">
+              <td class="px-6 py-4 whitespace-nowrap">
+                <% if transaction.http_method.present? %>
+                  <span class="font-mono text-sm text-gray-600"><%= transaction.http_method %></span>
+                <% else %>
+                  <span class="text-gray-400">-</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <% if transaction.http_status.present? %>
+                  <span class="px-2 py-1 text-xs font-medium rounded <%= transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800' : transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
+                    <%= transaction.http_status %>
+                  </span>
+                <% else %>
+                  <span class="text-gray-400">-</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right">
+                <span class="font-semibold <%= duration_color_class(transaction.duration) %>">
+                  <%= format_duration(transaction.duration) %>
+                </span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
+                <% if transaction.db_time.present? %>
+                  <%= format_duration(transaction.db_time) %>
+                <% else %>
+                  <span class="text-gray-400">-</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
+                <% if transaction.view_time.present? %>
+                  <%= format_duration(transaction.view_time) %>
+                <% else %>
+                  <span class="text-gray-400">-</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <% if transaction.environment.present? %>
+                  <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
+                    <%= transaction.environment %>
+                  </span>
+                <% else %>
+                  <span class="text-gray-400">-</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                <%= transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S") %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                <%= link_to "View", project_transaction_path(@project.slug, transaction),
+                    class: "text-blue-600 hover:text-blue-800 font-medium" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+
+    <% if @pagy.pages > 1 %>
+      <div class="mt-6 flex justify-center">
+        <%== pagy_nav(@pagy) %>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="bg-white rounded-lg shadow p-12 text-center border border-gray-200">
+      <h3 class="text-lg font-medium text-gray-900 mb-2">No transactions found</h3>
+      <p class="text-gray-600">No transaction data available for this endpoint in the selected time range</p>
+    </div>
+  <% end %>
+</div>

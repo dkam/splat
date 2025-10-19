@@ -1,0 +1,23 @@
+import { Controller } from "@hotwired/stimulus"
+
+export default class extends Controller {
+  static values = {
+    timeout: { type: Number, default: 3000 }
+  }
+
+  connect() {
+    this.timeout = setTimeout(() => {
+      this.remove()
+    }, this.timeoutValue)
+  }
+
+  disconnect() {
+    if (this.timeout) {
+      clearTimeout(this.timeout)
+    }
+  }
+
+  remove() {
+    this.element.remove()
+  }
+}

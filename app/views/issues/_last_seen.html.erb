@@ -1,0 +1,7 @@
+<div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+  <div class="text-sm text-gray-600 mb-1">Last Seen</div>
+  <div class="text-lg font-semibold text-gray-900">
+    <%= time_ago_in_words(issue.last_seen) %> ago
+    <div class="text-sm text-gray-500 mt-1"><%= issue.last_seen.strftime("%Y-%m-%d %H:%M:%S") %></div>
+  </div>
+</div>

@@ -23,5 +23,24 @@ module Splat
     #
     # config.time_zone = "Central Time (US & Canada)"
     # config.eager_load_paths << Rails.root.join("extras")
+
+    # Email configuration using environment variables
+    config.action_mailer.default_url_options = {
+      host: ENV.fetch('SPLAT_HOST', 'localhost'),
+      port: ENV.fetch('SPLAT_PORT', 3000)
+    }
+
+    # Configure SMTP settings using environment variables
+    config.action_mailer.delivery_method = :smtp
+    config.action_mailer.smtp_settings = {
+      address: ENV.fetch('SMTP_ADDRESS', 'localhost'),
+      port: ENV.fetch('SMTP_PORT', 587),
+      domain: ENV.fetch('SMTP_DOMAIN', 'localhost'),
+      user_name: ENV.fetch('SMTP_USER_NAME', nil),
+      password: ENV.fetch('SMTP_PASSWORD', nil),
+      authentication: ENV.fetch('SMTP_AUTHENTICATION', 'plain').to_sym,
+      enable_starttls_auto: ENV.fetch('SMTP_STARTTLS_AUTO', 'true') == 'true',
+      openssl_verify_mode: ENV.fetch('SMTP_OPENSSL_VERIFY_MODE', 'peer').to_sym
+    }
   end
 end

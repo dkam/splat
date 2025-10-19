@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta content="text/html; charset=UTF-8" http-equiv="Content-Type">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333;">
+  <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="border-left: 4px solid #f59e0b; padding: 20px; background: #fffbeb; border-radius: 0 8px 8px 0;">
+      <h1 style="margin: 0 0 10px 0; color: #d97706;">⚠️ Issue Reopened</h1>
+      <h2 style="margin: 0 0 20px 0; color: #92400e; font-size: 1.2em;"><%= @issue.title %></h2>
+    </div>
+
+    <div style="margin: 20px 0; padding: 15px; background: #f8fafc; border-radius: 8px;">
+      <p style="margin: 0 0 10px 0;"><strong>Exception Type:</strong> <%= @issue.exception_type || 'Unknown' %></p>
+      <p style="margin: 0 0 10px 0;"><strong>Last Seen:</strong> <%= @issue.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') %></p>
+      <p style="margin: 0 0 10px 0;"><strong>Total Occurrences:</strong> <%= @issue.count %></p>
+      <p style="margin: 0 0 10px 0;"><strong>Project:</strong> <%= @project.name %></p>
+    </div>
+
+    <div style="margin: 20px 0;">
+      <p style="margin: 0 0 15px 0;">This issue was previously resolved but has reoccurred. It may need further investigation.</p>
+
+      <a href="<%= @url %>"
+         style="display: inline-block; background: #f59e0b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+        View Issue Details
+      </a>
+    </div>
+
+    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 0.9em; color: #6b7280;">
+      <p style="margin: 0;">
+        This notification was sent by <strong>Splat</strong> - your lightweight error tracker.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

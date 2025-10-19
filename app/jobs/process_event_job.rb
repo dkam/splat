@@ -12,6 +12,12 @@ class ProcessEventJob < ApplicationJob
 
     # Update the issue statistics with the event's actual timestamp
     if event.issue
+      # Reopen resolved issues when new events arrive (ignored issues stay ignored)
+      was_resolved = event.issue.resolved?
+      if was_resolved
+        event.issue.open!
+      end
+
       event.issue.update!(
         count: event.issue.count + 1,
         last_seen: event.timestamp
@@ -24,4 +30,5 @@ class ProcessEventJob < ApplicationJob
     Rails.logger.error e.backtrace.join("\n")
     raise
   end
-end
+
+  end

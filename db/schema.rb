@@ -48,7 +48,7 @@ ActiveRecord::Schema[8.1].define(version: 2025_10_18_082207) do
     t.datetime "first_seen", null: false
     t.datetime "last_seen", null: false
     t.integer "project_id", null: false
-    t.string "status", default: "unresolved", null: false
+    t.integer "status", default: 0, null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.index ["count"], name: "index_issues_on_count"

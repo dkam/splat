@@ -1,0 +1,15 @@
+🐛 New Issue Detected
+
+Issue: <%= @issue.title %>
+
+Details:
+- Exception Type: <%= @issue.exception_type || 'Unknown' %>
+- First Seen: <%= @issue.first_seen.strftime('%Y-%m-%d %H:%M:%S UTC') %>
+- Project: <%= @project.name %>
+
+This issue has been detected in your application and needs attention.
+
+View Issue Details: <%= @url %>
+
+---
+This notification was sent by Splat - your lightweight error tracker.

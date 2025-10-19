@@ -7,7 +7,7 @@ class HealthController < ApplicationController
       timestamp: Time.current.iso8601,
       queue_depth: SolidQueue::Job.pending.count,
       event_count: Event.count,
-      issue_count: Issue.where(status: "unresolved").count,
+      issue_count: Issue.where(status: "open").count,
       transaction_count: Transaction.count
     }
   end

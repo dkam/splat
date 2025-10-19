@@ -1,0 +1,116 @@
+<%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%= turbo_stream_from @project, "events" %>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold text-gray-900">Events</h1>
+  </div>
+
+  <!-- Filters -->
+  <div class="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
+    <%= form_with url: project_events_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
+      <div class="flex-1 min-w-[200px]">
+        <%= f.label :environment, "Environment", class: "block text-sm font-medium text-gray-700 mb-1" %>
+        <%= f.select :environment,
+            options_for_select([["All", ""]] + @environments.map { |e| [e, e] }, params[:environment]),
+            {},
+            class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+      </div>
+
+      <div class="flex-1 min-w-[200px]">
+        <%= f.label :exception_type, "Exception Type", class: "block text-sm font-medium text-gray-700 mb-1" %>
+        <%= f.select :exception_type,
+            options_for_select([["All", ""]] + @exception_types.map { |e| [e, e] }, params[:exception_type]),
+            {},
+            class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+      </div>
+
+      <div class="flex items-end">
+        <%= f.submit "Filter", class: "bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg" %>
+        <% if params[:environment].present? || params[:exception_type].present? %>
+          <%= link_to "Clear", project_events_path(@project.slug), class: "ml-2 text-gray-600 hover:text-gray-900 py-2 px-4" %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <!-- Events List -->
+  <% if @events.any? %>
+    <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+      <% @events.each do |event| %>
+        <div class="p-4 hover:bg-gray-50 transition-colors">
+          <div class="flex justify-between items-start gap-4">
+            <!-- Event Info -->
+            <div class="flex-1 min-w-0">
+              <%= link_to project_event_path(@project.slug, event), class: "block" do %>
+                <div class="font-medium text-gray-900 mb-2 truncate">
+                  <%= event.message || event.exception_value || "No message" %>
+                </div>
+              <% end %>
+
+              <div class="flex items-center flex-wrap gap-x-3 gap-y-1 text-sm text-gray-600">
+                <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
+                  <%= event.exception_type || "unknown" %>
+                </span>
+
+                <% if event.environment.present? %>
+                  <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
+                    <%= event.environment %>
+                  </span>
+                <% end %>
+
+                <% if event.issue %>
+                  <%= link_to project_issue_path(@project.slug, event.issue), class: "text-blue-600 hover:text-blue-800" do %>
+                    Issue #<%= event.issue.id %>
+                  <% end %>
+                <% end %>
+
+                <% if event.release.present? %>
+                  <span class="text-gray-500"><%= event.release %></span>
+                <% end %>
+
+                <% if event.server_name.present? %>
+                  <span class="text-gray-500">@<%= event.server_name %></span>
+                <% end %>
+
+                <span class="text-gray-400">•</span>
+                <span class="text-gray-500"><%= event.timestamp.strftime("%Y-%m-%d %H:%M:%S") %></span>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-2">
+              <%= link_to "View", project_event_path(@project.slug, event),
+                  class: "text-blue-600 hover:text-blue-800 text-sm font-medium" %>
+              <%= button_to "Delete",
+                  project_event_path(@project.slug, event),
+                  method: :delete,
+                  data: { turbo_confirm: "Are you sure?" },
+                  class: "text-red-600 hover:text-red-800 text-sm font-medium" %>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+
+    <% if @pagy.pages > 1 %>
+      <div class="mt-6 flex justify-center">
+        <%== pagy_nav(@pagy) %>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="bg-white rounded-lg shadow p-12 text-center border border-gray-200">
+      <h3 class="text-lg font-medium text-gray-900 mb-2">No events found</h3>
+      <% if params[:environment].present? || params[:exception_type].present? %>
+        <p class="text-gray-600 mb-4">Try adjusting your filters</p>
+        <%= link_to "Clear filters", project_events_path(@project.slug), class: "text-blue-600 hover:text-blue-800" %>
+      <% else %>
+        <p class="text-gray-600">Events will appear here once your application starts sending errors</p>
+      <% end %>
+    </div>
+  <% end %>
+</div>

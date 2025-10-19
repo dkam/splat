@@ -4,15 +4,33 @@ class Issue < ApplicationRecord
   belongs_to :project
   has_many :events, dependent: :nullify
 
+  enum :status, { open: 0, resolved: 1, ignored: 2 }
+
   validates :fingerprint, presence: true, uniqueness: { scope: :project_id }
   validates :title, presence: true
-  validates :status, inclusion: { in: %w[unresolved resolved ignored] }
 
-  scope :unresolved, -> { where(status: "unresolved") }
-  scope :resolved, -> { where(status: "resolved") }
-  scope :ignored, -> { where(status: "ignored") }
   scope :recent, -> { order(last_seen: :desc) }
   scope :by_frequency, -> { order(count: :desc) }
+
+  # Callbacks for email notifications
+  after_create :notify_new_issue, if: :should_notify_new_issue?
+  after_update :notify_issue_reopened, if: :was_reopened?
+
+  # Real-time updates
+  after_create_commit do
+    broadcast_refresh_to(project)
+  end
+
+  after_update_commit do
+    broadcast_refresh  # Refreshes the issue show page
+    broadcast_refresh_to(project, "issues")  # Refreshes the project's issues index
+  end
+
+  # Broadcast to both project and issue when status changes
+  # after_update_commit -> {
+  #  broadcast_refresh_later               # For issue show pages
+  #  broadcast_refresh_later_to(project)  # For project pages
+  # } #, if: :status_changed?
 
   def self.group_event(event_payload, project)
     fingerprint = generate_fingerprint(event_payload)
@@ -22,6 +40,7 @@ class Issue < ApplicationRecord
       issue.exception_type = extract_exception_type(event_payload)
       issue.first_seen = Time.current
       issue.last_seen = Time.current
+      issue.status = :open
     end
   end
 
@@ -63,27 +82,23 @@ class Issue < ApplicationRecord
     )
   end
 
-  def resolve!
-    update!(status: "resolved")
+  private
+
+  def notify_new_issue
+    IssueMailer.new_issue(self).deliver_later
   end
 
-  def ignore!
-    update!(status: "ignored")
+  def notify_issue_reopened
+    IssueMailer.issue_reopened(self).deliver_later
   end
 
-  def unresolve!
-    update!(status: "unresolved")
+  def should_notify_new_issue?
+    # Only notify for new issues in production environment or if explicitly enabled
+    Rails.env.production? || ENV['SPLAT_EMAIL_NOTIFICATIONS'] == 'true'
   end
 
-  def resolved?
-    status == "resolved"
-  end
-
-  def ignored?
-    status == "ignored"
-  end
-
-  def unresolved?
-    status == "unresolved"
+  def was_reopened?
+    # Check if status changed from resolved to open
+    saved_change_to_status?(from: 1, to: 0)  # resolved=1, open=0
   end
 end

@@ -9,7 +9,20 @@
 #     priority: 2
 #     schedule: at 5am every day
 
-production:
-  clear_solid_queue_finished_jobs:
-    command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
+development:
+  cleanup_finished_jobs:
+    class: "MaintenanceJob"
     schedule: every hour at minute 12
+
+  cleanup_old_events:
+    class: "CleanupEventsJob"
+    schedule: at 2am every day
+
+production:
+  cleanup_finished_jobs:
+    class: "MaintenanceJob"
+    schedule: every hour at minute 12
+
+  cleanup_old_events:
+    class: "CleanupEventsJob"
+    schedule: at 2am every day

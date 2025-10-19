@@ -5,19 +5,21 @@ class Api::EnvelopesController < ApplicationController
 
   # POST /api/:project_id/envelope/
   def create
-    project = find_project
+    project = authenticate_project!
     return head :not_found unless project
 
     Sentry::EnvelopeProcessor.new(request.body.read, project).process
 
     # Always return 200 OK to avoid client retries
     head :ok
+  rescue DsnAuthenticationService::AuthenticationError => e
+    Rails.logger.warn "DSN authentication failed: #{e.message}"
+    head :unauthorized
   end
 
   private
 
-  def find_project
-    Project.find_by(id: params[:project_id]) ||
-      Project.find_by(slug: params[:project_id])
+  def authenticate_project!
+    DsnAuthenticationService.authenticate(request, params[:project_id])
   end
 end

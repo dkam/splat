@@ -1,0 +1,36 @@
+<div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← Back to Projects", root_path, class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <h1 class="text-3xl font-bold text-gray-900 mb-8">Create New Project</h1>
+
+  <%= form_with model: @project, class: "space-y-6" do |f| %>
+    <% if @project.errors.any? %>
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+        <h3 class="text-sm font-medium text-red-800 mb-2">
+          <%= pluralize(@project.errors.count, "error") %> prohibited this project from being saved:
+        </h3>
+        <ul class="list-disc list-inside text-sm text-red-700">
+          <% @project.errors.full_messages.each do |message| %>
+            <li><%= message %></li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+
+    <div>
+      <%= f.label :name, class: "block text-sm font-medium text-gray-700 mb-2" %>
+      <%= f.text_field :name,
+          class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
+          placeholder: "My Application",
+          autofocus: true %>
+      <p class="mt-1 text-sm text-gray-600">A friendly name for your project (e.g., "Booko Production")</p>
+    </div>
+
+    <div class="flex gap-3">
+      <%= f.submit "Create Project", class: "bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg" %>
+      <%= link_to "Cancel", root_path, class: "bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg" %>
+    </div>
+  <% end %>
+</div>

@@ -1,0 +1,201 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← Events", project_events_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <!-- Event Header -->
+  <div class="flex justify-between items-start mb-8">
+    <div class="flex-1">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">
+        <%= @event.message || @event.exception_value || "Event #{@event.event_id}" %>
+      </h1>
+      <div class="flex items-center gap-3 text-sm text-gray-600">
+        <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= @event.event_id %></span>
+        <% if @event.environment.present? %>
+          <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded"><%= @event.environment %></span>
+        <% end %>
+        <span><%= @event.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %></span>
+      </div>
+    </div>
+
+    <div class="flex gap-2">
+      <% if @issue %>
+        <%= link_to "View Issue", project_issue_path(@project.slug, @issue),
+            class: "bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg" %>
+      <% end %>
+      <%= button_to "Delete Event", project_event_path(@project.slug, @event),
+          method: :delete,
+          data: { turbo_confirm: "Are you sure?" },
+          class: "bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg" %>
+    </div>
+  </div>
+
+  <!-- Exception Details -->
+  <% exception = @event.exception_details %>
+  <% if exception[:type].present? %>
+    <div class="bg-red-50 rounded-lg p-6 mb-6 border border-red-200">
+      <h2 class="text-lg font-semibold text-red-900 mb-2">
+        <%= exception[:type] %>
+      </h2>
+      <% if exception[:value].present? %>
+        <p class="text-red-800 font-mono text-sm"><%= exception[:value] %></p>
+      <% end %>
+    </div>
+  <% end %>
+
+  <!-- Stacktrace -->
+  <% if @event.stacktrace.present? %>
+    <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-900 mb-4">Stack Trace</h2>
+      <div class="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+        <% frames = @event.stacktrace["frames"] || [] %>
+        <% frames.reverse.each_with_index do |frame, index| %>
+          <div class="mb-3 font-mono text-sm <%= frame['in_app'] ? 'text-red-400' : 'text-gray-400' %>">
+            <div class="flex items-start gap-3">
+              <span class="text-gray-500 min-w-[2rem] text-right"><%= index + 1 %></span>
+              <div class="flex-1">
+                <div>
+                  <span class="text-blue-300"><%= frame["filename"] || "unknown" %></span>
+                  <% if frame["lineno"] %>
+                    <span class="text-gray-500">:<%= frame["lineno"] %></span>
+                    <% if frame["colno"] %>
+                      <span class="text-gray-500">:<%= frame["colno"] %></span>
+                    <% end %>
+                  <% end %>
+                </div>
+                <% if frame["function"] %>
+                  <div class="text-yellow-300">in <%= frame["function"] %></div>
+                <% end %>
+                <% if frame["context_line"] %>
+                  <div class="mt-1 text-gray-300"><%= frame["context_line"].strip %></div>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Tags -->
+    <% if @event.tags.present? && @event.tags.any? %>
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Tags</h2>
+        <dl class="space-y-2">
+          <% @event.tags.each do |key, value| %>
+            <div class="flex justify-between text-sm">
+              <dt class="text-gray-600 font-medium"><%= key %></dt>
+              <dd class="text-gray-900 font-mono"><%= value %></dd>
+            </div>
+          <% end %>
+        </dl>
+      </div>
+    <% end %>
+
+    <!-- Request Info -->
+    <% if @event.request.present? && @event.request.any? %>
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Request</h2>
+        <dl class="space-y-2 text-sm">
+          <% if @event.request["url"] %>
+            <div>
+              <dt class="text-gray-600 font-medium">URL</dt>
+              <dd class="text-gray-900 font-mono text-xs break-all"><%= @event.request["url"] %></dd>
+            </div>
+          <% end %>
+          <% if @event.request["method"] %>
+            <div>
+              <dt class="text-gray-600 font-medium">Method</dt>
+              <dd class="text-gray-900"><%= @event.request["method"] %></dd>
+            </div>
+          <% end %>
+          <% if @event.request["headers"] %>
+            <div>
+              <dt class="text-gray-600 font-medium mb-1">Headers</dt>
+              <dd class="text-gray-900">
+                <% @event.request["headers"].each do |key, value| %>
+                  <div class="flex justify-between font-mono text-xs py-1">
+                    <span class="text-gray-600"><%= key %></span>
+                    <span class="text-gray-900 truncate ml-2"><%= value %></span>
+                  </div>
+                <% end %>
+              </dd>
+            </div>
+          <% end %>
+        </dl>
+      </div>
+    <% end %>
+
+    <!-- User Info -->
+    <% if @event.user.present? && @event.user.any? %>
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">User</h2>
+        <dl class="space-y-2 text-sm">
+          <% @event.user.each do |key, value| %>
+            <div class="flex justify-between">
+              <dt class="text-gray-600 font-medium"><%= key.humanize %></dt>
+              <dd class="text-gray-900 font-mono"><%= value %></dd>
+            </div>
+          <% end %>
+        </dl>
+      </div>
+    <% end %>
+
+    <!-- Contexts -->
+    <% if @event.contexts.present? && @event.contexts.any? %>
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Contexts</h2>
+        <dl class="space-y-3 text-sm">
+          <% @event.contexts.each do |key, context| %>
+            <div>
+              <dt class="text-gray-600 font-medium mb-1"><%= key.humanize %></dt>
+              <dd class="text-gray-900">
+                <% if context.is_a?(Hash) %>
+                  <% context.each do |k, v| %>
+                    <div class="flex justify-between font-mono text-xs py-1">
+                      <span class="text-gray-600"><%= k %></span>
+                      <span class="text-gray-900"><%= v %></span>
+                    </div>
+                  <% end %>
+                <% else %>
+                  <span class="font-mono text-xs"><%= context %></span>
+                <% end %>
+              </dd>
+            </div>
+          <% end %>
+        </dl>
+      </div>
+    <% end %>
+  </div>
+
+  <!-- Breadcrumbs -->
+  <% if @event.breadcrumbs.present? && @event.breadcrumbs.any? %>
+    <div class="mt-6 bg-white rounded-lg shadow p-6 border border-gray-200">
+      <h2 class="text-lg font-semibold text-gray-900 mb-4">Breadcrumbs</h2>
+      <div class="space-y-2">
+        <% @event.breadcrumbs.each do |breadcrumb| %>
+          <div class="flex items-start gap-4 text-sm py-2 border-l-2 border-gray-300 pl-3">
+            <span class="text-gray-500 font-mono text-xs min-w-[140px]">
+              <%= Time.at(breadcrumb["timestamp"]).strftime("%H:%M:%S.%L") rescue breadcrumb["timestamp"] %>
+            </span>
+            <span class="px-2 py-0.5 text-xs bg-gray-100 rounded min-w-[80px] text-center">
+              <%= breadcrumb["category"] || breadcrumb["type"] %>
+            </span>
+            <span class="text-gray-900 flex-1"><%= breadcrumb["message"] || breadcrumb["data"] %></span>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <!-- Raw Payload (collapsed) -->
+  <details class="mt-6 bg-white rounded-lg shadow border border-gray-200">
+    <summary class="cursor-pointer p-4 font-semibold text-gray-900 hover:bg-gray-50">
+      Raw Event Payload
+    </summary>
+    <div class="p-4 border-t border-gray-200">
+      <pre class="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs font-mono"><%= JSON.pretty_generate(@event.payload) %></pre>
+    </div>
+  </details>
+</div>

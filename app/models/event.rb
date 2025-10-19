@@ -7,6 +7,10 @@ class Event < ApplicationRecord
   validates :event_id, presence: true, uniqueness: true
   validates :timestamp, presence: true
 
+  after_create_commit do
+    broadcast_refresh_to(issue)
+  end
+
   scope :recent, -> { order(timestamp: :desc) }
   scope :by_issue, ->(issue_id) { where(issue_id: issue_id) }
   scope :by_environment, ->(env) { where(environment: env) }
@@ -111,6 +115,13 @@ class Event < ApplicationRecord
   end
 
   private
+
+  def broadcast_refresh_to(issue)
+    issue.broadcast_refresh_later
+    project.broadcast_refresh_later
+    project.broadcast_issues_refresh
+    project.broadcast_events_refresh
+  end
 
   def extract_fields_from_payload
     return unless payload.present?

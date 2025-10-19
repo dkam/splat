@@ -1,0 +1,146 @@
+<%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%= turbo_stream_from @project %>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="flex justify-between items-start mb-8">
+    <div>
+      <div class="flex items-center gap-2 mb-2">
+        <%= link_to "← Projects", root_path, class: "text-gray-600 hover:text-gray-900" %>
+      </div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-3xl font-bold text-gray-900"><%= @project.name %></h1>
+        <button type="button"
+                data-controller="clipboard"
+                data-action="click->clipboard#copy"
+                data-clipboard-text-value="<%= @project.dsn %>"
+                class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-1.5 px-3 rounded-lg">
+          Copy DSN
+        </button>
+      </div>
+      <p class="text-gray-600 mt-1">/<%= @project.slug %></p>
+    </div>
+    <div class="flex gap-2">
+      <%= link_to "Edit", edit_project_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+      <%= button_to "Delete", project_path(@project.slug), method: :delete,
+          data: { turbo_confirm: "Are you sure? This will delete all events and issues." },
+          class: "text-red-600 hover:text-red-800" %>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm text-gray-600 mb-1">Open Issues</div>
+      <div class="text-3xl font-bold text-red-600"><%= @project.issues.open.count %></div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm text-gray-600 mb-1">Events (24h)</div>
+      <div class="text-3xl font-bold text-gray-900"><%= @event_count_24h %></div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm text-gray-600 mb-1">Avg Response</div>
+      <div class="text-3xl font-bold text-gray-900"><%= @avg_response_time.round %>ms</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm text-gray-600 mb-1">Queue Depth</div>
+      <div class="text-3xl font-bold <%= @queue_depth > 10 ? 'text-yellow-600' : 'text-gray-900' %>"><%= @queue_depth %></div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm text-gray-600 mb-1">Total Events</div>
+      <div class="text-3xl font-bold text-gray-900"><%= @project.events.count %></div>
+    </div>
+  </div>
+
+
+  <!-- Quick Links -->
+  <div class="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+    <%= link_to project_issues_path(@project.slug),
+        class: "bg-white hover:bg-gray-50 rounded-lg shadow p-4 border border-gray-200 transition-colors" do %>
+      <div class="text-sm text-gray-600 mb-1">📋 Issues</div>
+      <div class="text-2xl font-bold text-gray-900"><%= @project.issues.open.count %></div>
+      <div class="text-xs text-gray-500 mt-1">View all issues →</div>
+    <% end %>
+
+    <%= link_to project_events_path(@project.slug),
+        class: "bg-white hover:bg-gray-50 rounded-lg shadow p-4 border border-gray-200 transition-colors" do %>
+      <div class="text-sm text-gray-600 mb-1">⚡ Events</div>
+      <div class="text-2xl font-bold text-gray-900"><%= @event_count_24h %></div>
+      <div class="text-xs text-gray-500 mt-1">View all events →</div>
+    <% end %>
+
+    <%= link_to project_transactions_path(@project.slug),
+        class: "bg-white hover:bg-gray-50 rounded-lg shadow p-4 border border-gray-200 transition-colors" do %>
+      <div class="text-sm text-gray-600 mb-1">🚀 Performance</div>
+      <div class="text-2xl font-bold <%= duration_color_class(@avg_response_time) %>"><%= format_duration(@avg_response_time) %></div>
+      <div class="text-xs text-gray-500 mt-1">View performance →</div>
+    <% end %>
+  </div>
+
+  <!-- Recent Unresolved Issues -->
+  <div class="mb-8">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-2xl font-bold text-gray-900">Recent Open Issues</h2>
+      <%= link_to "View All Issues →", project_issues_path(@project.slug), class: "text-blue-600 hover:text-blue-800" %>
+    </div>
+
+    <% if @recent_issues.any? %>
+      <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+        <% @recent_issues.each do |issue| %>
+          <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 p-4 transition-colors" do %>
+            <div class="flex justify-between items-start">
+              <div class="flex-1">
+                <h3 class="font-semibold text-gray-900 mb-1"><%= issue.title %></h3>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                  <span><%= issue.exception_type %></span>
+                  <span>•</span>
+                  <span><%= issue.count %> events</span>
+                  <span>•</span>
+                  <span>Last seen <%= time_ago_in_words(issue.last_seen) %> ago</span>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-white rounded-lg shadow p-8 text-center border border-gray-200">
+        <p class="text-gray-600">No open issues 🎉</p>
+      </div>
+    <% end %>
+  </div>
+
+  <!-- Recent Events -->
+  <div>
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-2xl font-bold text-gray-900">Recent Events</h2>
+      <%= link_to "View All Events →", project_events_path(@project.slug), class: "text-blue-600 hover:text-blue-800" %>
+    </div>
+
+    <% if @recent_events.any? %>
+      <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+        <% @recent_events.each do |event| %>
+          <%= link_to project_event_path(@project.slug, event), class: "block hover:bg-gray-50 p-4 transition-colors" do %>
+            <div class="flex justify-between items-start">
+              <div class="flex-1">
+                <h3 class="font-medium text-gray-900 mb-1"><%= event.message %></h3>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                  <span><%= event.exception_type %></span>
+                  <% if event.environment.present? %>
+                    <span>•</span>
+                    <span><%= event.environment %></span>
+                  <% end %>
+                  <span>•</span>
+                  <span><%= event.timestamp.strftime("%Y-%m-%d %H:%M:%S") %></span>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-white rounded-lg shadow p-8 text-center border border-gray-200">
+        <p class="text-gray-600">No events yet</p>
+      </div>
+    <% end %>
+  </div>
+</div>

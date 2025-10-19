@@ -19,6 +19,26 @@ Rails.application.routes.draw do
   # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
   # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
 
-  # Defines the root path route ("/")
-  # root "posts#index"
+  # Root - project list
+  root "projects#index"
+
+  # Projects and nested resources
+  resources :projects, param: :slug do
+    resources :issues, only: [:index, :show] do
+      member do
+        patch :resolve
+        patch :ignore
+        patch :reopen
+      end
+    end
+
+    resources :events, only: [:index, :show, :destroy]
+
+    resources :transactions, only: [:index, :show] do
+      collection do
+        get :slow
+        get :by_endpoint
+      end
+    end
+  end
 end

@@ -117,8 +117,8 @@ create_table :issues do |t|
   t.datetime :first_seen, null: false
   t.datetime :last_seen, null: false
 
-  # Status
-  t.string :status, default: 'unresolved'          # unresolved, resolved, ignored
+  # Status (enum: 0=unresolved, 1=resolved, 2=ignored)
+  t.integer :status, default: 0, null: false
 
   t.timestamps
 end
@@ -247,7 +247,14 @@ class ProcessEventJob < ApplicationJob
       # ... extract other fields
     )
 
-    # 4. Update issue stats
+    # 4. Auto-reopen resolved issues (following GlitchTip behavior)
+    # - resolved → unresolved (new event reopens the issue)
+    # - ignored → stays ignored (you explicitly don't want to see it)
+    if issue.resolved?
+      issue.unresolved!
+    end
+
+    # 5. Update issue stats
     issue.increment!(:count)
     issue.touch(:last_seen)
   end
@@ -312,7 +319,47 @@ class ProcessTransactionJob < ApplicationJob
 end
 ```
 
-## UI Views (Phlex)
+## Models
+
+### Issue Model
+
+```ruby
+class Issue < ApplicationRecord
+  belongs_to :project
+  has_many :events, dependent: :nullify
+
+  # Status enum (following GlitchTip pattern)
+  # - unresolved (0): Active issue needing attention
+  # - resolved (1): Fixed, but will auto-reopen on new events
+  # - ignored (2): Explicitly ignored, stays ignored on new events
+  enum :status, { unresolved: 0, resolved: 1, ignored: 2 }
+
+  validates :fingerprint, presence: true, uniqueness: { scope: :project_id }
+  validates :title, presence: true
+
+  scope :recent, -> { order(last_seen: :desc) }
+  scope :by_frequency, -> { order(count: :desc) }
+  # Enum automatically provides scopes: Issue.unresolved, Issue.resolved, Issue.ignored
+
+  def record_event!(timestamp: Time.current)
+    update!(
+      count: count + 1,
+      last_seen: timestamp
+    )
+  end
+
+  # Enum automatically provides:
+  # - Checkers: resolved?, ignored?, unresolved?
+  # - Setters: resolved!, ignored!, unresolved!
+end
+```
+
+**Status behavior on new events** (matches GlitchTip):
+- `resolved` → automatically changed to `unresolved`
+- `ignored` → stays `ignored` (explicit "don't care" decision)
+- `unresolved` → stays `unresolved`
+
+## UI Views (ERB + Tailwindcss)
 
 ### Issues List
 ```ruby

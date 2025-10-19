@@ -1,0 +1,101 @@
+<%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%= turbo_stream_from @project, "issues" %>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+  </div>
+
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold text-gray-900">Issues</h1>
+  </div>
+
+  <!-- Status Tabs -->
+  <div class="mb-6 border-b border-gray-200">
+    <nav class="flex gap-8">
+      <%= link_to project_issues_path(@project.slug, status: "open"),
+          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'open' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}" do %>
+        Open
+        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100">
+          <%= @project.issues.open.count %>
+        </span>
+      <% end %>
+
+      <%= link_to project_issues_path(@project.slug, status: "resolved"),
+          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'resolved' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}" do %>
+        Resolved
+        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100">
+          <%= @project.issues.resolved.count %>
+        </span>
+      <% end %>
+
+      <%= link_to project_issues_path(@project.slug, status: "ignored"),
+          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'ignored' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}" do %>
+        Ignored
+        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100">
+          <%= @project.issues.ignored.count %>
+        </span>
+      <% end %>
+    </nav>
+  </div>
+
+  <!-- Issues List -->
+  <% if @issues.any? %>
+    <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+      <% @issues.each do |issue| %>
+        <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 p-6 transition-colors" do %>
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <div class="flex items-center gap-3 mb-2">
+                <h2 class="text-lg font-semibold text-gray-900"><%= issue.title %></h2>
+                <% if issue.resolved? %>
+                  <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">Resolved</span>
+                <% elsif issue.ignored? %>
+                  <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">Ignored</span>
+                <% end %>
+              </div>
+
+              <div class="flex items-center gap-4 text-sm text-gray-600 mb-3">
+                <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= issue.exception_type %></span>
+                <span>•</span>
+                <span class="font-semibold text-gray-900"><%= issue.count %></span>
+                <span>events</span>
+              </div>
+
+              <div class="flex items-center gap-4 text-sm text-gray-500">
+                <span>First seen: <%= issue.first_seen.strftime("%Y-%m-%d %H:%M") %></span>
+                <span>•</span>
+                <span>Last seen: <%= time_ago_in_words(issue.last_seen) %> ago</span>
+              </div>
+            </div>
+
+            <div class="text-right">
+              <div class="text-2xl font-bold text-gray-900"><%= issue.count %></div>
+              <div class="text-xs text-gray-500">events</div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+
+    <% if @pagy.pages > 1 %>
+      <div class="mt-6 flex justify-center">
+        <%== pagy_nav(@pagy) %>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="bg-white rounded-lg shadow p-12 text-center border border-gray-200">
+      <% if @status == "open" %>
+        <div class="text-6xl mb-4">🎉</div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">No open issues</h3>
+        <p class="text-gray-600">Great job! Everything is looking good.</p>
+      <% elsif @status == "resolved" %>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">No resolved issues</h3>
+        <p class="text-gray-600">Resolved issues will appear here.</p>
+      <% else %>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">No ignored issues</h3>
+        <p class="text-gray-600">Ignored issues will appear here.</p>
+      <% end %>
+    </div>
+  <% end %>
+</div>
