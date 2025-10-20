@@ -39,7 +39,7 @@
     </div>
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
       <div class="text-sm text-gray-600 mb-1">Transactions (24h)</div>
-      <div class="text-3xl font-bold text-gray-900"><%= @transaction_count_24h %></div>
+      <div class="<%= @transaction_count_24h > 99_999 ? 'text-2xl' : 'text-3xl' %> font-bold text-gray-900"><%= @transaction_count_24h %></div>
     </div>
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
       <div class="text-sm text-gray-600 mb-1">Avg Response</div>
