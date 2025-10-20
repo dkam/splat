@@ -210,6 +210,11 @@ Cleanup completed successfully
   FROM_EMAIL: splat@splat.example.com # Change this to your email
   SOLID_QUEUE_THREADS: 3
   SOLID_QUEUE_PROCESSES: 1
+
+### Data Retenion
+SPLAT_MAX_EVENT_LIFE_DAYS=30
+SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS=60
+SPLAT_MAX_FILE_LIFE_DAYS=180
   
 ### Mission Control
 Optionally set these if you'd like to access /jobs to view the SolidQueue management system
