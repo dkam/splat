@@ -42,5 +42,10 @@ module Splat
       enable_starttls_auto: ENV.fetch('SMTP_STARTTLS_AUTO', 'true') == 'true',
       openssl_verify_mode: ENV.fetch('SMTP_OPENSSL_VERIFY_MODE', 'peer').to_sym
     }
+
+    if Rails.env.development? && ENV['MISSION_CONTROL_USERNAME'].present? && ENV['MISSION_CONTROL_PASSWORD'].present?
+      MissionControl::Jobs.http_basic_auth_user = ENV['MISSION_CONTROL_USERNAME']
+      MissionControl::Jobs.http_basic_auth_password = ENV['MISSION_CONTROL_PASSWORD']
+    end
   end
 end
