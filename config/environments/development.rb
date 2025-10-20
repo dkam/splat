@@ -32,9 +32,7 @@ Rails.application.configure do
   config.active_job.queue_adapter = :solid_queue
   config.solid_queue.connects_to = { database: { writing: :queue } }
 
-  # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
-
+  
   # Save emails to files instead of opening browser
   config.action_mailer.delivery_method = :file
   config.action_mailer.perform_deliveries = true

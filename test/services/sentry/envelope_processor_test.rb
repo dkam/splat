@@ -21,16 +21,73 @@ class Sentry::EnvelopeProcessorTest < ActiveSupport::TestCase
     assert processor.process
   end
 
-  test "rejects envelope without event_id" do
+  test "processes envelope with event_id only in payload" do
+    envelope_body = build_envelope_with_empty_headers(
+      items: [
+        {
+          type: "event",
+          payload: {
+            "event_id" => "payload123",
+            "message" => "Test error",
+            "platform" => "ruby"
+          }
+        }
+      ]
+    )
+
+    processor = Sentry::EnvelopeProcessor.new(envelope_body, @project)
+    assert processor.process
+  end
+
+  test "processes envelope with event_id only in envelope headers" do
     envelope_body = build_envelope(
+      event_id: "header123",
       sent_at: "2025-10-18T08:00:00Z",
+      items: [
+        {
+          type: "event",
+          payload: {
+            "message" => "Test error",
+            "platform" => "ruby"
+          }
+        }
+      ]
+    )
+
+    processor = Sentry::EnvelopeProcessor.new(envelope_body, @project)
+    assert processor.process
+  end
+
+  test "processes envelope with event_id in both payload and headers (prefers payload)" do
+    envelope_body = build_envelope(
+      event_id: "header123",
+      sent_at: "2025-10-18T08:00:00Z",
+      items: [
+        {
+          type: "event",
+          payload: {
+            "event_id" => "payload456",
+            "message" => "Test error",
+            "platform" => "ruby"
+          }
+        }
+      ]
+    )
+
+    processor = Sentry::EnvelopeProcessor.new(envelope_body, @project)
+    assert processor.process
+  end
+
+  test "rejects envelope without event_id in either payload or headers" do
+    envelope_body = build_envelope_with_empty_headers(
       items: [
         { type: "event", payload: { "message" => "Test" } }
       ]
     )
 
     processor = Sentry::EnvelopeProcessor.new(envelope_body, @project)
-    assert_not processor.process
+    # Should still process but log error - the item will be skipped
+    assert processor.process
   end
 
   test "rejects envelope with no items" do
@@ -131,6 +188,25 @@ class Sentry::EnvelopeProcessorTest < ActiveSupport::TestCase
         {
           type: "transaction",
           payload: {
+            "transaction" => "GET /users",
+            "start_timestamp" => 1729238400.0,
+            "timestamp" => 1729238401.5
+          }
+        }
+      ]
+    )
+
+    processor = Sentry::EnvelopeProcessor.new(envelope_body, @project)
+    assert processor.process
+  end
+
+  test "processes transaction with event_id only in payload" do
+    envelope_body = build_envelope_with_empty_headers(
+      items: [
+        {
+          type: "transaction",
+          payload: {
+            "event_id" => "txn456",
             "transaction" => "GET /users",
             "start_timestamp" => 1729238400.0,
             "timestamp" => 1729238401.5
@@ -260,6 +336,35 @@ class Sentry::EnvelopeProcessorTest < ActiveSupport::TestCase
     assert processor.process
   end
 
+  test "processes envelope with mixed items: some with event_id, some without" do
+    event_payload = {
+      "event_id" => "valid123",
+      "message" => "Valid event",
+      "platform" => "ruby"
+    }
+    event_json = event_payload.to_json
+
+    transaction_payload = {
+      "event_id" => "txn456",
+      "transaction" => "GET /api/test",
+      "timestamp" => "2025-10-18T13:09:01Z"
+    }
+    transaction_json = transaction_payload.to_json
+
+    envelope_body = [
+      "{}",  # Empty headers
+      '{"type":"event","length":' + event_json.bytesize.to_s + '}',
+      event_json,
+      '{"type":"event"}',
+      '{"message":"Invalid event - no event_id","platform":"ruby"}',
+      '{"type":"transaction","length":' + transaction_json.bytesize.to_s + '}',
+      transaction_json
+    ].join("\n")
+
+    processor = Sentry::EnvelopeProcessor.new(envelope_body, @project)
+    assert processor.process
+  end
+
   test "handles long message without truncation" do
     envelope_body = build_envelope(
       event_id: "abc123",
@@ -342,6 +447,22 @@ class Sentry::EnvelopeProcessorTest < ActiveSupport::TestCase
     headers["sent_at"] = sent_at if sent_at
 
     lines = [ headers.to_json ]
+
+    items.each do |item|
+      item_headers = {}
+      item_headers["type"] = item[:type] if item[:type]
+      lines << item_headers.to_json
+
+      if item[:payload]
+        lines << item[:payload].to_json
+      end
+    end
+
+    lines.join("\n")
+  end
+
+  def build_envelope_with_empty_headers(items: [])
+    lines = [ "{}" ]  # Empty headers
 
     items.each do |item|
       item_headers = {}
