@@ -4,6 +4,8 @@ This software is untested in production and should be considered alpha quality. 
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.  Splat currently has no user accounts.
 
+I've only used it with Rails and have been extracting the view / database times. T
+
 ## Overview
 
 **Named after Ruby's splat operator and the satisfying sound of squashing bugs**, Splat accepts Sentry-compatible error events and transaction data via a simple API endpoint, processes them asynchronously, and presents them in a clean, fast web interface.

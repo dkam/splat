@@ -21,7 +21,7 @@ class Transaction < ApplicationRecord
   scope :last_24_hours, -> { where("timestamp > ?", 24.hours.ago) }
   scope :last_7_days, -> { where("timestamp > ?", 7.days.ago) }
 
-  after_create_commit :broadcast_transaction_update_later
+  after_create_commit :broadcast_transaction_update
 
   def self.create_from_sentry_payload!(transaction_id, payload, project)
     # Extract timing information
@@ -33,10 +33,27 @@ class Transaction < ApplicationRecord
     request_data = payload["request"] || {}
     response_data = payload.dig("contexts", "response") || {}
 
-    # Extract measurements
+    # Extract measurements (primary source)
     measurements = payload["measurements"] || {}
     db_time = measurements.dig("db", "value")
     view_time = measurements.dig("view", "value")
+
+    # If measurements is empty, extract from spans (fallback)
+    if measurements.empty? && payload["spans"].present?
+      span_timing = SpanAnalyzer.extract_timing_data(payload["spans"])
+      db_time ||= span_timing[:db_time]
+      view_time ||= span_timing[:view_time]
+    end
+
+    # Analyze SQL queries for performance patterns
+    breadcrumbs_values = payload.dig("breadcrumbs", "values") || []
+    query_analysis = SpanAnalyzer.analyze_sql_queries(breadcrumbs_values)
+
+    # Enhance measurements with analysis results
+    enhanced_measurements = measurements.dup
+    enhanced_measurements["span_extracted_db_time"] = db_time if db_time.present?
+    enhanced_measurements["span_extracted_view_time"] = view_time if view_time.present?
+    enhanced_measurements["query_analysis"] = query_analysis if query_analysis[:total_queries] > 0
 
     create!(
       project: project,
@@ -54,7 +71,7 @@ class Transaction < ApplicationRecord
       http_status: response_data["status_code"],
       http_url: request_data["url"],
       tags: payload["tags"],
-      measurements: measurements
+      measurements: enhanced_measurements
     )
   rescue => e
     Rails.logger.error "Failed to create transaction from payload: #{e.message}"
@@ -145,6 +162,30 @@ class Transaction < ApplicationRecord
     measurements&.dig(key, "value")
   end
 
+  def query_analysis
+    measurements&.dig("query_analysis") || {}
+  end
+
+  def query_count
+    query_analysis["total_queries"] || 0
+  end
+
+  def unique_query_patterns
+    query_analysis["unique_patterns"] || 0
+  end
+
+  def potential_n_plus_one_queries
+    query_analysis["potential_n_plus_one"] || []
+  end
+
+  def has_n_plus_one_queries?
+    potential_n_plus_one_queries.any?
+  end
+
+  def query_patterns
+    query_analysis["query_patterns"] || {}
+  end
+
   def controller_action
     # Extract controller#action from transaction name if it follows Rails convention
     return nil unless transaction_name.present?
@@ -164,7 +205,7 @@ class Transaction < ApplicationRecord
 
   private
 
-  def broadcast_transaction_update_later
+  def broadcast_transaction_update
     # Only broadcast if it's been at least the configured interval since the last broadcast for this project
     cache_key = "transaction_broadcast_#{project_id}"
     last_broadcast = Rails.cache.read(cache_key)
@@ -175,7 +216,7 @@ class Transaction < ApplicationRecord
 
     if last_broadcast.nil? || last_broadcast < throttle_interval.seconds.ago
       Rails.cache.write(cache_key, Time.current, expires_in: 1.hour)
-      TransactionUpdateJob.perform_later(project_id)
+      project.broadcast_refresh_to(project, "transactions")
     end
   end
 

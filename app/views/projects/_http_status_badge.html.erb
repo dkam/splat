@@ -1,0 +1,7 @@
+<% if status.present? %>
+  <span class="px-2 py-1 text-xs font-medium rounded <%= status.to_i >= 500 ? 'bg-red-100 text-red-800' : status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
+    <%= status %>
+  </span>
+<% else %>
+  <span class="text-gray-400 text-sm">-</span>
+<% end %>
