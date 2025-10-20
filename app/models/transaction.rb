@@ -55,9 +55,8 @@ class Transaction < ApplicationRecord
     enhanced_measurements["span_extracted_view_time"] = view_time if view_time.present?
     enhanced_measurements["query_analysis"] = query_analysis if query_analysis[:total_queries] > 0
 
-    create!(
+    attributes = {
       project: project,
-      transaction_id: transaction_id,
       timestamp: timestamp || Time.current,
       transaction_name: payload["transaction"],
       op: payload.dig("contexts", "trace", "op"),
@@ -72,7 +71,16 @@ class Transaction < ApplicationRecord
       http_url: request_data["url"],
       tags: payload["tags"],
       measurements: enhanced_measurements
-    )
+    }
+
+    transaction = find_or_initialize_by(transaction_id: transaction_id)
+    if transaction.new_record?
+      transaction.assign_attributes(attributes)
+      transaction.save!
+    else
+      Rails.logger.info "Skipping duplicate transaction: #{transaction_id}"
+    end
+    transaction
   rescue => e
     Rails.logger.error "Failed to create transaction from payload: #{e.message}"
     raise
