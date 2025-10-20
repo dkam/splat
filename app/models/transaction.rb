@@ -21,9 +21,7 @@ class Transaction < ApplicationRecord
   scope :last_24_hours, -> { where("timestamp > ?", 24.hours.ago) }
   scope :last_7_days, -> { where("timestamp > ?", 7.days.ago) }
 
-  after_create_commit do
-    broadcast_refresh_to(project, "transactions")  # Refreshes the project's issues index
-  end
+  after_create_commit :broadcast_transaction_update_later
 
   def self.create_from_sentry_payload!(transaction_id, payload, project)
     # Extract timing information
@@ -162,5 +160,26 @@ class Transaction < ApplicationRecord
 
   def action
     controller_action&.split("#")&.last
+  end
+
+  private
+
+  def broadcast_transaction_update_later
+    # Only broadcast if it's been at least the configured interval since the last broadcast for this project
+    cache_key = "transaction_broadcast_#{project_id}"
+    last_broadcast = Rails.cache.read(cache_key)
+    throttle_interval = broadcast_interval
+
+    # Ensure we have a valid Time object
+    last_broadcast = Time.parse(last_broadcast) if last_broadcast.is_a?(String)
+
+    if last_broadcast.nil? || last_broadcast < throttle_interval.seconds.ago
+      Rails.cache.write(cache_key, Time.current, expires_in: 1.hour)
+      TransactionUpdateJob.perform_later(project_id)
+    end
+  end
+
+  def broadcast_interval
+    ENV.fetch("TRANSACTION_BROADCAST_INTERVAL", 3).to_i
   end
 end
