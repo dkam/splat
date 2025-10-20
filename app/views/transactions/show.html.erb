@@ -203,7 +203,7 @@
               <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div class="flex-1 mr-4">
                   <code class="text-xs text-gray-800 break-all"><%= pattern %></code>
-                  <% if data[:examples].any? %>
+                  <% if data[:examples]&.any? %>
                     <div class="mt-1 text-xs text-gray-500">
                       Example: <code class="text-xs"><%= data[:examples].first %></code>
                     </div>
