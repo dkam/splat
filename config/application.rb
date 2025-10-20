@@ -53,3 +53,13 @@ module Splat
     end
   end
 end
+
+
+{address: "smtp.fastmail.com",
+ port: "587",
+ domain: "localhost",
+ user_name: "myuser",
+ password: "abc123",
+ authentication: :plain,
+ enable_starttls_auto: true,
+ openssl_verify_mode: :none}

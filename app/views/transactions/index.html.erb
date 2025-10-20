@@ -101,7 +101,9 @@
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
-                  <%= endpoint.count %>
+                  <span class="<%= 'text-sm' if endpoint.count >= 100_000 %>">
+                    <%= number_with_delimiter(endpoint.count) %>
+                  </span>
                 </td>
               </tr>
             <% end %>
