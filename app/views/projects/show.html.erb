@@ -28,7 +28,7 @@
   </div>
 
   <!-- Stats -->
-  <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-6 mb-8">
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
       <div class="text-sm text-gray-600 mb-1">Open Issues</div>
       <div class="text-3xl font-bold text-red-600"><%= @project.issues.open.count %></div>
@@ -36,6 +36,10 @@
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
       <div class="text-sm text-gray-600 mb-1">Events (24h)</div>
       <div class="text-3xl font-bold text-gray-900"><%= @event_count_24h %></div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <div class="text-sm text-gray-600 mb-1">Transactions (24h)</div>
+      <div class="text-3xl font-bold text-gray-900"><%= @transaction_count_24h %></div>
     </div>
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
       <div class="text-sm text-gray-600 mb-1">Avg Response</div>
@@ -46,8 +50,10 @@
       <div class="text-3xl font-bold <%= @queue_depth > 10 ? 'text-yellow-600' : 'text-gray-900' %>"><%= @queue_depth %></div>
     </div>
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm text-gray-600 mb-1">Total Events</div>
-      <div class="text-3xl font-bold text-gray-900"><%= @project.events.count %></div>
+      <div class="text-sm text-gray-600 mb-1">Error Rate</div>
+      <div class="text-3xl font-bold <%= @project.error_rate > 5 ? 'text-red-600' : @project.error_rate > 1 ? 'text-yellow-600' : 'text-green-600' %>">
+        <%= @project.error_rate %>%
+      </div>
     </div>
   </div>
 
@@ -109,6 +115,57 @@
     <% end %>
   </div>
 
+  <!-- Recent Transactions -->
+  <div class="mb-8">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-2xl font-bold text-gray-900">Recent Transactions</h2>
+      <%= link_to "View All Transactions →", project_transactions_path(@project.slug), class: "text-blue-600 hover:text-blue-800" %>
+    </div>
+
+    <% if @recent_transactions.any? %>
+      <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+        <% @recent_transactions.each do |transaction| %>
+          <%= link_to project_transaction_path(@project.slug, transaction), class: "block hover:bg-gray-50 p-4 transition-colors" do %>
+            <div class="flex justify-between items-start">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="font-medium text-gray-900"><%= transaction.transaction_name %></h3>
+                  <%= render "http_status_badge", status: transaction.http_status %>
+                </div>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                  <span class="<%= duration_color_class(transaction.duration) %> font-medium">
+                    <%= format_duration(transaction.duration) %>
+                  </span>
+                  <% if transaction.http_method.present? %>
+                    <span>•</span>
+                    <span><%= transaction.http_method.upcase %></span>
+                  <% end %>
+                  <% if transaction.environment.present? %>
+                    <span>•</span>
+                    <span><%= transaction.environment %></span>
+                  <% end %>
+                  <span>•</span>
+                  <span><%= transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S") %></span>
+                </div>
+                <% if transaction.slow? %>
+                  <div class="mt-2">
+                    <span class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-red-100 text-red-800">
+                      🐌 Slow transaction
+                    </span>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-white rounded-lg shadow p-8 text-center border border-gray-200">
+        <p class="text-gray-600">No transactions yet</p>
+      </div>
+    <% end %>
+  </div>
+
   <!-- Recent Events -->
   <div>
     <div class="flex justify-between items-center mb-4">
@@ -122,9 +179,26 @@
           <%= link_to project_event_path(@project.slug, event), class: "block hover:bg-gray-50 p-4 transition-colors" do %>
             <div class="flex justify-between items-start">
               <div class="flex-1">
-                <h3 class="font-medium text-gray-900 mb-1"><%= event.message %></h3>
+                <div class="flex items-center gap-3 mb-1">
+                  <h3 class="font-medium text-gray-900"><%= event.message %></h3>
+                  <% if event.issue.present? %>
+                    <% if event.issue.resolved? %>
+                      <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">Resolved</span>
+                    <% elsif event.issue.ignored? %>
+                      <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">Ignored</span>
+                    <% else %>
+                      <span class="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded">Open</span>
+                    <% end %>
+                  <% end %>
+                </div>
                 <div class="flex items-center gap-4 text-sm text-gray-600">
                   <span><%= event.exception_type %></span>
+                  <% if event.issue.present? %>
+                    <span>•</span>
+                    <%= link_to project_issue_path(@project.slug, event.issue), class: "text-blue-600 hover:text-blue-800" do %>
+                      Issue #<%= event.issue.id %>
+                    <% end %>
+                  <% end %>
                   <% if event.environment.present? %>
                     <span>•</span>
                     <span><%= event.environment %></span>

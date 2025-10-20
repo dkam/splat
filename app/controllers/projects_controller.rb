@@ -10,7 +10,9 @@ class ProjectsController < ApplicationController
   def show
     @recent_issues = @project.open_issues.limit(20)
     @recent_events = @project.recent_events(limit: 10)
+    @recent_transactions = @project.recent_transactions(limit: 10)
     @event_count_24h = @project.event_count(24.hours.ago..Time.current)
+    @transaction_count_24h = @project.transaction_count(24.hours.ago..Time.current)
     @avg_response_time = @project.avg_response_time
     @queue_depth = SolidQueue::ReadyExecution.count
   end

@@ -21,6 +21,10 @@ class Transaction < ApplicationRecord
   scope :last_24_hours, -> { where("timestamp > ?", 24.hours.ago) }
   scope :last_7_days, -> { where("timestamp > ?", 7.days.ago) }
 
+  after_create_commit do
+    broadcast_refresh_to(project, "transactions")  # Refreshes the project's issues index
+  end
+
   def self.create_from_sentry_payload!(transaction_id, payload, project)
     # Extract timing information
     start_timestamp = parse_timestamp(payload["start_timestamp"])
