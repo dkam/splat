@@ -134,11 +134,6 @@ module Sentry
     end
 
     def validate_envelope!(envelope)
-      # Validate envelope headers
-      unless envelope[:headers][:event_id].present?
-        raise InvalidEnvelope, "Missing required field: event_id"
-      end
-
       # Validate sent_at format if present
       if envelope[:headers][:sent_at].present?
         begin
@@ -177,7 +172,14 @@ module Sentry
 
     def process_item(item, envelope_headers)
       item_type = item.dig(:headers, :type)
-      event_id = envelope_headers[:event_id]
+
+      # Get event_id from payload first, then envelope headers, following GlitchTip pattern
+      event_id = extract_event_id(item[:payload]) || envelope_headers[:event_id]
+
+      unless event_id
+        Rails.logger.error "Missing event_id in both payload and envelope headers for #{item_type} item"
+        return # Skip this item but continue processing others
+      end
 
       case item_type
       when "event"
@@ -204,6 +206,11 @@ module Sentry
         # Unknown item type - log but don't fail
         Rails.logger.info "Unknown item type: #{item_type}"
       end
+    end
+
+    def extract_event_id(payload)
+      return nil unless payload.is_a?(Hash)
+      payload[:event_id] || payload['event_id']
     end
   end
 end
