@@ -42,4 +42,9 @@ Rails.application.routes.draw do
       end
     end
   end
+  
+  # MCP (Model Context Protocol) endpoint
+ namespace :mcp, defaults: {format: "json"} do
+   match "/", to: "mcp#handle_mcp_request", via: [:get, :post, :put, :patch, :delete, :head, :options]
+ end
 end

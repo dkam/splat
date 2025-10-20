@@ -3,6 +3,7 @@
 class Current < ActiveSupport::CurrentAttributes
   attribute :splat_host
   attribute :project
+  attribute :ip
 
   def self.splat_host
     @splat_host || ENV.fetch("SPLAT_HOST", "localhost:3000")
