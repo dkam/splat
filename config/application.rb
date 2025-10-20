@@ -44,7 +44,7 @@ module Splat
       password: ENV.fetch('SMTP_PASSWORD', nil),
       authentication: ENV.fetch('SMTP_AUTHENTICATION', 'plain').to_sym,
       enable_starttls_auto: ENV.fetch('SMTP_STARTTLS_AUTO', 'true') == 'true',
-      openssl_verify_mode: ENV.fetch('SMTP_OPENSSL_VERIFY_MODE', 'peer').to_sym
+      openssl_verify_mode: OpenSSL::SSL::VERIFY_PEER, # ENV.fetch('SMTP_OPENSSL_VERIFY_MODE', 'peer').to_sym
     }
 
     if ENV['MISSION_CONTROL_USERNAME'].present? && ENV['MISSION_CONTROL_PASSWORD'].present?
