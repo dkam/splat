@@ -54,7 +54,6 @@ SMTP_PASSWORD=your-app-password
 SMTP_DOMAIN=localhost
 SMTP_AUTHENTICATION=plain
 SMTP_STARTTLS_AUTO=true
-SMTP_OPENSSL_VERIFY_MODE=peer
 SPLAT_HOST=localhost:3000
 
 # For local development with self-signed certificates, use:
@@ -96,8 +95,11 @@ Deploy using Kamal, Docker, or traditional Rails deployment methods.
 ```yaml
 x-common-variables: &common-variables
   RAILS_ENV: production
-  RAILS_MASTER_KEY: ${RAILS_MASTER_KEY}
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
   SPLAT_HOST: ${SPLAT_HOST}
+  SPLAT_ADMIN_EMAILS: ${SPLAT_ADMIN_EMAILS}
+  SPLAT_EMAIL_FROM: ${SPLAT_EMAIL_FROM}
+
   SMTP_ADDRESS: ${SMTP_ADDRESS}
   SMTP_PORT: ${SMTP_PORT}
   SMTP_USER_NAME: ${SMTP_USER_NAME}
