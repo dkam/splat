@@ -10,19 +10,11 @@
 #     schedule: at 5am every day
 
 development:
-  cleanup_finished_jobs:
-    class: "MaintenanceJob"
-    schedule: every hour at minute 12
-
   cleanup_old_events:
     class: "CleanupEventsJob"
     schedule: at 2am every day
 
 production:
-  cleanup_finished_jobs:
-    class: "MaintenanceJob"
-    schedule: every hour at minute 12
-
   cleanup_old_events:
     class: "CleanupEventsJob"
     schedule: at 2am every day
