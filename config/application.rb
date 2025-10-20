@@ -8,6 +8,10 @@ Bundler.require(*Rails.groups)
 
 module Splat
   class Application < Rails::Application
+    config.secret_key_base = ENV.fetch('SECRET_KEY_BASE') do
+      raise "SECRET_KEY_BASE environment variable is required but not set. Please 
+  set it in your .env file or environment."
+    end
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.1
 
@@ -43,7 +47,7 @@ module Splat
       openssl_verify_mode: ENV.fetch('SMTP_OPENSSL_VERIFY_MODE', 'peer').to_sym
     }
 
-    if Rails.env.development? && ENV['MISSION_CONTROL_USERNAME'].present? && ENV['MISSION_CONTROL_PASSWORD'].present?
+    if ENV['MISSION_CONTROL_USERNAME'].present? && ENV['MISSION_CONTROL_PASSWORD'].present?
       MissionControl::Jobs.http_basic_auth_user = ENV['MISSION_CONTROL_USERNAME']
       MissionControl::Jobs.http_basic_auth_password = ENV['MISSION_CONTROL_PASSWORD']
     end

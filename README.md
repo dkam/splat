@@ -89,6 +89,57 @@ Deploy using Kamal, Docker, or traditional Rails deployment methods.
 
 **Important**: Configure SMTP settings before deploying to production to ensure email notifications work correctly.
 
+## Deployment
+
+### Docker Compose
+
+```yaml
+x-common-variables: &common-variables
+  RAILS_ENV: production
+  RAILS_MASTER_KEY: ${RAILS_MASTER_KEY}
+  SPLAT_HOST: ${SPLAT_HOST}
+  SMTP_ADDRESS: ${SMTP_ADDRESS}
+  SMTP_PORT: ${SMTP_PORT}
+  SMTP_USER_NAME: ${SMTP_USER_NAME}
+  SMTP_PASSWORD: ${SMTP_PASSWORD}
+
+services:
+  splat:
+    image: reg.tbdb.info/splat:latest
+    environment:
+      <<: *common-variables
+      MISSION_CONTROL_USERNAME: ${MISSION_CONTROL_USERNAME}
+      MISSION_CONTROL_PASSWORD: ${MISSION_CONTROL_PASSWORD}
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/web:/rails/log
+    ports:
+      - "${HOST_IP}:3030:3000"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  jobs:
+    image: reg.tbdb.info/splat:latest
+    environment:
+      <<: *common-variables
+      SOLID_QUEUE_THREADS: 3
+      SOLID_QUEUE_PROCESSES: 1
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/jobs:/rails/log
+    command: bundle exec bin/jobs
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+```
+
 
 ## Maintenance
 
@@ -153,12 +204,15 @@ Cleanup completed successfully
 ## Full List of Environment Variables
   RAILS_ENV: production
   SECRET_KEY_BASE : generate with `openssl rand -hex 64`
+  HOST_IP: ip address to bind to
   PORT: 3000
   SPLAT_DOMAIN: https://splat.example.com # Change this to your domain
   FROM_EMAIL: splat@splat.example.com # Change this to your email
   SOLID_QUEUE_THREADS: 3
   SOLID_QUEUE_PROCESSES: 1
   
+### Mission Control
+Optionally set these if you'd like to access /jobs to view the SolidQueue management system
   MISSION_CONTROL_USERNAME
   MISSION_CONTROL_PASSWORD
 
