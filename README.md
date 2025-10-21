@@ -1,6 +1,6 @@
 # Splat - Lightweight Error Tracker
 
-This software is untested in production and should be considered alpha quality. It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
+This software is in production in Booko and it's been fine. It's under development and changing fast. It should be considered alpha quality. A large percentage of it is written with GLM 4.6 and Sonnet 4.5.  More testing is needed.  It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.  Splat currently has no user accounts.
 
