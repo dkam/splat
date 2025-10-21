@@ -19,15 +19,17 @@ class TransactionsController < ApplicationController
     base_scope = @project.transactions.where("timestamp > ?", time_ago)
     base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
 
-    # Calculate stats
-    durations = base_scope.pluck(:duration).sort
-    if durations.any?
-      @avg_duration = (durations.sum / durations.size.to_f).round
-      @p95_duration = durations[(durations.size * 0.95).to_i] || 0
-      @p99_duration = durations[(durations.size * 0.99).to_i] || 0
-    else
-      @avg_duration = @p95_duration = @p99_duration = 0
+    # Calculate stats efficiently
+    @avg_duration = base_scope.average(:duration)&.round || 0
+
+    # Use sampling for percentiles (SQLite can't do percentiles efficiently)
+    cache_key = "transaction_percentiles_#{@project.id}_#{@time_range}_#{Time.current.to_i / 300}"
+    percentiles = Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
+      calculate_percentiles_sampled(base_scope, 2000)
     end
+
+    @p95_duration = percentiles[:p95] || 0
+    @p99_duration = percentiles[:p99] || 0
 
     # Slow endpoints grouped by transaction_name
     @slow_endpoints = base_scope
@@ -39,8 +41,10 @@ class TransactionsController < ApplicationController
     # Recent transactions
     @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
 
-    # Available environments for filter
-    @environments = @project.transactions.distinct.pluck(:environment).compact.sort
+    # Available environments for filter (cached)
+    @environments = Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
+      @project.transactions.distinct.pluck(:environment).compact.sort
+    end
   end
 
   def show
@@ -149,6 +153,18 @@ class TransactionsController < ApplicationController
       },
       created_at: @transaction.created_at,
       updated_at: @transaction.updated_at
+    }
+  end
+
+  def calculate_percentiles_sampled(base_scope, sample_size = 2000)
+    # Get recent sample (more representative than random)
+    sample = base_scope.order(timestamp: :desc).limit(sample_size).pluck(:duration).sort
+    return { avg: 0, p95: 0, p99: 0 } if sample.empty?
+
+    {
+      avg: (sample.sum / sample.size.to_f).round,
+      p95: sample[(sample.size * 0.95).to_i] || 0,
+      p99: sample[(sample.size * 0.99).to_i] || 0
     }
   end
 
