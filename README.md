@@ -273,6 +273,10 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 **Alternative: Use from Claude Code (supports HTTP):**
 
+You can use command line like: 
+
+`claude mcp add --transport http splat http://localhost:3030/mcp --header "Authorization: Bearer your-generated-token-here"
+
 Claude Code (VS Code extension) supports HTTP transport. In your workspace, you can connect directly:
 
 ```json
