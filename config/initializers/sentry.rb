@@ -2,6 +2,9 @@
 # Only initialize in production environment and only if DSN is configured
 Rails.application.configure do
   if Rails.env.production? && ENV['SENTRY_DSN'].present?
+    # Require the version provider service to ensure it's loaded
+    require_relative '../app/services/version_provider'
+
     Sentry.init do |config|
       config.breadcrumbs_logger = [:active_support_logger, :http_logger]
       config.dsn = ENV['SENTRY_DSN']

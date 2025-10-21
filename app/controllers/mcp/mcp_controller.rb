@@ -167,6 +167,12 @@ module Mcp
         get_transactions_by_endpoint(arguments)
       when "compare_endpoint_performance"
         compare_endpoint_performance(arguments)
+      when "resolve_issue"
+        resolve_issue(arguments)
+      when "ignore_issue"
+        ignore_issue(arguments)
+      when "reopen_issue"
+        reopen_issue(arguments)
       else
         render json: {
           jsonrpc: "2.0",
@@ -454,6 +460,48 @@ module Mcp
             },
             required: ["endpoint"]
           }
+        },
+        {
+          name: "resolve_issue",
+          description: "Mark an issue as resolved",
+          inputSchema: {
+            type: "object",
+            properties: {
+              issue_id: {
+                type: "integer",
+                description: "The ID of the issue to resolve"
+              }
+            },
+            required: ["issue_id"]
+          }
+        },
+        {
+          name: "ignore_issue",
+          description: "Mark an issue as ignored (won't auto-reopen on new events)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              issue_id: {
+                type: "integer",
+                description: "The ID of the issue to ignore"
+              }
+            },
+            required: ["issue_id"]
+          }
+        },
+        {
+          name: "reopen_issue",
+          description: "Reopen a resolved or ignored issue",
+          inputSchema: {
+            type: "object",
+            properties: {
+              issue_id: {
+                type: "integer",
+                description: "The ID of the issue to reopen"
+              }
+            },
+            required: ["issue_id"]
+          }
         }
       ]
     end
@@ -733,6 +781,45 @@ module Mcp
       }
     rescue ArgumentError => e
       render_error("Invalid timestamp format. Please use ISO format (e.g., '2025-10-21T03:00:00Z')")
+    end
+
+    def resolve_issue(args)
+      issue = Issue.find(args["issue_id"])
+      issue.resolved!
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: "✅ Issue ##{issue.id} marked as resolved" }]
+        }
+      }
+    end
+
+    def ignore_issue(args)
+      issue = Issue.find(args["issue_id"])
+      issue.ignored!
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: "🔕 Issue ##{issue.id} marked as ignored" }]
+        }
+      }
+    end
+
+    def reopen_issue(args)
+      issue = Issue.find(args["issue_id"])
+      issue.open!
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: "🔓 Issue ##{issue.id} reopened" }]
+        }
+      }
     end
 
     # Helper methods for new tools
