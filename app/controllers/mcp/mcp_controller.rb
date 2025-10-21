@@ -161,6 +161,12 @@ module Mcp
         search_slow_transactions(arguments)
       when "get_transaction"
         get_transaction(arguments)
+      when "get_endpoint_summary"
+        get_endpoint_summary(arguments)
+      when "get_transactions_by_endpoint"
+        get_transactions_by_endpoint(arguments)
+      when "compare_endpoint_performance"
+        compare_endpoint_performance(arguments)
       else
         render json: {
           jsonrpc: "2.0",
@@ -275,6 +281,10 @@ module Mcp
           inputSchema: {
             type: "object",
             properties: {
+              endpoint: {
+                type: "string",
+                description: "Filter by specific endpoint name (e.g., 'AlertsController#index')"
+              },
               time_range_hours: {
                 type: "integer",
                 description: "Number of hours to look back (default: 24, max: 168)",
@@ -340,6 +350,109 @@ module Mcp
               }
             },
             required: ["transaction_id"]
+          }
+        },
+        {
+          name: "get_endpoint_summary",
+          description: "Get comprehensive statistics for a specific endpoint",
+          inputSchema: {
+            type: "object",
+            properties: {
+              endpoint: {
+                type: "string",
+                description: "Endpoint name (e.g., 'AlertsController#index')"
+              },
+              hours: {
+                type: "integer",
+                description: "Time range in hours (default: 24, max: 168)",
+                default: 24
+              },
+              environment: {
+                type: "string",
+                description: "Filter by environment (optional)"
+              },
+              release: {
+                type: "string",
+                description: "Filter by application version/release (optional)"
+              }
+            },
+            required: ["endpoint"]
+          }
+        },
+        {
+          name: "get_transactions_by_endpoint",
+          description: "Get recent transactions for a specific endpoint without duration filter",
+          inputSchema: {
+            type: "object",
+            properties: {
+              endpoint: {
+                type: "string",
+                description: "Endpoint name (e.g., 'AlertsController#index')"
+              },
+              limit: {
+                type: "integer",
+                description: "Number of results (default: 20, max: 100)",
+                default: 20
+              },
+              hours: {
+                type: "integer",
+                description: "Time range in hours (default: 24, max: 168)",
+                default: 24
+              },
+              environment: {
+                type: "string",
+                description: "Filter by environment (optional)"
+              },
+              release: {
+                type: "string",
+                description: "Filter by application version/release (optional)"
+              }
+            },
+            required: ["endpoint"]
+          }
+        },
+        {
+          name: "compare_endpoint_performance",
+          description: "Compare endpoint performance before/after a version or timestamp",
+          inputSchema: {
+            type: "object",
+            properties: {
+              endpoint: {
+                type: "string",
+                description: "Endpoint name (e.g., 'AlertsController#index')"
+              },
+              before_release: {
+                type: "string",
+                description: "Application version before comparison (mutually exclusive with before_timestamp)"
+              },
+              after_release: {
+                type: "string",
+                description: "Application version after comparison (mutually exclusive with after_timestamp)"
+              },
+              before_timestamp: {
+                type: "string",
+                description: "ISO timestamp before comparison (mutually exclusive with before_release)"
+              },
+              after_timestamp: {
+                type: "string",
+                description: "ISO timestamp after comparison (mutually exclusive with after_release)"
+              },
+              hours_before: {
+                type: "integer",
+                description: "Hours before comparison point (default: 24, max: 168)",
+                default: 24
+              },
+              hours_after: {
+                type: "integer",
+                description: "Hours after comparison point (default: 24, max: 168)",
+                default: 24
+              },
+              environment: {
+                type: "string",
+                description: "Filter by environment (optional)"
+              }
+            },
+            required: ["endpoint"]
           }
         }
       ]
@@ -434,16 +547,21 @@ module Mcp
     end
 
     def get_transaction_stats(args)
+      endpoint = args["endpoint"]
       time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
       limit = [[args["limit"]&.to_i || 10, 1].max, 50].min
 
       time_range = time_range_hours.hours.ago..Time.current
 
-      percentiles = Transaction.percentiles(time_range)
-      slowest_endpoints = Transaction.stats_by_endpoint(time_range).limit(limit)
-      total_count = Transaction.where(timestamp: time_range).count
+      # Filter by endpoint if specified
+      transactions = Transaction.where(timestamp: time_range)
+      transactions = transactions.by_name(endpoint) if endpoint.present?
 
-      text = format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours)
+      percentiles = transactions.percentiles(time_range)
+      slowest_endpoints = transactions.stats_by_endpoint(time_range).limit(limit)
+      total_count = transactions.count
+
+      text = format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours, endpoint)
 
       render json: {
         jsonrpc: "2.0",
@@ -497,6 +615,178 @@ module Mcp
           content: [{ type: "text", text: text }]
         }
       }
+    end
+
+    def get_endpoint_summary(args)
+      endpoint = args["endpoint"]
+      hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
+      environment = args["environment"]
+      release = args["release"]
+
+      transactions = Transaction.includes(:project)
+        .where(transaction_name: endpoint)
+        .where("timestamp > ?", hours.hours.ago)
+
+      transactions = transactions.where(environment: environment) if environment.present?
+      transactions = transactions.where(release: release) if release.present?
+
+      total_count = transactions.count
+      return render_no_data("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count == 0
+
+      # Calculate statistics
+      durations = transactions.pluck(:duration).sort
+      db_times = transactions.pluck(:db_time).compact
+      view_times = transactions.pluck(:view_time).compact
+
+      percentiles = calculate_percentiles(durations)
+      db_percentiles = calculate_percentiles(db_times) if db_times.any?
+      view_percentiles = calculate_percentiles(view_times) if view_times.any?
+
+      slowest_request = transactions.order(duration: :desc).first
+      fastest_request = transactions.order(duration: :asc).first
+
+      text = format_endpoint_summary(
+        endpoint, total_count, hours, environment, release,
+        percentiles, db_percentiles, view_percentiles,
+        slowest_request, fastest_request
+      )
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: text }]
+        }
+      }
+    end
+
+    def get_transactions_by_endpoint(args)
+      endpoint = args["endpoint"]
+      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
+      hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
+      environment = args["environment"]
+      release = args["release"]
+
+      transactions = Transaction.includes(:project)
+        .where(transaction_name: endpoint)
+        .where("timestamp > ?", hours.hours.ago)
+        .order(timestamp: :desc)
+        .limit(limit)
+
+      transactions = transactions.where(environment: environment) if environment.present?
+      transactions = transactions.where(release: release) if release.present?
+
+      text = format_transactions_by_endpoint(transactions, endpoint, hours, environment, release)
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: text }]
+        }
+      }
+    end
+
+    def compare_endpoint_performance(args)
+      endpoint = args["endpoint"]
+      before_release = args["before_release"]
+      after_release = args["after_release"]
+      before_timestamp = args["before_timestamp"]
+      after_timestamp = args["after_timestamp"]
+      hours_before = [[args["hours_before"]&.to_i || 24, 1].max, 168].min
+      hours_after = [[args["hours_after"]&.to_i || 24, 1].max, 168].min
+      environment = args["environment"]
+
+      # Validate input - either release-based or timestamp-based comparison
+      if before_release.present? && after_release.present?
+        # Version-based comparison
+        before_transactions = get_transactions_by_filters(endpoint, hours_before, environment, before_release)
+        after_transactions = get_transactions_by_filters(endpoint, hours_after, environment, after_release)
+        comparison_type = "version"
+        before_label = "Version #{before_release}"
+        after_label = "Version #{after_release}"
+      elsif before_timestamp.present? && after_timestamp.present?
+        # Timestamp-based comparison
+        before_time = Time.parse(before_timestamp)
+        after_time = Time.parse(after_timestamp)
+
+        before_transactions = get_transactions_by_time_range(endpoint, before_time - hours_before.hours, before_time, environment)
+        after_transactions = get_transactions_by_time_range(endpoint, after_time, after_time + hours_after.hours, environment)
+        comparison_type = "timestamp"
+        before_label = "Before #{before_timestamp}"
+        after_label = "After #{after_timestamp}"
+      else
+        return render_error("Please provide either both before_release/after_release OR both before_timestamp/after_timestamp for comparison.")
+      end
+
+      text = format_performance_comparison(
+        endpoint, comparison_type, before_label, after_label,
+        before_transactions, after_transactions
+      )
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: text }]
+        }
+      }
+    rescue ArgumentError => e
+      render_error("Invalid timestamp format. Please use ISO format (e.g., '2025-10-21T03:00:00Z')")
+    end
+
+    # Helper methods for new tools
+    def calculate_percentiles(values)
+      return {} if values.empty?
+
+      {
+        avg: values.sum / values.size,
+        p50: values[values.size * 0.5],
+        p95: values[values.size * 0.95],
+        p99: values[values.size * 0.99],
+        min: values.first,
+        max: values.last
+      }
+    end
+
+    def get_transactions_by_filters(endpoint, hours, environment, release)
+      transactions = Transaction.includes(:project)
+        .where(transaction_name: endpoint)
+        .where("timestamp > ?", hours.hours.ago)
+
+      transactions = transactions.where(environment: environment) if environment.present?
+      transactions = transactions.where(release: release) if release.present?
+      transactions
+    end
+
+    def get_transactions_by_time_range(endpoint, start_time, end_time, environment)
+      transactions = Transaction.includes(:project)
+        .where(transaction_name: endpoint)
+        .where(timestamp: start_time..end_time)
+
+      transactions = transactions.where(environment: environment) if environment.present?
+      transactions
+    end
+
+    def render_no_data(message)
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: message }]
+        }
+      }
+    end
+
+    def render_error(message)
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        error: {
+          code: -32602,
+          message: message
+        }
+      }, status: :bad_request
     end
 
     # Formatting helpers
@@ -677,8 +967,9 @@ module Mcp
       result
     end
 
-    def format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours)
+    def format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours, endpoint = nil)
       result = "## Transaction Performance Statistics\n\n"
+      result += "**Endpoint:** #{endpoint}\n" if endpoint.present?
       result += "**Time Range:** Last #{time_range_hours} hour(s)\n"
       result += "**Total Transactions:** #{total_count}\n\n"
 
@@ -694,9 +985,16 @@ module Mcp
       result += "- **P99:** #{percentiles[:p99].round}ms\n\n"
 
       if slowest_endpoints.any?
-        result += "### Slowest Endpoints\n\n"
-        slowest_endpoints.each do |endpoint|
-          result += "- **#{endpoint.transaction_name}** - Avg: #{endpoint.avg_duration.to_f.round}ms (#{endpoint.count} requests)\n"
+        if endpoint.present?
+          result += "### Sample Requests\n\n"
+          slowest_endpoints.each do |sample|
+            result += "- **#{sample.transaction_name}** - Avg: #{sample.avg_duration.to_f.round}ms (#{sample.count} requests)\n"
+          end
+        else
+          result += "### Slowest Endpoints\n\n"
+          slowest_endpoints.each do |endpoint_stat|
+            result += "- **#{endpoint_stat.transaction_name}** - Avg: #{endpoint_stat.avg_duration.to_f.round}ms (#{endpoint_stat.count} requests)\n"
+          end
         end
       end
 
@@ -745,6 +1043,182 @@ module Mcp
       end
 
       result
+    end
+
+    def format_endpoint_summary(endpoint, total_count, hours, environment, release,
+                               percentiles, db_percentiles, view_percentiles,
+                               slowest_request, fastest_request)
+      result = "## Endpoint Summary: #{endpoint}\n\n"
+      result += "**Total Requests:** #{total_count}\n"
+      result += "**Time Range:** Last #{hours} hour(s)\n"
+      result += "**Environment:** #{environment}\n" if environment.present?
+      result += "**Release:** #{release}\n" if release.present?
+      result += "\n"
+
+      # Overall performance
+      result += "### Response Time Performance\n\n"
+      result += "- **Average:** #{percentiles[:avg]&.round}ms\n"
+      result += "- **Median (P50):** #{percentiles[:p50]&.round}ms\n"
+      result += "- **P95:** #{percentiles[:p95]&.round}ms\n"
+      result += "- **P99:** #{percentiles[:p99]&.round}ms\n"
+      result += "- **Min:** #{percentiles[:min]&.round}ms\n"
+      result += "- **Max:** #{percentiles[:max]&.round}ms\n\n"
+
+      # Database performance
+      if db_percentiles&.any?
+        result += "### Database Performance\n\n"
+        result += "- **Avg DB Time:** #{db_percentiles[:avg]&.round}ms\n"
+        result += "- **P95 DB Time:** #{db_percentiles[:p95]&.round}ms\n\n"
+      end
+
+      # View performance
+      if view_percentiles&.any?
+        result += "### View Rendering Performance\n\n"
+        result += "- **Avg View Time:** #{view_percentiles[:avg]&.round}ms\n"
+        result += "- **P95 View Time:** #{view_percentiles[:p95]&.round}ms\n\n"
+      end
+
+      # Extreme examples
+      result += "### Sample Requests\n\n"
+      if fastest_request
+        result += "**Fastest Request:** #{fastest_request.duration.round}ms"
+        result += " (DB: #{fastest_request.db_time.round}ms)" if fastest_request.db_time
+        result += " (View: #{fastest_request.view_time.round}ms)" if fastest_request.view_time
+        result += " - #{fastest_request.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      end
+
+      if slowest_request
+        result += "**Slowest Request:** #{slowest_request.duration.round}ms"
+        result += " (DB: #{slowest_request.db_time.round}ms)" if slowest_request.db_time
+        result += " (View: #{slowest_request.view_time.round}ms)" if slowest_request.view_time
+        result += " - #{slowest_request.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      end
+
+      result
+    end
+
+    def format_transactions_by_endpoint(transactions, endpoint, hours, environment, release)
+      if transactions.empty?
+        result = "No transactions found for endpoint '#{endpoint}'"
+        result += " with the specified filters." if environment.present? || release.present?
+        return result
+      end
+
+      result = "## Recent Transactions: #{endpoint}\n\n"
+      result += "**Showing:** #{transactions.size} transaction(s)\n"
+      result += "**Time Range:** Last #{hours} hour(s)\n"
+      result += "**Environment:** #{environment}\n" if environment.present?
+      result += "**Release:** #{release}\n" if release.present?
+      result += "\n"
+
+      transactions.each_with_index do |txn, index|
+        result += "### Transaction #{index + 1}\n"
+        result += "**ID:** ##{txn.id}\n"
+        result += "**Duration:** #{txn.duration.round}ms"
+        result += " (DB: #{txn.db_time.round}ms)" if txn.db_time
+        result += " (View: #{txn.view_time.round}ms)" if txn.view_time
+        result += "\n"
+        result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "**HTTP:** #{txn.http_method} #{txn.http_status}\n" if txn.http_method || txn.http_status
+        result += "**Environment:** #{txn.environment}\n" if txn.environment
+        result += "**Release:** #{txn.release}\n" if txn.release
+        result += "**Server:** #{txn.server_name}\n" if txn.server_name
+        result += "**Project:** #{txn.project.name}\n"
+        result += "\n"
+      end
+
+      result
+    end
+
+    def format_performance_comparison(endpoint, comparison_type, before_label, after_label,
+                                     before_transactions, after_transactions)
+      result = "## Performance Comparison: #{endpoint}\n\n"
+      result += "**Comparison Type:** #{comparison_type}\n"
+      result += "**Before Period:** #{before_label}\n"
+      result += "**After Period:** #{after_label}\n\n"
+
+      # Calculate statistics
+      before_durations = before_transactions.pluck(:duration).sort
+      after_durations = after_transactions.pluck(:duration).sort
+
+      before_stats = calculate_percentiles(before_durations)
+      after_stats = calculate_percentiles(after_durations)
+
+      if before_stats.empty? && after_stats.empty?
+        return "No transaction data available for comparison."
+      end
+
+      # Summary table
+      result += "### Performance Summary\n\n"
+      result += "| Metric | Before | After | Change |\n"
+      result += "|--------|--------|-------|--------|\n"
+      result += "| **Requests** | #{before_transactions.count} | #{after_transactions.count} | #{format_count_change(before_transactions.count, after_transactions.count)} |\n"
+
+      if before_stats[:avg] && after_stats[:avg]
+        avg_change = format_percentage_change(before_stats[:avg], after_stats[:avg])
+        result += "| **Avg Duration** | #{before_stats[:avg].round}ms | #{after_stats[:avg].round}ms | #{avg_change} |\n"
+      end
+
+      if before_stats[:p50] && after_stats[:p50]
+        p50_change = format_percentage_change(before_stats[:p50], after_stats[:p50])
+        result += "| **Median (P50)** | #{before_stats[:p50].round}ms | #{after_stats[:p50].round}ms | #{p50_change} |\n"
+      end
+
+      if before_stats[:p95] && after_stats[:p95]
+        p95_change = format_percentage_change(before_stats[:p95], after_stats[:p95])
+        result += "| **P95** | #{before_stats[:p95].round}ms | #{after_stats[:p95].round}ms | #{p95_change} |\n"
+      end
+
+      if before_stats[:p99] && after_stats[:p99]
+        p99_change = format_percentage_change(before_stats[:p99], after_stats[:p99])
+        result += "| **P99** | #{before_stats[:p99].round}ms | #{after_stats[:p99].round}ms | #{p99_change} |\n"
+      end
+
+      # Analysis
+      result += "\n### Analysis\n\n"
+      if before_stats[:avg] && after_stats[:avg]
+        if after_stats[:avg] < before_stats[:avg]
+          improvement = ((before_stats[:avg] - after_stats[:avg]) / before_stats[:avg] * 100).round(1)
+          result += "✅ **Performance improved by #{improvement}%** (average duration decreased)\n\n"
+        else
+          degradation = ((after_stats[:avg] - before_stats[:avg]) / before_stats[:avg] * 100).round(1)
+          result += "⚠️ **Performance degraded by #{degradation}%** (average duration increased)\n\n"
+        end
+      end
+
+      # Sample requests
+      if before_transactions.any?
+        slowest_before = before_transactions.order(duration: :desc).first
+        result += "**Slowest request (before):** #{slowest_before.duration.round}ms at #{slowest_before.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      end
+
+      if after_transactions.any?
+        slowest_after = after_transactions.order(duration: :desc).first
+        result += "**Slowest request (after):** #{slowest_after.duration.round}ms at #{slowest_after.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      end
+
+      result
+    end
+
+    def format_percentage_change(before, after)
+      return "N/A" if before.nil? || after.nil? || before == 0
+
+      change = ((after - before) / before * 100).round(1)
+      if change > 0
+        "+#{change}%"
+      else
+        "#{change}%"
+      end
+    end
+
+    def format_count_change(before, after)
+      if after == before
+        "No change"
+      elsif after > before
+        "+#{after - before} (#{((after - before).to_f / before * 100).round(1)}%)"
+      else
+        "#{after - before} (#{((after - before).to_f / before * 100).round(1)}%)"
+      end
     end
   end
 end

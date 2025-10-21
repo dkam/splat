@@ -15,6 +15,7 @@ class Transaction < ApplicationRecord
   scope :by_server, ->(server) { where(server_name: server) }
   scope :by_http_status, ->(status) { where(http_status: status) }
   scope :by_http_method, ->(method) { where(http_method: method) }
+  scope :by_release, ->(release) { where(release: release) }
 
   # Time-based scopes
   scope :last_hour, -> { where("timestamp > ?", 1.hour.ago) }
