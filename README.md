@@ -15,6 +15,7 @@ I've only used it with Rails and have been extracting the view / database times.
 - ✅ **Single-Tenant Design** - Simple setup, no user management overhead
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
 - ✅ **Performance Monitoring** - Transaction data with lightweight metrics
+- ✅ **MCP Integration** - Query errors via Claude and AI assistants
 - ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
 
@@ -106,6 +107,9 @@ x-common-variables: &common-variables
   SMTP_PORT: ${SMTP_PORT}
   SMTP_USER_NAME: ${SMTP_USER_NAME}
   SMTP_PASSWORD: ${SMTP_PASSWORD}
+
+  # MCP Authentication Token
+  MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
 
 services:
   splat:
@@ -215,11 +219,14 @@ Cleanup completed successfully
   SOLID_QUEUE_THREADS: 3
   SOLID_QUEUE_PROCESSES: 1
 
-### Data Retenion
+### MCP (Model Context Protocol)
+MCP_AUTH_TOKEN: Generate with `openssl rand -hex 32`
+
+### Data Retention
 SPLAT_MAX_EVENT_LIFE_DAYS=30
 SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS=60
 SPLAT_MAX_FILE_LIFE_DAYS=180
-  
+
 ### Mission Control
 Optionally set these if you'd like to access /jobs to view the SolidQueue management system
   MISSION_CONTROL_USERNAME
@@ -231,7 +238,7 @@ Optionally set these if you'd like to access /jobs to view the SolidQueue manage
 
   SMTP_ADDRESS - default 'localhost'
   SMTP_PORT - default 587
-  SMTP_DOMAIN' - default 'localhost' Some providers require it match a verified domain. 
+  SMTP_DOMAIN' - default 'localhost' Some providers require it match a verified domain.
   SMTP_USER_NAME' - default nil
   SMTP_PASSWORD' - default nil
   SMTP_AUTHENTICATION' - default 'plain'

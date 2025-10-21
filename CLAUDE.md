@@ -568,6 +568,22 @@ end
 SPLAT_DSN=http://ignored@splat.booko.info/1
 RAILS_ENV=production
 DATABASE_URL=sqlite3:storage/production.sqlite3
+
+# MCP (Model Context Protocol) Authentication
+# Generate a secure token for Claude/AI assistants to query error data
+MCP_AUTH_TOKEN=your-generated-token-here
+```
+
+**Generate MCP Auth Token:**
+```bash
+# Using OpenSSL
+openssl rand -hex 32
+
+# Or using Ruby
+ruby -r securerandom -e 'puts SecureRandom.hex(32)'
+
+# Example output:
+# 6ba04de38d45e51a829f05d5934b0fef1b8eee91a840d9347a02b2d4cc479d0a
 ```
 
 ### Sentry Client Configuration (Booko)
@@ -902,6 +918,7 @@ provider :oauth2, ENV['OAUTH_CLIENT_ID'], ENV['OAUTH_CLIENT_SECRET'],
 - [ ] Source code context (fetch from git)
 - [ ] Multiple projects (if needed)
 - [ ] Team/role management (if needed beyond email allowlist)
+- [ ] MCP write tools (resolve/ignore issues, add comments)
 
 ## Success Criteria
 
@@ -929,6 +946,7 @@ cd splat
 
 - Sentry Protocol: https://develop.sentry.dev/sdk/envelopes/
 - Sentry Event Schema: https://develop.sentry.dev/sdk/event-payloads/
+- Model Context Protocol: https://modelcontextprotocol.io/
 - Rails Guides: https://edgeguides.rubyonrails.org/
 - Solid Queue: https://github.com/basecamp/solid_queue
 - Phlex: https://www.phlex.fun/
