@@ -4,7 +4,11 @@ This software is untested in production and should be considered alpha quality. 
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.  Splat currently has no user accounts.
 
-I've only used it with Rails and have been extracting the view / database times. T
+This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale.
+
+It has an (awesome) MCP endpoint. You need to set an environment variable `MCP_AUTH_TOKEN` in order to use it. The end point is /mcp.
+
+I've only used Splat with Rails.
 
 ## Overview
 
