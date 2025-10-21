@@ -80,4 +80,6 @@ group :test do
   gem "selenium-webdriver"
 end
 
+gem "sentry-rails"
+
 gem "mission_control-jobs", "~> 1.1"
