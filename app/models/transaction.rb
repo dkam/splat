@@ -101,8 +101,11 @@ class Transaction < ApplicationRecord
     nil
   end
 
-  def self.stats_by_endpoint(time_range = 24.hours.ago..Time.current)
-    where(timestamp: time_range)
+  def self.stats_by_endpoint(time_range = 24.hours.ago..Time.current, project_id: nil)
+    scope = time_range ? where(timestamp: time_range) : all
+    scope = scope.where(project_id: project_id) if project_id.present?
+
+    scope
       .group(:transaction_name)
       .select(
         :transaction_name,
@@ -116,17 +119,57 @@ class Transaction < ApplicationRecord
       .order("avg_duration DESC")
   end
 
-  def self.percentiles(time_range = 24.hours.ago..Time.current)
-    durations = where(timestamp: time_range).pluck(:duration).sort
-    return {} if durations.empty?
+  def self.percentiles(time_range = 24.hours.ago..Time.current, project_id: nil)
+    base_scope = time_range ? where(timestamp: time_range) : all
+    base_scope = base_scope.where(project_id: project_id) if project_id.present?
+
+    transaction_count = base_scope.count
+    return {} if transaction_count == 0
+
+    # Build WHERE clause conditions
+    where_conditions = ["timestamp BETWEEN ? AND ?"]
+    where_params = [time_range.begin, time_range.end]
+
+    if project_id.present?
+      where_conditions << "project_id = ?"
+      where_params << project_id
+    end
+
+    where_clause = where_conditions.join(" AND ")
+
+    # Single optimized query using NTILE for percentile calculation
+    # NTILE divides data into 100 buckets, making percentile lookup efficient
+    percentile_query = <<~SQL
+      WITH ranked_data AS (
+        SELECT
+          duration,
+          NTILE(100) OVER (ORDER BY duration) as percentile_bucket
+        FROM transactions
+        WHERE #{where_clause}
+      )
+      SELECT
+        (SELECT AVG(duration) FROM ranked_data) as avg,
+        (SELECT AVG(duration) FROM ranked_data WHERE percentile_bucket = 50) as p50,
+        (SELECT AVG(duration) FROM ranked_data WHERE percentile_bucket = 95) as p95,
+        (SELECT AVG(duration) FROM ranked_data WHERE percentile_bucket = 99) as p99,
+        (SELECT MIN(duration) FROM ranked_data) as min,
+        (SELECT MAX(duration) FROM ranked_data) as max
+    SQL
+
+    result = ActiveRecord::Base.connection.execute(
+      ActiveRecord::Base.sanitize_sql([
+        percentile_query,
+        *where_params
+      ])
+    ).first
 
     {
-      avg: durations.sum / durations.size,
-      p50: durations[durations.size * 0.5],
-      p95: durations[durations.size * 0.95],
-      p99: durations[durations.size * 0.99],
-      min: durations.first,
-      max: durations.last
+      avg: result['avg']&.to_f&.round(2) || 0,
+      p50: result['p50']&.to_f&.round(2) || 0,
+      p95: result['p95']&.to_f&.round(2) || 0,
+      p99: result['p99']&.to_f&.round(2) || 0,
+      min: result['min']&.to_f || 0,
+      max: result['max']&.to_f || 0
     }
   end
 
