@@ -53,7 +53,7 @@ class Api::EnvelopesController < ApplicationController
       end
     end
 
-    Sentry::EnvelopeProcessor.new(raw_body, project).process
+    SentryProtocol::EnvelopeProcessor.new(raw_body, project).process
 
     # Always return 200 OK to avoid client retries
     head :ok

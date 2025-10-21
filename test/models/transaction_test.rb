@@ -69,7 +69,14 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal 1500, transaction.duration
     assert_equal 800, transaction.db_time
     assert_equal 200, transaction.view_time
-    assert_equal({ "db" => { "value" => 800 }, "view" => { "value" => 200 }, "custom_metric" => { "value" => 42 } }, transaction.measurements)
+    expected_measurements = {
+      "db" => { "value" => 800 },
+      "view" => { "value" => 200 },
+      "custom_metric" => { "value" => 42 },
+      "span_extracted_db_time" => 800,
+      "span_extracted_view_time" => 200
+    }
+    assert_equal(expected_measurements, transaction.measurements)
   end
 
   test "create_from_sentry_payload! includes environment and release" do

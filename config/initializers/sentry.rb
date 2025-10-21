@@ -3,8 +3,9 @@
 Rails.application.configure do
   if Rails.env.production? && ENV['SENTRY_DSN'].present?
     Sentry.init do |config|
+      config.breadcrumbs_logger = [:active_support_logger, :http_logger]
       config.dsn = ENV['SENTRY_DSN']
-
+      
       # Set the environment tag
       config.environment = Rails.env
 
