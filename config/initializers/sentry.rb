@@ -2,9 +2,6 @@
 # Only initialize in production environment and only if DSN is configured
 Rails.application.configure do
   if Rails.env.production? && ENV['SENTRY_DSN'].present?
-    # Require the version provider service to ensure it's loaded
-    require_relative '../app/services/version_provider'
-
     Sentry.init do |config|
       config.breadcrumbs_logger = [:active_support_logger, :http_logger]
       config.dsn = ENV['SENTRY_DSN']
@@ -13,7 +10,7 @@ Rails.application.configure do
       config.environment = Rails.env
 
       # Release version - auto-generated from git tags and commit hash
-      config.release = VersionProvider.current_version
+      config.release = "#{DateTime.current.beginning_of_hour.iso8601}-#{`git rev-parse --short HEAD`.strip}"
 
       # Sample rate for error events (100% for errors)
       config.sample_rate = 1.0
