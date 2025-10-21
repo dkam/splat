@@ -9,8 +9,8 @@ Rails.application.configure do
       # Set the environment tag
       config.environment = Rails.env
 
-      # Release version (if available)
-      config.release = ENV.fetch('APP_VERSION', nil) if ENV['APP_VERSION'].present?
+      # Release version - auto-generated from git tags and commit hash
+      config.release = VersionProvider.current_version
 
       # Sample rate for error events (100% for errors)
       config.sample_rate = 1.0

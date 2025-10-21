@@ -209,6 +209,113 @@ Deleted 89 empty issues
 Cleanup completed successfully
 ```
 
+## Model Context Protocol (MCP) Integration
+
+Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly.
+
+### Setup
+
+**1. Generate an authentication token:**
+
+```bash
+# Using OpenSSL
+openssl rand -hex 32
+
+# Or using Ruby
+ruby -r securerandom -e 'puts SecureRandom.hex(32)'
+```
+
+**2. Add to your environment:**
+
+```bash
+# .env
+MCP_AUTH_TOKEN=your-generated-token-here
+```
+
+**3. Configure Claude Desktop:**
+
+**Note:** Claude Desktop currently only supports `stdio` transport (not HTTP). To use Splat's MCP server with Claude Desktop, you'll need to create a proxy script.
+
+Create a file at `~/splat-mcp-proxy.sh`:
+
+```bash
+#!/bin/bash
+# Proxy for Splat MCP over stdio -> HTTP
+# Replace TOKEN with your actual MCP_AUTH_TOKEN
+
+while IFS= read -r line; do
+  echo "$line" | curl -s -X POST http://localhost:3030/mcp \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_TOKEN_HERE" \
+    -d @-
+done
+```
+
+Make it executable:
+```bash
+chmod +x ~/splat-mcp-proxy.sh
+```
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "splat": {
+      "command": "/Users/YOUR_USERNAME/splat-mcp-proxy.sh",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  }
+}
+```
+
+**Alternative: Use from Claude Code (supports HTTP):**
+
+Claude Code (VS Code extension) supports HTTP transport. In your workspace, you can connect directly:
+
+```json
+{
+  "mcpServers": {
+    "splat": {
+      "url": "http://localhost:3030/mcp",
+      "transport": {
+        "type": "http",
+        "headers": {
+          "Authorization": "Bearer your-generated-token-here"
+        }
+      }
+    }
+  }
+}
+```
+
+**4. Restart Claude Desktop or VS Code**
+
+### Available MCP Tools (8 total)
+
+**Issue Management:**
+- `list_recent_issues` - List recent issues by status
+- `search_issues` - Search by keyword, exception type, or status
+- `get_issue` - Get detailed issue with stack trace
+- `get_issue_events` - List event occurrences for an issue
+- `get_event` - Get full event details (request ID, breadcrumbs, context)
+
+**Performance Monitoring:**
+- `get_transaction_stats` - Performance overview with percentiles
+- `search_slow_transactions` - Find slow requests
+- `get_transaction` - Get detailed transaction breakdown
+
+### Usage Examples
+
+Once configured, you can ask Claude:
+- "List recent open issues in Splat"
+- "Search for NoMethodError issues in production"
+- "Show me performance stats for the last 24 hours"
+- "Find slow POST requests"
+- "Get event abc-123-def with full context and request ID"
+
 ## Full List of Environment Variables
   RAILS_ENV: production
   SECRET_KEY_BASE : generate with `openssl rand -hex 64`

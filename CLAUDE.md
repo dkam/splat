@@ -910,6 +910,123 @@ provider :oauth2, ENV['OAUTH_CLIENT_ID'], ENV['OAUTH_CLIENT_SECRET'],
   }
 ```
 
+## Model Context Protocol (MCP) Integration
+
+Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly.
+
+### Features
+
+**8 Available Tools:**
+1. `list_recent_issues` - List recent issues by status
+2. `search_issues` - Search issues by keyword, exception type, or status
+3. `get_issue` - Get detailed issue information with stack trace
+4. `get_issue_events` - List recent event occurrences for an issue
+5. `get_event` - Get full event details including request ID, breadcrumbs, and context
+6. `get_transaction_stats` - Performance overview with percentiles and slowest endpoints
+7. `search_slow_transactions` - Find slow requests with filtering
+8. `get_transaction` - Get detailed transaction performance breakdown
+
+### Setup for Claude Desktop
+
+**1. Generate Auth Token (see Environment Variables section above)**
+
+**2. Configure MCP Client**
+
+**For Claude Desktop (stdio proxy required):**
+
+Claude Desktop only supports `stdio` transport. Create a proxy script at `~/splat-mcp-proxy.sh`:
+
+```bash
+#!/bin/bash
+# Proxy for Splat MCP over stdio -> HTTP
+while IFS= read -r line; do
+  echo "$line" | curl -s -X POST http://localhost:3030/mcp \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_TOKEN_HERE" \
+    -d @-
+done
+```
+
+Make it executable and configure Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```bash
+chmod +x ~/splat-mcp-proxy.sh
+```
+
+```json
+{
+  "mcpServers": {
+    "splat": {
+      "command": "/Users/YOUR_USERNAME/splat-mcp-proxy.sh",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  }
+}
+```
+
+**For Claude Code (direct HTTP):**
+
+Claude Code supports HTTP transport directly:
+
+```json
+{
+  "mcpServers": {
+    "splat": {
+      "url": "http://localhost:3030/mcp",
+      "transport": {
+        "type": "http",
+        "headers": {
+          "Authorization": "Bearer your-generated-token-here"
+        }
+      }
+    }
+  }
+}
+```
+
+For production, use your Splat domain (HTTPS recommended):
+```json
+{
+  "mcpServers": {
+    "splat": {
+      "url": "https://splat.booko.info/mcp",
+      "transport": {
+        "type": "http",
+        "headers": {
+          "Authorization": "Bearer your-generated-token-here"
+        }
+      }
+    }
+  }
+}
+```
+
+**3. Restart Claude Desktop or VS Code**
+
+### Usage Examples
+
+Once configured, you can ask Claude:
+- "List recent open issues in Splat"
+- "Search for NoMethodError issues"
+- "Show me performance stats for the last 24 hours"
+- "Find slow transactions in production"
+- "Get event abc-123-def with full context and request ID"
+
+### Security
+
+- **Token-based authentication** - Uses Bearer token for all requests
+- **Read-only access** - MCP tools can query data but not modify anything
+- **HTTPS recommended** - Use HTTPS in production to protect token in transit
+- **Simple token rotation** - Just update `MCP_AUTH_TOKEN` and restart
+
+### Implementation
+
+- **No external dependencies** - Manual JSON-RPC 2.0 implementation
+- **Single controller** - All MCP logic in `app/controllers/mcp/mcp_controller.rb`
+- **Easy to extend** - Add new tools by defining in `tools_list` and implementing handler
+
 ## Future Enhancements (Maybe)
 
 - [ ] Notification webhooks (Slack, Discord)
