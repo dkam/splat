@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2025_10_18_082207) do
+ActiveRecord::Schema[8.1].define(version: 2025_10_21_125803) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "environment"
@@ -94,6 +94,7 @@ ActiveRecord::Schema[8.1].define(version: 2025_10_18_082207) do
     t.index ["environment", "timestamp"], name: "index_transactions_on_environment_and_timestamp"
     t.index ["http_method"], name: "index_transactions_on_http_method"
     t.index ["http_status"], name: "index_transactions_on_http_status"
+    t.index ["project_id", "timestamp"], name: "index_transactions_on_project_id_and_timestamp"
     t.index ["project_id"], name: "index_transactions_on_project_id"
     t.index ["timestamp"], name: "index_transactions_on_timestamp"
     t.index ["transaction_id"], name: "index_transactions_on_transaction_id", unique: true

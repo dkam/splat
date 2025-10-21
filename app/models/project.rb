@@ -88,13 +88,107 @@ class Project < ApplicationRecord
   end
 
   def avg_response_time(time_range = 24.hours.ago..Time.current)
-    durations = transactions.where(timestamp: time_range).pluck(:duration)
-    return 0 if durations.empty?
+    transactions.where(timestamp: time_range).average(:duration).to_f.round(2)
+  end
 
-    (durations.sum / durations.size).round(2)
+  def p95_response_time(time_range = 24.hours.ago..Time.current)
+    # Cache expensive percentile calculations for 5 minutes
+    Rails.cache.fetch("project_#{id}_p95_#{time_range.begin.to_i}_#{time_range.end.to_i}", expires_in: 5.minutes) do
+      calculate_p95_percentile(time_range)
+    end
+  end
+
+  def slowest_endpoints(limit: 10, time_range: 24.hours.ago..Time.current)
+    # Cache endpoint analysis for 10 minutes
+    Rails.cache.fetch("project_#{id}_slowest_#{limit}_#{time_range.begin.to_i}", expires_in: 10.minutes) do
+      calculate_slowest_endpoints(limit, time_range)
+    end
+  end
+
+  def response_time_by_hour(time_range: 24.hours.ago..Time.current)
+    # Cache hourly stats for 5 minutes
+    Rails.cache.fetch("project_#{id}_hourly_#{time_range.begin.to_i}", expires_in: 5.minutes) do
+      calculate_response_time_by_hour(time_range)
+    end
   end
 
   private
+
+  def calculate_p95_percentile(time_range)
+    transaction_count = transactions.where(timestamp: time_range).count
+
+    if transaction_count > 10_000
+      # Use sample for large datasets (faster, good enough)
+      sample_size = [5000, transaction_count / 10].min
+      sample_query = <<~SQL
+        SELECT AVG(duration)
+        FROM (
+          SELECT duration,
+                 PERCENT_RANK() OVER (ORDER BY duration) as pr
+          FROM (
+            SELECT duration
+            FROM transactions
+            WHERE timestamp BETWEEN ? AND ?
+            ORDER BY RANDOM()
+            LIMIT ?
+          )
+        )
+        WHERE pr >= 0.95
+        LIMIT 1
+      SQL
+
+      result = ActiveRecord::Base.connection.execute(
+        ActiveRecord::Base.sanitize_sql([sample_query, time_range.begin, time_range.end, sample_size])
+      ).first
+      result&.values&.first&.to_f&.round(2) || 0
+    else
+      # Full calculation for smaller datasets
+      percentile_query = <<~SQL
+        SELECT AVG(duration)
+        FROM (
+          SELECT duration,
+                 PERCENT_RANK() OVER (ORDER BY duration) as pr
+          FROM transactions
+          WHERE timestamp BETWEEN ? AND ?
+        )
+        WHERE pr >= 0.95
+        LIMIT 1
+      SQL
+
+      result = ActiveRecord::Base.connection.execute(
+        ActiveRecord::Base.sanitize_sql([percentile_query, time_range.begin, time_range.end])
+      ).first
+      result&.values&.first&.to_f&.round(2) || 0
+    end
+  end
+
+  def calculate_slowest_endpoints(limit, time_range)
+    transactions
+      .where(timestamp: time_range)
+      .group(:transaction_name)
+      .select(
+        'transaction_name',
+        'COUNT(*) as request_count',
+        'AVG(duration) as avg_duration',
+        'MAX(duration) as max_duration',
+        'MIN(duration) as min_duration'
+      )
+      .order('AVG(duration) DESC')
+      .limit(limit)
+  end
+
+  def calculate_response_time_by_hour(time_range)
+    transactions
+      .where(timestamp: time_range)
+      .group(Arel.sql("strftime('%H:00', timestamp)"))
+      .select(
+        Arel.sql("strftime('%H:00', timestamp) as hour_bucket"),
+        'COUNT(*) as request_count',
+        'AVG(duration) as avg_duration',
+        'MAX(duration) as max_duration'
+      )
+      .order(Arel.sql("strftime('%H:00', timestamp)"))
+  end
 
   def generate_slug
     self.slug = name&.parameterize&.downcase
