@@ -15,7 +15,7 @@ Rails.application.configure do
       config.sample_rate = 1.0
 
       # Performance monitoring - enable with low sample rate
-      config.traces_sample_rate = ENV.fetch('SENTRY_TRACES_SAMPLE_RATE', 0.01).to_f
+      config.traces_sample_rate = ENV.fetch('SENTRY_TRACES_SAMPLE_RATE', 0.1).to_f
 
       # Filter out sensitive data
       config.send_default_pii = false
@@ -43,6 +43,6 @@ Rails.application.configure do
       end
     end
 
-    Rails.logger.info "Sentry initialized in production environment with DSN: #{ENV['SENTRY_DSN']&.split('@')&.last}"
+    # Rails.logger.info "Sentry initialized in production environment with DSN: #{ENV['SENTRY_DSN']&.split('@')&.last}"
   end
 end
