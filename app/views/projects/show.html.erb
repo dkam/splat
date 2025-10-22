@@ -14,8 +14,29 @@
                 data-action="click->clipboard#copy"
                 data-clipboard-text-value="<%= @project.dsn %>"
                 class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-1.5 px-3 rounded-lg">
-          Copy DSN
+          Copy External DSN
         </button>
+        <% if @project.internal_dsn.present? %>
+          <button type="button"
+                  data-controller="clipboard"
+                  data-action="click->clipboard#copy"
+                  data-clipboard-text-value="<%= @project.internal_dsn %>"
+                  class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-1.5 px-3 rounded-lg">
+            Copy Internal DSN
+          </button>
+        <% end %>
+      </div>
+      <div class="mt-2 space-y-1">
+        <p class="text-xs text-gray-600">
+          <span class="font-semibold">External:</span>
+          <code class="text-gray-800 bg-gray-100 px-2 py-0.5 rounded"><%= @project.dsn %></code>
+        </p>
+        <% if @project.internal_dsn.present? %>
+          <p class="text-xs text-gray-600">
+            <span class="font-semibold">Internal:</span>
+            <code class="text-gray-800 bg-gray-100 px-2 py-0.5 rounded"><%= @project.internal_dsn %></code>
+          </p>
+        <% end %>
       </div>
       <p class="text-gray-600 mt-1">/<%= @project.slug %></p>
     </div>

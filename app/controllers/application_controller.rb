@@ -13,6 +13,7 @@ class ApplicationController < ActionController::Base
 
   def set_current_attributes
     Current.splat_host = ENV.fetch("SPLAT_HOST", "localhost:3030")
+    Current.splat_internal_host = ENV.fetch("SPLAT_INTERNAL_HOST", nil)
   end
 
   def queue_depth

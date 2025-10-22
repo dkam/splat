@@ -1,10 +1,10 @@
 # Splat - Lightweight Error Tracker
 
-This software is in production in Booko and it's been fine. It's under development and changing fast. It should be considered alpha quality. A large percentage of it is written with GLM 4.6 and Sonnet 4.5.  More testing is needed.  It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
+This software is in production in [Booko](https://booko.info) and it's been fine. It's under development and changing fast. It should be considered alpha quality. A large percentage of it is written with GLM 4.6 and Sonnet 4.5.  More testing is needed.  It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
 
-Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.  Splat currently has no user accounts.
+Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
 
-This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale.
+This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale. When 
 
 It has an (awesome) MCP endpoint. You need to set an environment variable `MCP_AUTH_TOKEN` in order to use it. The end point is /mcp.
 
@@ -61,7 +61,9 @@ SMTP_PASSWORD=your-app-password
 SMTP_DOMAIN=localhost
 SMTP_AUTHENTICATION=plain
 SMTP_STARTTLS_AUTO=true
-SPLAT_HOST=localhost:3000
+SPLAT_HOST=splat.example.com
+SPLAT_INTERNAL_HOST=100.x.x.x:3030  # Your Tailscale IP maybe? Used for displaying alternate DSN
+
 
 # For local development with self-signed certificates, use:
 SMTP_OPENSSL_VERIFY_MODE=none
@@ -325,6 +327,7 @@ Once configured, you can ask Claude:
 - "Get event abc-123-def with full context and request ID"
 
 ## Full List of Environment Variables
+```
   RAILS_ENV: production
   SECRET_KEY_BASE : generate with `openssl rand -hex 64`
   HOST_IP: ip address to bind to
@@ -333,21 +336,29 @@ Once configured, you can ask Claude:
   FROM_EMAIL: splat@splat.example.com # Change this to your email
   SOLID_QUEUE_THREADS: 3
   SOLID_QUEUE_PROCESSES: 1
+```
 
 ### MCP (Model Context Protocol)
+```
 MCP_AUTH_TOKEN: Generate with `openssl rand -hex 32`
+```
 
 ### Data Retention
+```
 SPLAT_MAX_EVENT_LIFE_DAYS=30
 SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS=60
 SPLAT_MAX_FILE_LIFE_DAYS=180
+```
 
 ### Mission Control
+```
 Optionally set these if you'd like to access /jobs to view the SolidQueue management system
   MISSION_CONTROL_USERNAME
   MISSION_CONTROL_PASSWORD
+```
 
 ### Email Sending Setup
+```
   https://guides.rubyonrails.org/action_mailer_basics.html#action-mailer-configuration
   https://guides.rubyonrails.org/configuring.html#configuring-action-mailer
 
@@ -359,3 +370,4 @@ Optionally set these if you'd like to access /jobs to view the SolidQueue manage
   SMTP_AUTHENTICATION' - default 'plain'
   SMTP_STARTTLS_AUTO' - default 'true'
   SMTP_OPENSSL_VERIFY_MODE - default'none').to_sym
+  ```

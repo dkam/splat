@@ -50,6 +50,14 @@ class Project < ApplicationRecord
     "#{protocol}://#{public_key}@#{host}/#{slug}"
   end
 
+  def internal_dsn
+    return nil unless Current.splat_internal_host.present?
+
+    host = Current.splat_internal_host
+    protocol = "http"  # Internal Tailscale connections use HTTP
+    "#{protocol}://#{public_key}@#{host}/#{slug}"
+  end
+
   def recent_events(limit: 100)
     events.recent.limit(limit)
   end
