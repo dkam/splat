@@ -1,0 +1,74 @@
+x-common-variables: &common-variables
+  RAILS_ENV: production
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  SPLAT_HOST: ${SPLAT_HOST}
+  SPLAT_INTERNAL_HOST: ${SPLAT_INTERNAL_HOST}
+  SPLAT_ADMIN_EMAILS: ${SPLAT_ADMIN_EMAILS}
+  SPLAT_EMAIL_FROM: ${SPLAT_EMAIL_FROM}
+
+  SMTP_ADDRESS: ${SMTP_ADDRESS}
+  SMTP_PORT: ${SMTP_PORT}
+  SMTP_USER_NAME: ${SMTP_USER_NAME}
+  SMTP_PASSWORD: ${SMTP_PASSWORD}
+
+  MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
+  SENTRY_DSN: ${SENTRY_DSN}
+  SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
+
+services:
+  web:
+    image: ghcr.io/dkam/splat:latest
+    environment:
+      <<: *common-variables
+      MISSION_CONTROL_USERNAME: ${MISSION_CONTROL_USERNAME}
+      MISSION_CONTROL_PASSWORD: ${MISSION_CONTROL_PASSWORD}
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/web:/rails/log
+    ports:
+      - "${HOST_IP}:3030:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/up"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1536M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  jobs:
+    image: ghcr.io/dkam/splat:latest
+    environment:
+      <<: *common-variables
+      SOLID_QUEUE_THREADS: 3
+      SOLID_QUEUE_PROCESSES: 1
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/jobs:/rails/log
+    command: bundle exec bin/jobs
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 640M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"

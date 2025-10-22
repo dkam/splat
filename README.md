@@ -155,7 +155,32 @@ services:
         max-size: "100m"
         max-file: "3"
 ```
+## Performance
 
+Splat has been tested in production handling real-world traffic with excellent results.
+
+### Production Metrics
+
+**Sustained load: ~1,550 transactions/minute (~26 tx/s)**
+- Web container: 1.07 GB RAM, ~19% CPU
+- Jobs container: 340 MB RAM, ~20% CPU
+- Queue depth: 0 (no backlog)
+- No database locks or contention
+
+**Total resources: ~1.4 GB RAM, ~0.8 CPU cores** for both containers combined.
+
+**Throughput: ~2.2 million transactions/day**
+
+### SQLite Performance
+
+At 26 transactions/second sustained:
+- ✅ No SQLITE_BUSY errors
+- ✅ No write conflicts
+- ✅ Linear CPU scaling with load
+- ✅ Stable memory usage (plateaus around 1GB for web container)
+- ✅ Memory remains stable as throughput increases (tested 14-26 tx/s)
+
+Rails 8.1's SQLite optimizations (WAL mode, connection pooling) handle write-heavy workloads efficiently.
 
 ## Maintenance
 
@@ -216,6 +241,25 @@ Deleted 567 old transactions
 Deleted 89 empty issues
 Cleanup completed successfully
 ```
+
+## Backup
+
+Splat uses SQLite databases. Two recommended backup strategies:
+
+**[Litestream](https://litestream.io/)** - Continuous replication to S3-compatible storage
+- Real-time backup with ~10-30 second lag
+- Supports AWS S3, Backblaze B2, Cloudflare R2, MinIO
+- Point-in-time recovery
+
+**[sqlite3_rsync](https://github.com/cannadayr/git/blob/master/sqlite3_rsync)** - Efficient incremental backups
+- Creates byte-for-byte clones of live databases
+- Works while database is in use
+- Smaller incremental transfers than full copies
+
+### What to Backup
+- `storage/production.sqlite3` - Events, issues, transactions (critical)
+- `storage/production_queue.sqlite3` - Background jobs (recommended)
+- `storage/production_cache.sqlite3` - Performance counters (optional)
 
 ## Model Context Protocol (MCP) Integration
 
