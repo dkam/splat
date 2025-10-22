@@ -45,6 +45,9 @@ RUN bundle install && \
 # Copy application code
 COPY . .
 
+# Capture git version at build time and write to REVISION file
+RUN git describe --tags --always --dirty 2>/dev/null > REVISION || echo "$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')" > REVISION
+
 # Precompile bootsnap code for faster boot times
 RUN bundle exec bootsnap precompile app/ lib/
 
