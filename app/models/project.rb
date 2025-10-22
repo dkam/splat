@@ -183,6 +183,7 @@ class Project < ApplicationRecord
       )
       .order('AVG(duration) DESC')
       .limit(limit)
+      .to_a
   end
 
   def calculate_response_time_by_hour(time_range)
@@ -196,6 +197,7 @@ class Project < ApplicationRecord
         'MAX(duration) as max_duration'
       )
       .order(Arel.sql("strftime('%H:00', timestamp)"))
+      .to_a
   end
 
   def generate_slug

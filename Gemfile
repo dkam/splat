@@ -72,6 +72,7 @@ group :development do
 
   # Preview emails in browser instead of sending
   gem "letter_opener"
+  gem "standard", "~> 1.51"
 end
 
 group :test do
@@ -83,3 +84,4 @@ end
 gem "sentry-rails"
 
 gem "mission_control-jobs", "~> 1.1"
+
