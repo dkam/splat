@@ -294,7 +294,7 @@ class TransactionTest < ActiveSupport::TestCase
       )
     end
 
-    percentiles = Transaction.percentiles
+    percentiles = Transaction.percentiles(nil, project_id: @project.id)
 
     assert_equal 300, percentiles[:avg]
     assert_equal 300, percentiles[:p50]

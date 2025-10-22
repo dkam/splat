@@ -605,8 +605,8 @@ module Mcp
       transactions = Transaction.where(timestamp: time_range)
       transactions = transactions.by_name(endpoint) if endpoint.present?
 
-      percentiles = transactions.percentiles(time_range)
-      slowest_endpoints = transactions.stats_by_endpoint(time_range).limit(limit)
+      percentiles = Transaction.percentiles(time_range)
+      slowest_endpoints = Transaction.stats_by_endpoint(time_range).limit(limit)
       total_count = transactions.count
 
       text = format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours, endpoint)

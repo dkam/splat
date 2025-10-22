@@ -173,12 +173,13 @@ Splat has been tested in production handling real-world traffic with excellent r
 
 ### SQLite Performance
 
-At 26 transactions/second sustained:
+At 26 transactions/second sustained with **~950k transactions in database (4.7GB)**:
 - ✅ No SQLITE_BUSY errors
 - ✅ No write conflicts
 - ✅ Linear CPU scaling with load
 - ✅ Stable memory usage (plateaus around 1GB for web container)
 - ✅ Memory remains stable as throughput increases (tested 14-26 tx/s)
+- ✅ Database size has no impact on ingestion performance ( so far )
 
 Rails 8.1's SQLite optimizations (WAL mode, connection pooling) handle write-heavy workloads efficiently.
 
