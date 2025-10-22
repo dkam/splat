@@ -26,35 +26,24 @@ class IssuesController < ApplicationController
 
   def resolve
     @issue.resolved!
-
-    respond_to do |format|
-      format.turbo_stream { head :ok }
-      format.html { redirect_to project_issue_path(@project.slug, @issue), notice: "Issue marked as resolved" }
-    end
+    redirect_to project_issue_path(@project.slug, @issue), notice: "Issue marked as resolved"
   end
 
   def ignore
     @issue.ignored!
-
-    respond_to do |format|
-      format.turbo_stream { head :ok }
-      format.html { redirect_to project_issue_path(@project.slug, @issue), notice: "Issue ignored" }
-    end
+    redirect_to project_issue_path(@project.slug, @issue), notice: "Issue ignored"
   end
 
   def reopen
     @issue.open!
-
-    respond_to do |format|
-      format.turbo_stream { head :ok }
-      format.html { redirect_to project_issue_path(@project.slug, @issue), notice: "Issue reopened" }
-    end
+    redirect_to project_issue_path(@project.slug, @issue), notice: "Issue reopened"
   end
 
   private
 
   def set_project
-    @project = Project.find_by!(slug: params[:project_slug])
+    # Accept both slug (e.g., "booko") and ID (e.g., "1")
+    @project = Project.find_by(slug: params[:project_slug]) || Project.find(params[:project_slug])
   end
 
   def set_issue
