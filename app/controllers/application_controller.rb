@@ -7,9 +7,15 @@ class ApplicationController < ActionController::Base
 
   before_action :set_current_attributes
 
+  helper_method :queue_depth
+
   private
 
   def set_current_attributes
     Current.splat_host = ENV.fetch("SPLAT_HOST", "localhost:3030")
+  end
+
+  def queue_depth
+    @queue_depth ||= SolidQueue::ReadyExecution.count
   end
 end

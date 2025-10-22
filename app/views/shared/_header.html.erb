@@ -1,0 +1,28 @@
+<!-- Header Toolbar -->
+<header class="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 shadow-sm z-40">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex justify-between items-center h-16">
+      <!-- Logo/Branding -->
+      <div class="flex items-center">
+        <%= link_to root_path, class: "flex items-center space-x-2 text-gray-900 hover:text-gray-700 transition-colors" do %>
+          <div class="text-2xl font-bold text-blue-600">Splat!</div>
+        <% end %>
+      </div>
+
+      <!-- System Status -->
+      <div class="flex items-center space-x-6">
+        <!-- Queue Depth Indicator -->
+        <div class="flex items-center space-x-2">
+          <span class="text-sm text-gray-600">Queue Depth:</span>
+          <% queue_depth_value = queue_depth %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                <%= queue_depth_value == 0 ? 'bg-green-100 text-green-800' :
+                    queue_depth_value < 10 ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800' %>">
+            <%= queue_depth_value %>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>

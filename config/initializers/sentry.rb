@@ -31,9 +31,22 @@ Rails.application.configure do
         'Mongoid::Errors::DocumentNotFound',
         'AbstractController::ActionNotFound'
       ]
+      # Use Rails request_id as transaction_id for easier log correlation
+      
+      set_request_id = lambda do |event, hint|
+        if event.tags && event.tags[:request_id]
+          event.event_id = event.tags[:request_id]
+        end
+        event
+      end
+
+      config.before_send_transaction = set_request_id
 
       # Before send callback for additional filtering
       config.before_send = lambda do |event, hint|
+        # Set request_id as event_id for correlation
+        set_request_id.call(event, hint)
+
         # Filter out events from certain IPs if needed
         # event.tags[:filtered] = 'true' if some_condition
 
