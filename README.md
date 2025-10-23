@@ -243,6 +243,91 @@ Deleted 89 empty issues
 Cleanup completed successfully
 ```
 
+## Monitoring
+
+Splat provides a `/_health` endpoint for monitoring service status and queue depth.
+
+### Health Endpoint
+```bash
+GET /_health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-10-23T12:34:56Z",
+  "queue_depth": 0,
+  "queue_status": "healthy",
+  "event_count": 1234,
+  "issue_count": 56,
+  "transaction_count": 5678,
+  "transactions_per_second": 1.23,
+  "transactions_per_minute": 73.5
+}
+```
+
+**Response Fields:**
+- `status`: Overall system health (`ok` or `degraded`)
+- `queue_status`: Queue health (`healthy`, `warning`, or `critical`)
+- `queue_depth`: Number of pending background jobs
+- `timestamp`: Current server time (ISO 8601)
+- `event_count`: Total error events tracked
+- `issue_count`: Number of open issues
+- `transaction_count`: Total performance transactions
+- `transactions_per_second`: Rate over last minute
+- `transactions_per_minute`: Rate over last hour
+
+**Environment Variables for Thresholds:**
+```bash
+# Optional - defaults shown
+QUEUE_WARNING_THRESHOLD=50   # queue_status becomes "warning"
+QUEUE_CRITICAL_THRESHOLD=100 # queue_status becomes "critical", status becomes "degraded"
+```
+
+### Uptime Kuma Setup
+
+**Monitor Configuration:**
+- **Monitor Type**: HTTP(s) - JSON Query
+- **URL**: `https://splat.yourdomain.com/_health`
+- **Expected Status Code**: 200
+- **Check Interval**: 60 seconds (or your preference)
+
+**Option 1: Monitor Queue Status (Recommended)**
+- **JSON Path**: `$.queue_status`
+- **Expected Value**: `healthy`
+- **Alert When**: Value is not equal to expected value
+- **Result**: Alerts when queue is "warning" or "critical"
+
+**Option 2: Monitor Overall Status**
+- **JSON Path**: `$.status`
+- **Expected Value**: `ok`
+- **Alert When**: Value is not equal to expected value
+- **Result**: Alerts only when system is "degraded" (critical queue depth)
+
+**Notification Settings:**
+Configure Uptime Kuma to send alerts via:
+- Email
+- Slack
+- Discord
+- Webhook
+- Or any of the 90+ notification services supported
+
+**Monitoring Guidelines:**
+- **Normal queue depth**: 0-10 jobs (instant processing)
+- **Warning level**: 50-99 jobs (queue building up)
+- **Critical level**: 100+ jobs (queue backlog)
+
+**When queue_status is "warning":**
+- Jobs are processing but slower than ingestion rate
+- Check Solid Queue worker status
+- Consider scaling workers if sustained
+
+**When queue_status is "critical":**
+- Significant backlog, data delayed
+- Immediate investigation needed
+- Check for worker crashes or resource constraints
+
 ## Backup
 
 Splat uses SQLite databases. Two recommended backup strategies:
@@ -264,7 +349,7 @@ Splat uses SQLite databases. Two recommended backup strategies:
 
 ## Model Context Protocol (MCP) Integration
 
-Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly.
+Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly. As Splat has no authentication system, we'll use an environment set value for an authentication token.
 
 ### Setup
 
