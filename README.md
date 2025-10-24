@@ -6,7 +6,7 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
 
-This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale. When 
+This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale.
 
 It has an (awesome) MCP endpoint. You need to set an environment variable `MCP_AUTH_TOKEN` in order to use it. The end point is /mcp.
 
@@ -155,6 +155,53 @@ services:
         max-size: "100m"
         max-file: "3"
 ```
+
+## Caddy Configuration
+
+```
+splat.booko.info {
+  encode zstd gzip
+
+  # Handle /api/* routes without basic auth
+  handle /api/* {
+    reverse_proxy * {
+      to http://<ip address>:3030
+      header_up X-Real-IP {remote_host}
+      header_up Access-Control-Allow-Origin *
+      header_up Access-Control-Allow-Credentials true
+      header_up Access-Control-Allow-Headers Cache-Control,Content-Type
+      transport http {
+        read_buffer 8192
+      }
+    }
+  }
+
+  # Handle all other routes with basic auth
+  handle {
+    basicauth {
+      <user> <basic-auth-hash>
+    }
+    reverse_proxy * {
+      to http://<ip address>:3030
+      header_up X-Real-IP {remote_host}
+      header_up Access-Control-Allow-Origin *
+      header_up Access-Control-Allow-Credentials true
+      header_up Access-Control-Allow-Headers Cache-Control,Content-Type
+      transport http {
+        read_buffer 8192
+      }
+    }
+  }
+
+  log {
+    output file /var/log/caddy/splat.log
+  }
+}
+```
+
+Generate the basic auth hash with `docker compose exec -it caddy caddy hash-password`
+
+
 ## Performance
 
 Splat has been tested in production handling real-world traffic with excellent results.
