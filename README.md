@@ -164,17 +164,10 @@ This configuration uses basic auth, but allows free access to the `/api/`
 splat.booko.info {
   encode zstd gzip
 
-  # Handle /api/* routes without basic auth
-  handle /api/* {
+  # Handle /api/* and /mcp/* routes without basic auth (both use token auth)
+  handle /api/* /mcp* {
     reverse_proxy * {
       to http://<ip address>:3030
-      header_up X-Real-IP {remote_host}
-      header_up Access-Control-Allow-Origin *
-      header_up Access-Control-Allow-Credentials true
-      header_up Access-Control-Allow-Headers Cache-Control,Content-Type
-      transport http {
-        read_buffer 8192
-      }
     }
   }
 
@@ -185,13 +178,6 @@ splat.booko.info {
     }
     reverse_proxy * {
       to http://<ip address>:3030
-      header_up X-Real-IP {remote_host}
-      header_up Access-Control-Allow-Origin *
-      header_up Access-Control-Allow-Credentials true
-      header_up Access-Control-Allow-Headers Cache-Control,Content-Type
-      transport http {
-        read_buffer 8192
-      }
     }
   }
 
