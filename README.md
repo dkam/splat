@@ -158,6 +158,8 @@ services:
 
 ## Caddy Configuration
 
+This configuration uses basic auth, but allows free access to the `/api/`
+
 ```
 splat.booko.info {
   encode zstd gzip
