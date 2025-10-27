@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class HealthController < ApplicationController
+  skip_before_action :require_authentication
+
   # Queue depth threshold for health checks
   # If queue depth exceeds this, set queue_status to "warning" or "critical"
   QUEUE_WARNING_THRESHOLD = ENV.fetch("QUEUE_WARNING_THRESHOLD", 50).to_i

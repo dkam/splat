@@ -158,7 +158,10 @@ services:
 
 ## Caddy Configuration
 
-This configuration uses basic auth, but allows free access to the `/api/`
+Assuming a Caddy server which forwards traffic to Splat. 
+
+### Basic Auth
+This configuration uses basic auth, but allows free access to the `/api/` and `/mcp/` endpoints.
 
 ```
 splat.booko.info {
@@ -188,6 +191,32 @@ splat.booko.info {
 ```
 
 Generate the basic auth hash with `docker compose exec -it caddy caddy hash-password`
+
+### Forward Auth
+
+```
+splat.booko.info {
+  encode zstd gzip
+
+  # Handle /api/* and /mcp/* routes without basic auth (both use token auth)
+  handle /api/* /mcp* {
+    reverse_proxy * {
+      to http://<ip address>:3030
+    }
+  }
+
+
+  handle {
+    forward_auth https://auth.booko.info {
+      uri /api/verify?rd=https://auth.booko.info
+      copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+    reverse_proxy * {
+      to http://<ip address>:3030
+    }
+  }
+}
+```
 
 
 ## Performance

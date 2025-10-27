@@ -39,6 +39,9 @@ gem "pagy"
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false
 
+# OpenID Connect authentication (direct approach)
+gem "openid_connect"
+
 # Deploy this application anywhere as a Docker container [https://kamal-deploy.org]
 gem "kamal", require: false
 
