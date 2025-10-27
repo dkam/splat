@@ -34,6 +34,27 @@ When you need error tracking that:
 - Can be understood and modified in one sitting
 - Rails 8 / Ruby 3.4.6 / SQLite3 + Solid stack (Queue/Cache/Cable) - SQLite-first architecture
 
+
+## Screenshots
+
+### 1. Projects Dashboard
+[![Projects Dashboard](docs/screenshots/thumbs/1-projects.png)](docs/screenshots/1-projects.png)
+
+### 2. Project Detail View
+[![Project Detail](docs/screenshots/thumbs/2-project.png)](docs/screenshots/2-project.png)
+
+### 3. Issues List
+[![Issues List](docs/screenshots/thumbs/3-issues.png)](docs/screenshots/3-issues.png)
+
+### 4. Issue Detail with Stack Trace
+[![Issue Detail](docs/screenshots/thumbs/4-issue.png)](docs/screenshots/4-issue.png)
+
+### 5. Event Details
+[![Event Details](docs/screenshots/thumbs/5-event.png)](docs/screenshots/5-event.png)
+
+### 6. Performance Monitoring
+[![Performance Monitoring](docs/screenshots/thumbs/6-performance.png)](docs/screenshots/6-performance.png)
+
 ## Getting Started
 
 ### Prerequisites
