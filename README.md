@@ -1,16 +1,18 @@
 # Splat - Lightweight Error Tracker
 
-This software is under development and changing fast. It should be considered alpha quality. A large percentage of it is written with GLM 4.6 and Sonnet 4.5.  More testing is needed.  It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
-
-If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & Telebugs. 
+This software is experiemental. If you'd like to try it out, find bugs, security flaws and improvements, please do. 
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
 
-This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale.
+This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale. I'm planning to add OIDC.
 
 It has an (awesome) MCP endpoint. You need to set an environment variable `MCP_AUTH_TOKEN` in order to use it. The end point is /mcp.
 
-I've only used Splat with Rails.
+A large percentage of it is written with GLM 4.6 and Sonnet 4.5. It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
+
+I've only used Splat with Rails, but there's no reason it shouldn't work with other systems. Happy to accept pull requests for wider compatibility.
+
+If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & Telebugs. 
 
 ## Overview
 
@@ -27,6 +29,7 @@ I've only used Splat with Rails.
 
 ### Why Splat?
 When you need error tracking that:
+- Your code assistant can grab issues and stack traces from
 - Shows errors within seconds
 - Can be understood and modified in one sitting
 - Rails 8 / Ruby 3.4.6 / SQLite3 + Solid stack (Queue/Cache/Cable) - SQLite-first architecture
