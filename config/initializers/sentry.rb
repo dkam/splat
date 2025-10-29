@@ -9,8 +9,8 @@ Rails.application.configure do
       # Set the environment tag
       config.environment = Rails.env
 
-      # Release version - timestamp with git hash
-      config.release = "#{DateTime.current.beginning_of_hour.iso8601}-#{`git rev-parse --short HEAD`.strip}"
+      # Release version - use Splat::VERSION
+      config.release = Splat::VERSION
 
       # Sample rate for error events (100% for errors)
       config.sample_rate = 1.0
