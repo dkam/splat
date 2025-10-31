@@ -7,6 +7,12 @@ require "rails/all"
 Bundler.require(*Rails.groups)
 
 module Splat
+  VERSION = begin
+    File.read(Rails.root.join("VERSION")).strip
+  rescue
+    "unknown"
+  end
+
   class Application < Rails::Application
     config.secret_key_base = ENV.fetch('SECRET_KEY_BASE') do
       raise "SECRET_KEY_BASE environment variable is required but not set. Please 

@@ -56,6 +56,7 @@
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
@@ -69,6 +70,9 @@
         <tbody class="bg-white divide-y divide-gray-200">
           <% @transactions.each do |transaction| %>
             <tr class="hover:bg-gray-50">
+              <td class="px-6 py-4">
+                <span class="font-mono text-sm text-gray-500">#<%= transaction.id %></span>
+              </td>
               <td class="px-6 py-4 whitespace-nowrap">
                 <% if transaction.http_method.present? %>
                   <span class="font-mono text-sm text-gray-600"><%= transaction.http_method %></span>

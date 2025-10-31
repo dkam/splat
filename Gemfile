@@ -88,3 +88,5 @@ gem "sentry-rails"
 
 gem "mission_control-jobs", "~> 1.1"
 
+
+gem "image_processing", "~> 1.14"
