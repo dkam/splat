@@ -6,9 +6,12 @@
   <!-- Event Header -->
   <div class="flex justify-between items-start mb-8">
     <div class="flex-1">
-      <h1 class="text-3xl font-bold text-gray-900 mb-2">
-        <%= @event.message || @event.exception_value || "Event #{@event.event_id}" %>
-      </h1>
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-3xl font-mono text-gray-500 font-medium">#<%= @event.id %></span>
+        <h1 class="text-3xl font-bold text-gray-900">
+          <%= @event.message || @event.exception_value || "Event #{@event.event_id}" %>
+        </h1>
+      </div>
       <div class="flex items-center gap-3 text-sm text-gray-600">
         <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= @event.event_id %></span>
         <% if @event.environment.present? %>

@@ -4,7 +4,10 @@
   </div>
 
   <div class="mb-6">
-    <h1 class="text-3xl font-bold text-gray-900 mb-2"><%= @transaction.transaction_name %></h1>
+    <div class="flex items-center gap-3 mb-2">
+      <span class="text-3xl font-mono text-gray-500 font-medium">#<%= @transaction.id %></span>
+      <h1 class="text-3xl font-bold text-gray-900"><%= @transaction.transaction_name %></h1>
+    </div>
     <div class="flex items-center gap-3 text-sm text-gray-600">
       <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= @transaction.transaction_id %></span>
       <span>•</span>
