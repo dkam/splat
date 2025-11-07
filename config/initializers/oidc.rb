@@ -1,26 +1,18 @@
 # OpenID Connect Client Configuration
 # This replaces OmniAuth with direct OpenID Connect gem usage
+require "json"
+
+# OIDC configuration is now handled per-request in AuthController
+# This initializer is kept for backward compatibility but the client
+# creation has been moved to the controller for better error handling
 
 Rails.application.configure do
   config.after_initialize do
-    # Only configure if OIDC is properly set up
-    next unless oidc_configured?
-
-    # Get OIDC configuration from discovery URL or individual endpoints
-    oidc_config = load_oidc_configuration
-
-    # Configure OpenID Connect client
-    Rails.application.config.oidc_client = OpenIDConnect::Client.new({
-      identifier: ENV.fetch('OIDC_CLIENT_ID'),
-      secret: ENV.fetch('OIDC_CLIENT_SECRET'),
-      authorization_endpoint: oidc_config[:authorization_endpoint],
-      token_endpoint: oidc_config[:token_endpoint],
-      userinfo_endpoint: oidc_config[:userinfo_endpoint],
-      jwks_uri: oidc_config[:jwks_uri],
-      redirect_uri: "#{ENV.fetch('RAILS_HOST_PROTOCOL', 'http')}://#{ENV.fetch('RAILS_HOST', 'localhost:3000')}/auth/callback"
-    })
-
-    Rails.logger.info "OpenID Connect client configured for #{ENV['OIDC_PROVIDER_NAME'] || 'OIDC Provider'}"
+    if OidcConfig.configured?
+      Rails.logger.info "OIDC authentication configured for #{ENV['OIDC_PROVIDER_NAME'] || 'OIDC Provider'}"
+    else
+      Rails.logger.info "OIDC authentication not configured"
+    end
   end
 end
 
@@ -42,10 +34,16 @@ def config_from_discovery
   discovery_url = ENV.fetch('OIDC_DISCOVERY_URL')
   Rails.logger.info "Loading OIDC configuration from discovery URL: #{discovery_url}"
 
-  response = HTTP.get(discovery_url)
+  uri = URI.parse(discovery_url)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = uri.scheme == 'https'
+  http.open_timeout = 5
+  http.read_timeout = 5
+
+  response = http.get(uri.request_uri)
   response.raise_for_status
 
-  discovery_data = response.parse.with_indifferent_access
+  discovery_data = JSON.parse(response.body).with_indifferent_access
 
   {
     authorization_endpoint: discovery_data[:authorization_endpoint],
@@ -53,6 +51,15 @@ def config_from_discovery
     userinfo_endpoint: discovery_data[:userinfo_endpoint],
     jwks_uri: discovery_data[:jwks_uri]
   }
+rescue JSON::ParserError => e
+  Rails.logger.error "Failed to parse OIDC discovery response as JSON: #{e.message}"
+  raise "Invalid JSON response from OIDC discovery endpoint: #{e.message}"
+rescue Net::TimeoutError => e
+  Rails.logger.error "OIDC discovery request timed out: #{e.message}"
+  raise "OIDC discovery endpoint timed out: #{e.message}"
+rescue Net::HTTPError => e
+  Rails.logger.error "OIDC discovery HTTP error: #{e.message}"
+  raise "OIDC discovery endpoint returned error: #{e.message}"
 end
 
 def config_from_env_vars

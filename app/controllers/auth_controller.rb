@@ -54,7 +54,7 @@ class AuthController < ApplicationController
     begin
       token_params = {
         code: params[:code],
-        redirect_uri: oidc_client.redirect_uri,
+        redirect_uri: oidc_redirect_uri,
         state: state
       }
 
@@ -73,6 +73,12 @@ class AuthController < ApplicationController
       # Process authentication
       handle_authentication(user_info, tokens)
 
+    rescue OpenIDConnect::Exception => e
+      Rails.logger.error "OIDC protocol error: #{e.message}"
+      redirect_to root_path, alert: "Authentication failed: #{e.message}"
+    rescue Rack::OAuth2::Client::Error => e
+      Rails.logger.error "OAuth2 client error: #{e.message}"
+      redirect_to root_path, alert: "Authentication failed: #{e.message}"
     rescue => e
       Rails.logger.error "OIDC callback error: #{e.message}"
       Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
@@ -154,7 +160,89 @@ class AuthController < ApplicationController
   end
 
   def oidc_client
-    Rails.application.config.oidc_client
+    @oidc_client ||= build_oidc_client
+  end
+
+  def build_oidc_client
+    # Get OIDC configuration from discovery URL or individual endpoints
+    oidc_config = load_oidc_configuration
+
+    # Create client dynamically per request (better error handling)
+    client = OpenIDConnect::Client.new({
+      identifier: ENV.fetch('OIDC_CLIENT_ID'),
+      secret: ENV.fetch('OIDC_CLIENT_SECRET'),
+      authorization_endpoint: oidc_config[:authorization_endpoint],
+      token_endpoint: oidc_config[:token_endpoint],
+      userinfo_endpoint: oidc_config[:userinfo_endpoint],
+      jwks_uri: oidc_config[:jwks_uri],
+      redirect_uri: oidc_redirect_uri
+    })
+
+    Rails.logger.debug "Created OIDC client for #{ENV['OIDC_PROVIDER_NAME'] || 'OIDC Provider'}"
+    client
+  rescue => e
+    Rails.logger.error "Failed to create OIDC client: #{e.message}"
+    raise "OIDC configuration error: #{e.message}"
+  end
+
+  def load_oidc_configuration
+    if ENV['OIDC_DISCOVERY_URL'].present?
+      # Use discovery URL (preferred method)
+      config_from_discovery
+    else
+      # Fall back to individual endpoint configuration
+      config_from_env_vars
+    end
+  rescue => e
+    Rails.logger.error "Failed to load OIDC configuration: #{e.message}"
+    raise e
+  end
+
+  def config_from_discovery
+    discovery_url = ENV.fetch('OIDC_DISCOVERY_URL')
+    Rails.logger.info "Loading OIDC configuration from discovery URL: #{discovery_url}"
+
+    uri = URI.parse(discovery_url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.open_timeout = 5
+    http.read_timeout = 5
+
+    response = http.get(uri.request_uri)
+    response.raise_for_status
+
+    discovery_data = JSON.parse(response.body).with_indifferent_access
+
+    {
+      authorization_endpoint: discovery_data[:authorization_endpoint],
+      token_endpoint: discovery_data[:token_endpoint],
+      userinfo_endpoint: discovery_data[:userinfo_endpoint],
+      jwks_uri: discovery_data[:jwks_uri]
+    }
+  rescue JSON::ParserError => e
+    Rails.logger.error "Failed to parse OIDC discovery response as JSON: #{e.message}"
+    raise "Invalid JSON response from OIDC discovery endpoint: #{e.message}"
+  rescue Net::TimeoutError => e
+    Rails.logger.error "OIDC discovery request timed out: #{e.message}"
+    raise "OIDC discovery endpoint timed out: #{e.message}"
+  rescue Net::HTTPError => e
+    Rails.logger.error "OIDC discovery HTTP error: #{e.message}"
+    raise "OIDC discovery endpoint returned error: #{e.message}"
+  end
+
+  def config_from_env_vars
+    Rails.logger.info "Loading OIDC configuration from environment variables"
+
+    {
+      authorization_endpoint: ENV.fetch('OIDC_AUTH_ENDPOINT'),
+      token_endpoint: ENV.fetch('OIDC_TOKEN_ENDPOINT'),
+      userinfo_endpoint: ENV.fetch('OIDC_USERINFO_ENDPOINT'),
+      jwks_uri: ENV.fetch('OIDC_JWKS_ENDPOINT')
+    }
+  end
+
+  def oidc_redirect_uri
+    "#{ENV.fetch('RAILS_HOST_PROTOCOL', 'http')}://#{ENV.fetch('RAILS_HOST', 'localhost:3000')}/auth/callback"
   end
 
   def pkce_required?
