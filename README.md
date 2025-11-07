@@ -1,3 +1,6 @@
+Use use the oauth
+
+
 # Splat - Lightweight Error Tracker
 
 This software is experiemental. If you'd like to try it out, find bugs, security flaws and improvements, please do. 
