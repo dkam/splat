@@ -4,14 +4,6 @@
 # Provides secure storage and retrieval of JWT tokens using Rails message verifier
 class TokenEncryptionService
   COOKIE_NAME = 'splat_auth_token'.freeze
-  COOKIE_OPTIONS = {
-    httponly: true,
-    secure: !Rails.env.development?,
-    same_site: :strict,
-    expires: cookie_expiry_time,
-    path: '/',
-    domain: ENV.fetch('COOKIE_DOMAIN', :all)
-  }.freeze
 
   class << self
     # Store encrypted token in cookie
@@ -21,7 +13,7 @@ class TokenEncryptionService
       begin
         cookie_value = encrypted_token.to_cookie
         validate_cookie_size(cookie_value)
-        cookies[COOKIE_NAME] = { value: cookie_value, **COOKIE_OPTIONS }
+        cookies[COOKIE_NAME] = { value: cookie_value, **cookie_options }
         Rails.logger.info "Stored encrypted token for #{encrypted_token.user_email}"
         true
       rescue => e
@@ -178,6 +170,18 @@ class TokenEncryptionService
     def jwt_verification_enabled?
       return true if Rails.env.production?
       ENV.fetch('OIDC_VERIFY_JWT_SIGNATURE', 'false').downcase == 'true'
+    end
+
+    # Get cookie options with dynamic expiry
+    def cookie_options
+      {
+        httponly: true,
+        secure: !Rails.env.development?,
+        same_site: :strict,
+        expires: cookie_expiry_time,
+        path: "/",
+        domain: ENV.fetch("COOKIE_DOMAIN", :all)
+      }
     end
 
     # Get cookie expiry time from environment

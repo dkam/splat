@@ -580,6 +580,128 @@ Optionally set these if you'd like to access /jobs to view the SolidQueue manage
   MISSION_CONTROL_PASSWORD
 ```
 
+## OIDC Authentication Setup
+
+Splat supports OpenID Connect (OIDC) authentication with automatic discovery URL configuration. This replaces the basic auth setup with proper user authentication.
+
+### Quick Start with Discovery URLs
+
+The preferred method is using OIDC discovery URLs - just set 3 environment variables:
+
+```bash
+# Required for OIDC authentication
+OIDC_DISCOVERY_URL=https://your-provider.com/.well-known/openid_configuration
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_PROVIDER_NAME=Your Provider Name  # Optional: Display name for login button
+```
+
+**Important**: Configure your OIDC provider with the callback URL: `https://your-splat-domain.com/auth/callback`
+
+### Provider-Specific Examples
+
+**Google:**
+```bash
+OIDC_DISCOVERY_URL=https://accounts.google.com/.well-known/openid_configuration
+OIDC_CLIENT_ID=your-google-client-id
+OIDC_CLIENT_SECRET=your-google-client-secret
+OIDC_PROVIDER_NAME=Google
+```
+
+**Okta:**
+```bash
+OIDC_DISCOVERY_URL=https://your-domain.okta.com/.well-known/openid_configuration
+OIDC_CLIENT_ID=your-okta-client-id
+OIDC_CLIENT_SECRET=your-okta-client-secret
+OIDC_PROVIDER_NAME=Okta
+```
+
+**Auth0:**
+```bash
+OIDC_DISCOVERY_URL=https://your-domain.auth0.com/.well-known/openid_configuration
+OIDC_CLIENT_ID=your-auth0-client-id
+OIDC_CLIENT_SECRET=your-auth0-client-secret
+OIDC_PROVIDER_NAME=Auth0
+```
+
+**Microsoft Azure AD:**
+```bash
+OIDC_DISCOVERY_URL=https://login.microsoftonline.com/your-tenant-id/v2.0/.well-known/openid_configuration
+OIDC_CLIENT_ID=your-azure-client-id
+OIDC_CLIENT_SECRET=your-azure-client-secret
+OIDC_PROVIDER_NAME=Microsoft
+```
+
+### Manual Endpoint Configuration
+
+If your provider doesn't support discovery URLs, configure endpoints individually:
+
+```bash
+# Required OIDC settings
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_AUTH_ENDPOINT=https://your-provider.com/oauth/authorize
+OIDC_TOKEN_ENDPOINT=https://your-provider.com/oauth/token
+OIDC_USERINFO_ENDPOINT=https://your-provider.com/oauth/userinfo
+OIDC_JWKS_ENDPOINT=https://your-provider.com/.well-known/jwks.json
+OIDC_PROVIDER_NAME=Your Provider
+```
+
+### Optional Configuration
+
+```bash
+# JWT signature verification (recommended for production)
+OIDC_VERIFY_JWT_SIGNATURE=true
+
+# Cookie settings
+COOKIE_EXPIRY_HOURS=24                    # Default: 24 hours
+COOKIE_DOMAIN=yourdomain.com               # Optional: Set for cross-subdomain auth
+```
+
+### Caddy Configuration (OIDC Forward Auth)
+
+Update your Caddy configuration to use forward authentication instead of basic auth:
+
+```
+splat.booko.info {
+  encode zstd gzip
+
+  # Handle /api/* and /mcp/* routes without auth (token-based)
+  handle /api/* /mcp* {
+    reverse_proxy * {
+      to http://<ip address>:3030
+    }
+  }
+
+  # Handle all other routes with OIDC forward auth
+  handle {
+    forward_auth https://splat.booko.info {
+      uri /auth/verify?rd=https://splat.booko.info/auth/login
+      copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+    reverse_proxy * {
+      to http://<ip address>:3030
+    }
+  }
+}
+```
+
+### How It Works
+
+1. **Discovery**: The app automatically fetches OIDC configuration from your provider's discovery URL
+2. **Authentication**: Users are redirected to your OIDC provider for login
+3. **Token Storage**: JWT tokens are encrypted and stored in secure HTTP-only cookies
+4. **Auto-Refresh**: Tokens are automatically refreshed when needed (5 minutes before expiry)
+5. **Session Migration**: Existing sessions are automatically migrated to encrypted cookies
+
+### Security Features
+
+- **Encrypted Cookies**: JWT tokens are encrypted using Rails message verifier
+- **HTTP-Only Cookies**: Tokens not accessible via JavaScript
+- **SameSite=Strict**: Protection against CSRF attacks
+- **JWT Verification**: Optional token signature validation
+- **Automatic Cleanup**: Tokens cleared on logout or expiry
+
 ### Email Sending Setup
 ```
   https://guides.rubyonrails.org/action_mailer_basics.html#action-mailer-configuration

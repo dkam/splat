@@ -19,8 +19,6 @@ class EncryptedToken
   attribute :user_name, :string
   attribute :authenticated_at, :datetime
 
-  encrypts :access_token, :refresh_token, :id_token, deterministic: false
-
   validates :user_email, presence: true
   validates :provider, presence: true
   validates :token_type, presence: true
@@ -97,29 +95,26 @@ class EncryptedToken
   # Convert to encrypted cookie format
   def to_cookie
     data = as_json(except: [:access_token, :refresh_token, :id_token])
-    data['encrypted_access_token'] = access_token
-    data['encrypted_refresh_token'] = refresh_token
-    data['encrypted_id_token'] = id_token
+    # Store sensitive tokens directly (will be encrypted by message verifier)
+    data["encrypted_access_token"] = access_token
+    data["encrypted_refresh_token"] = refresh_token
+    data["encrypted_id_token"] = id_token
 
-    verifier = Rails.application.message_verifier('encrypted_token')
+    verifier = Rails.application.message_verifier("encrypted_token")
     verifier.generate(data)
   end
 
   # Convert to JSON (with encrypted fields)
   def as_json(options = {})
-    super(options).merge(
-      'access_token' => '[ENCRYPTED]',
-      'refresh_token' => '[ENCRYPTED]',
-      'id_token' => '[ENCRYPTED]'
-    )
+    super
   end
 
   # Create instance from JSON data
   def from_json(data)
-    self.attributes = data.except('encrypted_access_token', 'encrypted_refresh_token', 'encrypted_id_token')
-    self.access_token = data['encrypted_access_token'] if data['encrypted_access_token']
-    self.refresh_token = data['encrypted_refresh_token'] if data['encrypted_refresh_token']
-    self.id_token = data['encrypted_id_token'] if data['encrypted_id_token']
+    self.attributes = data.except("encrypted_access_token", "encrypted_refresh_token", "encrypted_id_token")
+    self.access_token = data["encrypted_access_token"] if data["encrypted_access_token"]
+    self.refresh_token = data["encrypted_refresh_token"] if data["encrypted_refresh_token"]
+    self.id_token = data["encrypted_id_token"] if data["encrypted_id_token"]
     self
   end
 
@@ -145,6 +140,6 @@ class EncryptedToken
 
   # Override attribute writer to handle encrypted fields properly
   def attributes=(attributes)
-    super(attributes)
+    super
   end
 end
