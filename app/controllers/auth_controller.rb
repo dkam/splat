@@ -1,5 +1,6 @@
 class AuthController < ApplicationController
   skip_before_action :require_authentication, only: [:login, :callback, :failure, :forward_auth]
+  before_action :check_rate_limit, only: [:login, :callback]
 
   # GET /auth/login - Redirect user to OIDC provider
   def login
@@ -119,10 +120,13 @@ class AuthController < ApplicationController
 
   # DELETE /auth/logout - Logout user
   def logout
-    email = session[:user_email]
-    provider = session[:provider]
+    # Get user info before clearing
+    user_info = TokenEncryptionService.current_user_info(cookies)
+    email = user_info&.dig(:email)
+    provider = user_info&.dig(:provider)
 
-    reset_session
+    # Clear all authentication data comprehensively
+    clear_authentication!
 
     Rails.logger.info "User logged out: #{email} via #{provider}" if email
 
@@ -143,17 +147,18 @@ class AuthController < ApplicationController
       return
     end
 
-    # Create session
-    session[:user_email] = email
-    session[:user_name] = name
-    session[:provider] = provider
-    session[:authenticated_at] = Time.current
-    session[:access_token] = tokens.access_token
-    session[:refresh_token] = tokens.refresh_token if tokens.refresh_token
-    session[:expires_at] = tokens.expires_at if tokens.expires_at
+    # Create encrypted token from OIDC response
+    encrypted_token = EncryptedToken.from_oidc_response(user_info, tokens, provider)
 
-    # Log successful authentication
-    Rails.logger.info "User authenticated: #{email} via #{provider}"
+    # Store token in encrypted cookie
+    if TokenEncryptionService.store_token(cookies, encrypted_token)
+      # Log successful authentication
+      Rails.logger.info "User authenticated: #{email} via #{provider} (stored in encrypted cookie)"
+    else
+      Rails.logger.error "Failed to store encrypted token for #{email}"
+      redirect_to root_path, alert: "Authentication succeeded but failed to store session. Please try again."
+      return
+    end
 
     # Redirect to intended page or root
     redirect_to session.delete(:return_to) || root_path, notice: "Welcome #{name}!"
@@ -248,6 +253,23 @@ class AuthController < ApplicationController
   def pkce_required?
     # Some providers require PKCE for additional security
     ENV.fetch('OIDC_REQUIRE_PKCE', 'false').downcase == 'true'
+  end
+
+  # Check rate limiting for authentication endpoints
+  def check_rate_limit
+    client_ip = request.remote_ip
+    key = "auth_rate_limit:#{client_ip}"
+
+    # Use Rails.cache for rate limiting
+    count = Rails.cache.increment(key, 1, expires_in: 1.hour)
+
+    if count > ENV.fetch('AUTH_RATE_LIMIT_HOURLY', '20').to_i
+      Rails.logger.warn "Rate limit exceeded for IP: #{client_ip} (#{count} attempts)"
+      render json: {
+        error: 'Too many authentication attempts. Please try again later.'
+      }, status: :too_many_requests
+      return false
+    end
   end
 
   # Simple PKCE implementation for providers that require it

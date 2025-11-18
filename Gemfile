@@ -42,6 +42,9 @@ gem "bootsnap", require: false
 # OpenID Connect authentication (direct approach)
 gem "openid_connect"
 
+# JWT token handling and verification
+gem "jwt"
+
 # Deploy this application anywhere as a Docker container [https://kamal-deploy.org]
 gem "kamal", require: false
 
