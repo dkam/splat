@@ -296,7 +296,9 @@ module SplatAuthorization
   end
 
   def config_from_discovery_for_refresh
-    discovery_url = ENV.fetch('OIDC_DISCOVERY_URL')
+    base_url = ENV.fetch('OIDC_DISCOVERY_URL')
+    # Ensure the discovery URL includes the well-known path
+    discovery_url = base_url.include?('/.well-known/openid_configuration') ? base_url : "#{base_url.chomp('/')}/.well-known/openid_configuration"
     Rails.logger.debug "Loading OIDC configuration from discovery URL for refresh: #{discovery_url}"
 
     uri = URI.parse(discovery_url)
