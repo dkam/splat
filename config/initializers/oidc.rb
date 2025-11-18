@@ -54,7 +54,7 @@ def config_from_discovery
 rescue JSON::ParserError => e
   Rails.logger.error "Failed to parse OIDC discovery response as JSON: #{e.message}"
   raise "Invalid JSON response from OIDC discovery endpoint: #{e.message}"
-rescue Net::TimeoutError => e
+rescue Net::ReadTimeout, Net::OpenTimeout => e
   Rails.logger.error "OIDC discovery request timed out: #{e.message}"
   raise "OIDC discovery endpoint timed out: #{e.message}"
 rescue Net::HTTPError => e

@@ -319,7 +319,7 @@ module SplatAuthorization
   rescue JSON::ParserError => e
     Rails.logger.error "Failed to parse OIDC discovery response as JSON for refresh: #{e.message}"
     raise "Invalid JSON response from OIDC discovery endpoint: #{e.message}"
-  rescue Net::TimeoutError => e
+  rescue Net::ReadTimeout, Net::OpenTimeout => e
     Rails.logger.error "OIDC discovery request timed out for refresh: #{e.message}"
     raise "OIDC discovery endpoint timed out: #{e.message}"
   rescue Net::HTTPError => e

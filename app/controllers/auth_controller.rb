@@ -214,7 +214,23 @@ class AuthController < ApplicationController
     http.read_timeout = 5
 
     response = http.get(uri.request_uri)
-    response.raise_for_status
+
+    # Handle HTTP redirects
+    if response.is_a?(Net::HTTPRedirection)
+      redirect_uri = URI.parse(response['location'])
+      Rails.logger.info "Following redirect to: #{redirect_uri}"
+      uri = redirect_uri
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == 'https'
+      http.open_timeout = 5
+      http.read_timeout = 5
+      response = http.get(uri.request_uri)
+    end
+
+    # Check for successful response
+    unless response.is_a?(Net::HTTPSuccess)
+      raise "OIDC discovery endpoint returned #{response.code}: #{response.message}"
+    end
 
     discovery_data = JSON.parse(response.body).with_indifferent_access
 
@@ -227,7 +243,7 @@ class AuthController < ApplicationController
   rescue JSON::ParserError => e
     Rails.logger.error "Failed to parse OIDC discovery response as JSON: #{e.message}"
     raise "Invalid JSON response from OIDC discovery endpoint: #{e.message}"
-  rescue Net::TimeoutError => e
+  rescue Net::ReadTimeout, Net::OpenTimeout => e
     Rails.logger.error "OIDC discovery request timed out: #{e.message}"
     raise "OIDC discovery endpoint timed out: #{e.message}"
   rescue Net::HTTPError => e
