@@ -658,30 +658,21 @@ COOKIE_EXPIRY_HOURS=24                    # Default: 24 hours
 COOKIE_DOMAIN=yourdomain.com               # Optional: Set for cross-subdomain auth
 ```
 
-### Caddy Configuration (OIDC Forward Auth)
+### Caddy Configuration (with OIDC)
 
-Update your Caddy configuration to use forward authentication instead of basic auth:
+When using OIDC authentication, Caddy simply passes all traffic to Splat - no external auth needed:
 
 ```
 splat.booko.info {
   encode zstd gzip
 
-  # Handle /api/* and /mcp/* routes without auth (token-based)
-  handle /api/* /mcp* {
-    reverse_proxy * {
-      to http://<ip address>:3030
-    }
+  # All traffic goes to Splat - it handles OIDC internally
+  reverse_proxy * {
+    to http://<ip address>:3030
   }
 
-  # Handle all other routes with OIDC forward auth
-  handle {
-    forward_auth https://splat.booko.info {
-      uri /auth/verify?rd=https://splat.booko.info/auth/login
-      copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
-    }
-    reverse_proxy * {
-      to http://<ip address>:3030
-    }
+  log {
+    output file /var/log/caddy/splat.log
   }
 }
 ```
