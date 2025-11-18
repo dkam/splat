@@ -16,6 +16,15 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", :as => :rails_health_check
 
+  # OpenID Connect authentication
+  get "/auth/login", to: "auth#login", as: :auth_login
+  get "/auth/callback", to: "auth#callback"
+  get "/auth/failure", to: "auth#failure"
+  delete "/auth/logout", to: "auth#logout", as: :auth_logout
+
+# Header-based ForwardAuth authentication
+  get "/forward_auth/authenticate", to: "forward_auth#authenticate", as: :forward_auth_authenticate
+
   # Render dynamic PWA files from app/views/pwa/* (remember to link manifest in application.html.erb)
   # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
   # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
