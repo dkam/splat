@@ -589,8 +589,8 @@ Splat supports OpenID Connect (OIDC) authentication with automatic discovery URL
 The preferred method is using OIDC discovery URLs - just set 3 environment variables:
 
 ```bash
-# Required for OIDC authentication
-OIDC_DISCOVERY_URL=https://your-provider.com/.well-known/openid_configuration
+# Required for OIDC authentication (app automatically adds .well-known path)
+OIDC_DISCOVERY_URL=https://your-provider.com
 OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 OIDC_PROVIDER_NAME=Your Provider Name  # Optional: Display name for login button
