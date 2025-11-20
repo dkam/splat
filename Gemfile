@@ -93,3 +93,5 @@ gem "mission_control-jobs", "~> 1.1"
 
 
 gem "image_processing", "~> 1.14"
+
+gem "duckdb", "~> 1.4"

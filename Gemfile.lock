@@ -117,6 +117,8 @@ GEM
       dotenv (= 3.1.8)
       railties (>= 6.1)
     drb (2.2.3)
+    duckdb (1.4.1.1)
+      bigdecimal (>= 3.1.4)
     ed25519 (1.4.0)
     email_validator (2.2.4)
       activemodel
@@ -501,6 +503,7 @@ DEPENDENCIES
   capybara
   debug
   dotenv-rails
+  duckdb (~> 1.4)
   image_processing (~> 1.14)
   importmap-rails
   jbuilder
