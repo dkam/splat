@@ -27,7 +27,15 @@ class TokenEncryptionService
       cookie_value = cookies[COOKIE_NAME]
       return nil if cookie_value.blank?
 
+      Rails.logger.debug "Attempting to load encrypted token from cookie (size: #{cookie_value.bytesize} bytes)"
       encrypted_token = EncryptedToken.from_cookie(cookie_value)
+      Rails.logger.debug "EncryptedToken.from_cookie returned: #{encrypted_token&.class&.name}"
+
+      if encrypted_token
+        Rails.logger.debug "Token email: #{encrypted_token.user_email}, valid?: #{encrypted_token.valid?}"
+        Rails.logger.debug "Token expires_at: #{encrypted_token.expires_at}, expired?: #{encrypted_token.expired?}"
+      end
+
       return encrypted_token unless encrypted_token&.valid?
 
       # Verify JWT signature if configured

@@ -26,15 +26,27 @@ class EncryptedToken
   class << self
     # Create encrypted token from OIDC response
     def from_oidc_response(user_info, tokens, provider)
+      email = user_info.is_a?(Hash) ? user_info["email"] : user_info.email
+      name = user_info.is_a?(Hash) ? user_info["name"] : user_info.name
+      preferred_username = user_info.is_a?(Hash) ? user_info["preferred_username"] : user_info.preferred_username
+
+      # Calculate expires_at from expires_in (seconds from now) or expires_at
+      expires_at = nil
+      if tokens.respond_to?(:expires_at) && tokens.expires_at
+        expires_at = Time.at(tokens.expires_at)
+      elsif tokens.respond_to?(:expires_in) && tokens.expires_in
+        expires_at = Time.current + tokens.expires_in.seconds
+      end
+
       new(
-        user_email: user_info.email,
-        user_name: user_info.name || user_info.preferred_username || user_info.email&.split('@')&.first,
+        user_email: email,
+        user_name: name || preferred_username || email&.split("@")&.first,
         provider: provider,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         id_token: tokens.id_token,
-        expires_at: tokens.expires_at ? Time.at(tokens.expires_at) : nil,
-        token_type: tokens.token_type || 'Bearer',
+        expires_at: expires_at,
+        token_type: tokens.token_type || "Bearer",
         authenticated_at: Time.current
       )
     end
@@ -46,7 +58,7 @@ class EncryptedToken
       begin
         # Decrypt the JSON data from cookie
         data = decrypt_cookie_data(cookie_value)
-        from_json(data)
+        from_json_class(data)
       rescue => e
         Rails.logger.error "Failed to load encrypted token from cookie: #{e.message}"
         nil
@@ -60,11 +72,34 @@ class EncryptedToken
       nil
     end
 
+    # Create instance from JSON data (class method)
+    def from_json_class(data)
+      new.tap do |token|
+        # Direct assignment of attributes
+        safe_data = data.except("encrypted_access_token", "encrypted_refresh_token", "encrypted_id_token")
+        safe_data.each do |key, value|
+          # Parse datetime fields
+          if key == "expires_at" && value.present?
+            token.send("#{key}=", Time.parse(value)) rescue nil
+          elsif key == "authenticated_at" && value.present?
+            token.send("#{key}=", Time.parse(value)) rescue nil
+          else
+            token.send("#{key}=", value) if token.respond_to?("#{key}=")
+          end
+        end
+        token.access_token = data["encrypted_access_token"] if data["encrypted_access_token"]
+        token.refresh_token = data["encrypted_refresh_token"] if data["encrypted_refresh_token"]
+        token.id_token = data["encrypted_id_token"] if data["encrypted_id_token"]
+
+        Rails.logger.debug "Restored token email: #{token.user_email}, expires_at: #{token.expires_at}"
+      end
+    end
+
     private
 
     # Decrypt cookie data using Rails message verifier
     def decrypt_cookie_data(encrypted_data)
-      verifier = Rails.application.message_verifier('encrypted_token')
+      verifier = Rails.application.message_verifier("encrypted_token")
       verifier.verify(encrypted_data)
     end
   end
@@ -94,11 +129,21 @@ class EncryptedToken
 
   # Convert to encrypted cookie format
   def to_cookie
-    data = as_json(except: [:access_token, :refresh_token, :id_token])
-    # Store sensitive tokens directly (will be encrypted by message verifier)
-    data["encrypted_access_token"] = access_token
-    data["encrypted_refresh_token"] = refresh_token
-    data["encrypted_id_token"] = id_token
+    # Explicitly build the data structure to ensure all fields are included
+    data = {
+      "user_email" => user_email,
+      "user_name" => user_name,
+      "provider" => provider,
+      "token_type" => token_type,
+      "expires_at" => expires_at&.iso8601, # Convert to string for JSON serialization
+      "authenticated_at" => authenticated_at&.iso8601,
+      # Store sensitive tokens directly (will be encrypted by message verifier)
+      "encrypted_access_token" => access_token,
+      "encrypted_refresh_token" => refresh_token,
+      "encrypted_id_token" => id_token
+    }
+
+    Rails.logger.debug "Cookie data: #{data.except('encrypted_access_token', 'encrypted_refresh_token', 'encrypted_id_token')}"
 
     verifier = Rails.application.message_verifier("encrypted_token")
     verifier.generate(data)
@@ -111,7 +156,11 @@ class EncryptedToken
 
   # Create instance from JSON data
   def from_json(data)
-    self.attributes = data.except("encrypted_access_token", "encrypted_refresh_token", "encrypted_id_token")
+    # Direct assignment of attributes
+    safe_data = data.except("encrypted_access_token", "encrypted_refresh_token", "encrypted_id_token")
+    safe_data.each do |key, value|
+      send("#{key}=", value) if respond_to?("#{key}=")
+    end
     self.access_token = data["encrypted_access_token"] if data["encrypted_access_token"]
     self.refresh_token = data["encrypted_refresh_token"] if data["encrypted_refresh_token"]
     self.id_token = data["encrypted_id_token"] if data["encrypted_id_token"]

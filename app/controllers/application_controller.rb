@@ -53,11 +53,10 @@ class ApplicationController < ActionController::Base
 
       unless oidc_configured?
         if SplatAuthorization.configuration_errors.any?
-          flash[:alert] = "OIDC authentication is not properly configured. #{SplatAuthorization.configuration_errors.join(' ')}"
+          render plain: "OIDC authentication is not properly configured. #{SplatAuthorization.configuration_errors.join(' ')}", status: :service_unavailable
         else
-          flash[:alert] = "Authentication is not configured. Please contact an administrator."
+          render plain: "Authentication is not configured. Please contact an administrator.", status: :service_unavailable
         end
-        redirect_to root_path
         return
       end
 

@@ -1,11 +1,11 @@
 class AuthController < ApplicationController
   skip_before_action :require_authentication, only: [:login, :callback, :failure, :forward_auth]
-  before_action :check_rate_limit, only: [:login, :callback]
+  # before_action :check_rate_limit, only: [:login, :callback]
 
   # GET /auth/login - Redirect user to OIDC provider
   def login
     unless oidc_configured?
-      redirect_to root_path, alert: "Authentication is not configured. Please contact an administrator."
+      render plain: "Authentication is not configured. Please contact an administrator.", status: :service_unavailable
       return
     end
 
@@ -18,8 +18,8 @@ class AuthController < ApplicationController
 
     # Build authorization URI
     auth_params = {
-      scope: 'openid email profile',
-      response_type: 'code',
+      scope: "openid email profile",
+      response_type: "code",
       state: session[:auth_state],
       redirect_uri: oidc_client.redirect_uri
     }
@@ -27,8 +27,9 @@ class AuthController < ApplicationController
     # Add PKCE if required
     if pkce_required?
       auth_params[:code_challenge] = PKCE.code_challenge(session[:auth_code_verifier])
-      auth_params[:code_challenge_method] = 'S256'
+      auth_params[:code_challenge_method] = "S256"
     end
+    Rails.logger.info("About to redurect")
 
     # Redirect to OIDC provider
     redirect_to oidc_client.authorization_uri(auth_params), allow_other_host: true
@@ -45,45 +46,196 @@ class AuthController < ApplicationController
     state = params[:state]
     expected_state = session.delete(:auth_state)
 
+    Rails.logger.debug "OAuth state: received=#{state}, expected=#{expected_state}"
+
     if state.blank? || state != expected_state
       Rails.logger.error "OAuth state mismatch: expected #{expected_state}, got #{state}"
       redirect_to root_path, alert: "Invalid authentication request. Please try again."
       return
     end
 
+    # Check if we already have a code (possible double submission or expired code)
+    if session[:auth_code_used]
+      Rails.logger.warn "Authorization code already used for state: #{expected_state} - starting fresh authentication"
+      session.delete(:auth_code_used)  # Clear the flag
+      session.delete(:auth_state)      # Clear the old state
+      redirect_to auth_login_path, notice: "Authentication session expired. Please try again."
+      return
+    end
+
+    # Mark this code as used to prevent double submission
+    session[:auth_code_used] = true
+
     # Exchange authorization code for tokens
     begin
-      token_params = {
-        code: params[:code],
-        redirect_uri: oidc_redirect_uri,
-        state: state
-      }
+      auth_code = params[:code]
+      Rails.logger.debug "Authorization code: #{auth_code&.first(10)}..."
 
-      # Add PKCE verifier if required
-      if pkce_required?
-        code_verifier = session.delete(:auth_code_verifier)
-        token_params[:code_verifier] = code_verifier
+      # Use the OpenIDConnect gem's built-in token exchange
+      begin
+        # Build token request parameters
+        token_params = {
+          "grant_type" => "authorization_code",
+          "code" => auth_code,
+          "redirect_uri" => oidc_redirect_uri,
+          "client_id" => ENV.fetch("OIDC_CLIENT_ID"),
+          "client_secret" => ENV.fetch("OIDC_CLIENT_SECRET")
+        }
+
+        # Add PKCE verifier if required
+        if pkce_required?
+          code_verifier = session.delete(:auth_code_verifier)
+          if code_verifier
+            token_params["code_verifier"] = code_verifier
+            Rails.logger.debug "PKCE verifier added: #{code_verifier.present?}"
+          else
+            Rails.logger.error "PKCE required but no code_verifier found in session"
+            redirect_to auth_login_path, alert: "Authentication session expired. Please try again."
+            return
+          end
+        end
+
+        # Make token request directly to avoid gem issues
+        uri = URI.parse(oidc_client.token_endpoint)
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == "https"
+        http.open_timeout = 10
+        http.read_timeout = 10
+
+        request = Net::HTTP::Post.new(uri.request_uri)
+        request.set_form_data(token_params)
+        request["Content-Type"] = "application/x-www-form-urlencoded"
+        request["Accept"] = "application/json"
+
+        response = http.request(request)
+
+        unless response.is_a?(Net::HTTPSuccess)
+          error_body = response.body
+          Rails.logger.error "Token request failed: #{response.code} #{response.message} - #{error_body}"
+
+          # Handle common OAuth errors
+          if response.code == "400" && error_body.include?("invalid_grant")
+            redirect_to auth_login_path, notice: "Authentication session expired. Please try again."
+          else
+            redirect_to auth_login_path, alert: "Token exchange failed: #{error_body}"
+          end
+          return
+        end
+
+        token_data = JSON.parse(response.body)
+
+        # Create access token object from response
+        client = OpenIDConnect::Client.new(
+          identifier: ENV.fetch("OIDC_CLIENT_ID"),
+          secret: ENV.fetch("OIDC_CLIENT_SECRET"),
+          authorization_endpoint: oidc_client.authorization_endpoint,
+          token_endpoint: oidc_client.token_endpoint,
+          userinfo_endpoint: oidc_client.userinfo_endpoint,
+          redirect_uri: oidc_redirect_uri
+        )
+
+        # Create an access token from the response
+        access_token = OpenIDConnect::AccessToken.new(
+          client: client,
+          access_token: token_data["access_token"],
+          refresh_token: token_data["refresh_token"],
+          expires_in: token_data["expires_in"],
+          id_token: token_data["id_token"]
+        )
+
+        tokens = access_token
+        Rails.logger.debug "Token exchange successful via manual request"
+      rescue => e
+        # Check if this is an OAuth protocol error (used/invalid codes)
+        error_message = e.message.to_s.downcase
+        if error_message.include?('invalid_grant') ||
+           error_message.include?('code') && error_message.include?('used') ||
+           error_message.include?('expired') ||
+           error_message.include?('authorization_code')
+          Rails.logger.error "OAuth token exchange error (used/invalid code): #{e.message}"
+          Rails.logger.info "Redirecting to fresh login due to token exchange failure"
+          redirect_to auth_login_path, notice: "Authentication session expired. Please try again."
+          return
+        else
+          Rails.logger.error "Token exchange failed via gem: #{e.class.name}: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
+          redirect_to auth_login_path, alert: "Token exchange failed: #{e.message}"
+          return
+        end
       end
 
-      # Exchange code for access token
-      tokens = oidc_client.authorization_code_callback(token_params)
+      # Try to get user info from ID token first, fallback to userinfo endpoint
+      user_info = nil
 
-      # Get user information
-      user_info = oidc_client.userinfo(tokens.access_token)
+      # First try to extract from ID token (JWT) - more efficient
+      begin
+        id_token = token_data["id_token"]
+        if id_token.present?
+          # Decode JWT without signature verification for now (OIDC provider should be trusted)
+          # In production, you should verify the signature using the provider's JWKS
+          jwt_payload = JWT.decode(id_token, nil, false).first
+          user_info = jwt_payload
+          Rails.logger.debug "User info extracted from ID token: #{user_info.except("exp", "iat", "auth_time")}"
+        end
+      rescue JWT::DecodeError => e
+        Rails.logger.warn "Failed to decode ID token, will try userinfo endpoint: #{e.message}"
+      rescue => e
+        Rails.logger.warn "Failed to extract user info from ID token, will try userinfo endpoint: #{e.class.name}: #{e.message}"
+      end
+
+      # Fallback to userinfo endpoint if ID token didn't work
+      if user_info.blank?
+        begin
+          uri = URI.parse(oidc_client.userinfo_endpoint)
+          http = Net::HTTP.new(uri.host, uri.port)
+          http.use_ssl = uri.scheme == "https"
+          http.open_timeout = 10
+          http.read_timeout = 10
+
+          request = Net::HTTP::Get.new(uri.request_uri)
+          request["Authorization"] = "Bearer #{tokens.access_token}"
+          request["Accept"] = "application/json"
+
+          response = http.request(request)
+
+          unless response.is_a?(Net::HTTPSuccess)
+            Rails.logger.error "Userinfo request failed: #{response.code} #{response.message} - #{response.body}"
+            redirect_to auth_login_path, alert: "Failed to retrieve user information"
+            return
+          end
+
+          user_info = JSON.parse(response.body)
+          Rails.logger.debug "Userinfo retrieved successfully via manual request"
+        rescue => e
+          Rails.logger.error "Failed to get userinfo: #{e.class.name}: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
+          redirect_to auth_login_path, alert: "Failed to retrieve user information"
+          return
+        end
+      end
+
+      # Ensure we have user info at this point
+      if user_info.blank?
+        Rails.logger.error "Unable to get user information from ID token or userinfo endpoint"
+        redirect_to auth_login_path, alert: "Failed to retrieve user information"
+        return
+      end
 
       # Process authentication
+      Rails.logger.info "About to process authentication..."
       handle_authentication(user_info, tokens)
+      Rails.logger.info "Authentication processing completed"
 
-    rescue OpenIDConnect::Exception => e
-      Rails.logger.error "OIDC protocol error: #{e.message}"
-      redirect_to root_path, alert: "Authentication failed: #{e.message}"
-    rescue Rack::OAuth2::Client::Error => e
-      Rails.logger.error "OAuth2 client error: #{e.message}"
-      redirect_to root_path, alert: "Authentication failed: #{e.message}"
     rescue => e
-      Rails.logger.error "OIDC callback error: #{e.message}"
+      # Catch any remaining errors
+      Rails.logger.error "OIDC callback error: #{e.class.name}: #{e.message}"
       Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
-      redirect_to root_path, alert: "Authentication failed: #{e.message}"
+      redirect_to auth_login_path, alert: "Authentication failed: #{e.message}"
+    ensure
+      # Always clear session flags to prevent double submission
+      session.delete(:auth_code_used)
+      session.delete(:auth_state)
+      session.delete(:auth_code_verifier)
     end
   end
 
@@ -94,7 +246,7 @@ class AuthController < ApplicationController
 
     Rails.logger.error "OIDC authentication failure: #{error} - #{description}"
 
-    redirect_to root_path, alert: "Authentication failed: #{description}"
+    render plain: "Authentication failed: #{description}", status: :bad_request
   end
 
   # GET /auth/forward_auth - ForwardAuth endpoint for reverse proxies
@@ -136,19 +288,34 @@ class AuthController < ApplicationController
   private
 
   def handle_authentication(user_info, tokens)
-    email = user_info.email
-    name = user_info.name || user_info.preferred_username || email&.split('@')&.first
-    provider = OidcConfig.provider_name
+    Rails.logger.info "Starting handle_authentication..."
+
+    # user_info is now a Hash, not an object with methods
+    email = user_info['email']
+    name = user_info['name'] || user_info['preferred_username'] || email&.split('@')&.first
+    provider = SplatAuthorization.provider_name
+
+    Rails.logger.info "User info extracted: email=#{email}, name=#{name}, provider=#{provider}"
 
     # Check if user is authorized
     unless SplatAuthorization.authorized?(email)
       Rails.logger.warn "Unauthorized login attempt: #{email} from #{provider}"
-      redirect_to root_path, alert: "Access denied. Your email (#{email}) is not authorized to access this application."
+      render plain: "Access denied. Your email (#{email}) is not authorized to access this application.", status: :forbidden
       return
     end
 
+    Rails.logger.info "User authorized: #{email}"
+
     # Create encrypted token from OIDC response
-    encrypted_token = EncryptedToken.from_oidc_response(user_info, tokens, provider)
+    begin
+      encrypted_token = EncryptedToken.from_oidc_response(user_info, tokens, provider)
+      Rails.logger.info "Encrypted token created successfully"
+    rescue => e
+      Rails.logger.error "Failed to create encrypted token: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
+      render plain: "Failed to process authentication: #{e.message}", status: :internal_server_error
+      return
+    end
 
     # Store token in encrypted cookie
     if TokenEncryptionService.store_token(cookies, encrypted_token)
@@ -160,6 +327,7 @@ class AuthController < ApplicationController
       return
     end
 
+    Rails.logger.info "Redirecting to root path with success message"
     # Redirect to intended page or root
     redirect_to session.delete(:return_to) || root_path, notice: "Welcome #{name}!"
   end
@@ -204,48 +372,55 @@ class AuthController < ApplicationController
   end
 
   def config_from_discovery
-    base_url = ENV.fetch('OIDC_DISCOVERY_URL')
-    # Ensure the discovery URL includes the well-known path (using correct OIDC standard with hyphen)
-    if base_url.include?('/.well-known/openid_configuration') || base_url.include?('/.well-known/openid-configuration')
-      discovery_url = base_url
-    else
-      discovery_url = "#{base_url.chomp('/')}/.well-known/openid-configuration"
-    end
-    Rails.logger.info "Loading OIDC configuration from discovery URL: #{discovery_url}"
+    Rails.logger.info("Loading OIDC From discovery")
+    Rails.cache.fetch("auth:oidc-configuration", expires_in: 5.minutes) do
 
-    uri = URI.parse(discovery_url)
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = uri.scheme == 'https'
-    http.open_timeout = 5
-    http.read_timeout = 5
+      base_url = ENV.fetch("OIDC_DISCOVERY_URL")
+      # Ensure the discovery URL includes the well-known path (using correct OIDC standard with hyphen)
+      discovery_path = "/.well-known/openid-configuration"
+      discovery_url = if base_url.include?(discovery_path)
+        base_url
+      else
+        "#{base_url.chomp("/")}/#{discovery_path}"
+      end
+      Rails.logger.info "Loading OIDC configuration from discovery URL: #{discovery_url}"
 
-    response = http.get(uri.request_uri)
-
-    # Handle HTTP redirects
-    if response.is_a?(Net::HTTPRedirection)
-      redirect_uri = URI.parse(response['location'])
-      Rails.logger.info "Following redirect to: #{redirect_uri}"
-      uri = redirect_uri
+      uri = URI.parse(discovery_url)
       http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = uri.scheme == 'https'
+      http.use_ssl = uri.scheme == "https"
       http.open_timeout = 5
       http.read_timeout = 5
+
       response = http.get(uri.request_uri)
+
+      # Handle HTTP redirects
+      if response.is_a?(Net::HTTPRedirection)
+        redirect_uri = URI.parse(response["location"])
+        Rails.logger.info "Following redirect to: #{redirect_uri}"
+        uri = redirect_uri
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == "https"
+        http.open_timeout = 5
+        http.read_timeout = 5
+        response = http.get(uri.request_uri)
+      end
+
+      # Check for successful response
+      unless response.is_a?(Net::HTTPSuccess)
+        raise "OIDC discovery endpoint returned #{response.code}: #{response.message}"
+      end
+
+      discovery_data = JSON.parse(response.body).with_indifferent_access
+
+      {
+        authorization_endpoint: discovery_data[:authorization_endpoint],
+        token_endpoint: discovery_data[:token_endpoint],
+        userinfo_endpoint: discovery_data[:userinfo_endpoint],
+        jwks_uri: discovery_data[:jwks_uri]
+      }
+
+      # discovery_data
     end
-
-    # Check for successful response
-    unless response.is_a?(Net::HTTPSuccess)
-      raise "OIDC discovery endpoint returned #{response.code}: #{response.message}"
-    end
-
-    discovery_data = JSON.parse(response.body).with_indifferent_access
-
-    {
-      authorization_endpoint: discovery_data[:authorization_endpoint],
-      token_endpoint: discovery_data[:token_endpoint],
-      userinfo_endpoint: discovery_data[:userinfo_endpoint],
-      jwks_uri: discovery_data[:jwks_uri]
-    }
   rescue JSON::ParserError => e
     Rails.logger.error "Failed to parse OIDC discovery response as JSON: #{e.message}"
     raise "Invalid JSON response from OIDC discovery endpoint: #{e.message}"
@@ -269,7 +444,8 @@ class AuthController < ApplicationController
   end
 
   def oidc_redirect_uri
-    "#{ENV.fetch('RAILS_HOST_PROTOCOL', 'http')}://#{ENV.fetch('RAILS_HOST', 'localhost:3000')}/auth/callback"
+    protocol = Rails.env.development? ? 'http' : ENV.fetch('RAILS_HOST_PROTOCOL', 'https')
+    "#{protocol}://#{ENV.fetch('SPLAT_HOST', 'localhost:3030')}/auth/callback"
   end
 
   def pkce_required?
@@ -299,13 +475,14 @@ class AuthController < ApplicationController
     extend self
 
     def code_verifier
-      # Generate a random 43-128 character string
-      SecureRandom.urlsafe_base64(32).tr('=_-', '')[0, 64]
+      # Generate a random 43-128 character string using proper base64url encoding
+      # This generates 32 bytes = 256 bits, then base64url encode = 43 characters minimum
+      SecureRandom.urlsafe_base64(32)
     end
 
     def code_challenge(verifier)
-      # Base64 URL encode the SHA256 hash of the verifier
-      Digest::SHA256.base64digest(verifier).tr('+=/', '-_').tr("\n", '')
+      # Base64 URL encode the SHA256 hash of the verifier with no padding
+      Digest::SHA256.base64digest(verifier).tr("+/", "-_").tr("=", "")
     end
   end
 end

@@ -19,17 +19,23 @@ module SplatAuthorization
 
     # Check if OIDC is configured and ready
     def oidc_configured?
-      OidcConfig.configured?
+      oidc_config.present?
     end
 
     # Get provider display name
     def provider_name
-      OidcConfig.provider_name
+      ENV.fetch('OIDC_PROVIDER_NAME', 'OIDC Provider')
     end
 
     # Get configuration errors for display
     def configuration_errors
-      OidcConfig.configuration_errors
+      @configuration_errors ||= begin
+        errors = []
+        errors << "OIDC_CLIENT_ID is required" unless ENV['OIDC_CLIENT_ID'].present?
+        errors << "OIDC_CLIENT_SECRET is required" unless ENV['OIDC_CLIENT_SECRET'].present?
+        errors << "OIDC_DISCOVERY_URL or individual endpoints are required" unless oidc_config.present?
+        errors
+      end
     end
 
     # Get current authentication mode
@@ -80,6 +86,19 @@ module SplatAuthorization
     end
 
     private
+
+    # Check if OIDC configuration is present
+    def oidc_config
+      @oidc_config ||= begin
+        if ENV['OIDC_DISCOVERY_URL'].present?
+          ENV['OIDC_DISCOVERY_URL']
+        elsif ENV['OIDC_CLIENT_ID'].present? && ENV['OIDC_CLIENT_SECRET'].present?
+          true  # Individual endpoint configuration
+        else
+          nil
+        end
+      end
+    end
 
     def allowed_emails
       @allowed_emails ||= ENV.fetch('SPLAT_ALLOWED_USERS', '').split(',').map(&:strip).reject(&:blank?).map(&:downcase)
@@ -240,11 +259,7 @@ module SplatAuthorization
     end
   end
 
-  # Check if we're using ForwardAuth for this request
-  def forward_auth_request?
-    @current_forward_auth_user.present?
-  end
-
+  
   # Clear all authentication data (both encrypted cookies and sessions)
   def clear_authentication!
     # Clear encrypted token cookie
@@ -345,7 +360,8 @@ module SplatAuthorization
   end
 
   def oidc_redirect_uri_for_refresh
-    "#{ENV.fetch('RAILS_HOST_PROTOCOL', 'http')}://#{ENV.fetch('RAILS_HOST', 'localhost:3000')}/auth/callback"
+    protocol = Rails.env.development? ? 'http' : ENV.fetch('RAILS_HOST_PROTOCOL', 'https')
+    "#{protocol}://#{ENV.fetch('SPLAT_HOST', 'localhost:3030')}/auth/callback"
   end
 
   end
