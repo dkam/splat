@@ -3,15 +3,15 @@ Use use the oauth
 
 # Splat - Lightweight Error Tracker
 
-This software is experiemental. If you'd like to try it out, find bugs, security flaws and improvements, please do. 
+This software is beta quality. If you'd like to try it out, find bugs, security flaws and improvements, please do.  
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
 
-This app has zero authentication. I run it within tailscale and expose it via Caddy + Basic Auth, but the data ingestion is internal to tailscale. I'm planning to add OIDC.
+This app has zero authentication by default but supports OIDC.
 
 It has an (awesome) MCP endpoint. You need to set an environment variable `MCP_AUTH_TOKEN` in order to use it. The end point is /mcp.
 
-A large percentage of it is written with GLM 4.6 and Sonnet 4.5. It is partly an experiement in using SQLite extensively in a write heavy service. Will it blend, or will I need to switch to PostgreSQL? Lets find out!
+A large percentage of it is written with GLM 4.6 and Sonnet 4.5. It was partly an experiement in using SQLite extensively in a write heavy service. It's performed well enough for my use case.
 
 I've only used Splat with Rails, but there's no reason it shouldn't work with other systems. Happy to accept pull requests for wider compatibility.
 
@@ -93,7 +93,6 @@ SMTP_STARTTLS_AUTO=true
 SPLAT_HOST=splat.example.com
 SPLAT_INTERNAL_HOST=100.x.x.x:3030  # Your Tailscale IP maybe? Used for displaying alternate DSN
 
-
 # For local development with self-signed certificates, use:
 SMTP_OPENSSL_VERIFY_MODE=none
 
@@ -109,22 +108,6 @@ SPLAT_EMAIL_NOTIFICATIONS=true
 
 # In production, emails are sent by default
 ```
-
-### Development
-
-#### Services
-- **Solid Queue**: Background job processing (`bin/jobs`)
-- **Solid Cache**: In-memory caching
-- **Solid Cable**: Real-time updates (optional)
-
-#### Email Previews
-View email templates at `http://localhost:3000/rails/mailers`
-
-### Deployment
-
-Deploy using Kamal, Docker, or traditional Rails deployment methods.
-
-**Important**: Configure SMTP settings before deploying to production to ensure email notifications work correctly.
 
 ## Deployment
 
@@ -183,12 +166,16 @@ services:
         max-file: "3"
 ```
 
-## Caddy Configuration
+## Authentication
 
-Assuming a Caddy server which forwards traffic to Splat. 
+1. None: Anyone can access splat - ensure it's running internal / within a VPN
+2. Basic Auth: Use your webserver to implement Basic Auth, avoiding protecting /api/ and /mcp/ endpoints as they're already authenticated
+3. OIDC: Set the 
+
 
 ### Basic Auth
-This configuration uses basic auth, but allows free access to the `/api/` and `/mcp/` endpoints.
+Assuming a Caddy server which forwards traffic to Splat. 
+The following configuration uses basic auth, but allows free access to the `/api/` and `/mcp/` endpoints.
 
 ```
 splat.booko.info {
@@ -219,32 +206,22 @@ splat.booko.info {
 
 Generate the basic auth hash with `docker compose exec -it caddy caddy hash-password`
 
-### Forward Auth
 
+### OIDC
+
+Splat supports OIDC
 ```
-splat.booko.info {
-  encode zstd gzip
+OIDC_CLIENT_ID=<OIDC CLIENT ID>
+OIDC_CLIENT_SECRET=<OIDC CLIENT SECRET>
+OIDC_DISCOVERY_URL=<OIDC DISCOVERY URL>
 
-  # Handle /api/* and /mcp/* routes without basic auth (both use token auth)
-  handle /api/* /mcp* {
-    reverse_proxy * {
-      to http://<ip address>:3030
-    }
-  }
+SPLAT_ALLOWED_USERS="Comma seperated list of email addresses allowed access Splat"
+SPLAT_ALLOWED_DOMAINS="Comma seperated list of email domains allowed access Splat"
 
-
-  handle {
-    forward_auth https://auth.booko.info {
-      uri /api/verify?rd=https://auth.booko.info
-      copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
-    }
-    reverse_proxy * {
-      to http://<ip address>:3030
-    }
-  }
-}
+# Optional
+OIDC_PROVIDER_NAME=<OIDC Providername>
+OIDC_REQUIRE_PKCE=<true/false>
 ```
-
 
 ## Performance
 
@@ -647,35 +624,6 @@ OIDC_JWKS_ENDPOINT=https://your-provider.com/.well-known/jwks.json
 OIDC_PROVIDER_NAME=Your Provider
 ```
 
-### Optional Configuration
-
-```bash
-# JWT signature verification (recommended for production)
-OIDC_VERIFY_JWT_SIGNATURE=true
-
-# Cookie settings
-COOKIE_EXPIRY_HOURS=24                    # Default: 24 hours
-COOKIE_DOMAIN=yourdomain.com               # Optional: Set for cross-subdomain auth
-```
-
-### Caddy Configuration (with OIDC)
-
-When using OIDC authentication, Caddy simply passes all traffic to Splat - no external auth needed:
-
-```
-splat.booko.info {
-  encode zstd gzip
-
-  # All traffic goes to Splat - it handles OIDC internally
-  reverse_proxy * {
-    to http://<ip address>:3030
-  }
-
-  log {
-    output file /var/log/caddy/splat.log
-  }
-}
-```
 
 ### How It Works
 
@@ -707,3 +655,14 @@ splat.booko.info {
   SMTP_STARTTLS_AUTO' - default 'true'
   SMTP_OPENSSL_VERIFY_MODE - default'none').to_sym
   ```
+
+### Development
+
+#### Services
+- **Solid Queue**: Background job processing (`bin/jobs`)
+- **Solid Cache**: In-memory caching
+- **Solid Cable**: Real-time updates (optional)
+
+#### Email Previews
+View email templates at `http://localhost:3000/rails/mailers`
+

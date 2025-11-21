@@ -39,41 +39,33 @@
               </div>
 
               <!-- Logout Button -->
-              <%= form_with(url: auth_logout_path, method: :delete, class: "inline", data: { turbo: false }) do |form| %>
-                <%= form.button type: :submit,
-                    class: "inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors" do %>
-                  <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-                  </svg>
-                  Logout
-                <% end %>
+              <%= button_to logout_path, method: :delete, class: "inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors", data: { turbo: false }, form: { class: "inline" } do %>
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                </svg>
+                Logout
               <% end %>
             </div>
           <% else %>
             <!-- Login Options -->
             <div class="flex items-center space-x-2">
-              <% if oidc_configured? %>
+              <% if SplatAuthorization.oidc_configured? %>
                 <!-- OIDC Login -->
-                <%= link_to auth_login_path,
+                <%= link_to login_path,
                     class: "inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors",
-                    title: "Login with OpenID Connect",
-                    data: { turbo: false } do %>
+                    title: "Login with OpenID Connect" do %>
                   <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
                   </svg>
-                  OIDC Login
+                  Login
                 <% end %>
               <% end %>
 
-              <!-- ForwardAuth Info -->
-              <span class="text-xs text-gray-500 italic" title="Header-based ForwardAuth should be handled by reverse proxy">
-                or use ForwardAuth
-              </span>
-            </div>
+              </div>
 
             <!-- Configuration Status -->
-            <% if !oidc_configured? && SplatAuthorization.configuration_errors.any? %>
-              <div class="text-xs text-red-600 italic" title="<%= SplatAuthorization.configuration_errors.join(', ') %>">
+            <% if !SplatAuthorization.oidc_configured? %>
+              <div class="text-xs text-red-600 italic">
                 OIDC not configured
               </div>
             <% end %>
