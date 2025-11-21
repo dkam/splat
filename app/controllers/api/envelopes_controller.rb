@@ -3,7 +3,6 @@
 class Api::EnvelopesController < ApplicationController
   skip_before_action :verify_authenticity_token
   skip_before_action :require_authentication
-  skip_before_action :refresh_access_token_if_needed
 
   # POST /api/:project_id/envelope/
   def create
