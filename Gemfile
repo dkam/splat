@@ -78,7 +78,7 @@ group :development do
 
   # Preview emails in browser instead of sending
   gem "letter_opener"
-  gem "standard", "~> 1.51"
+  gem "standard", "~> 1.52"
 end
 
 group :test do
