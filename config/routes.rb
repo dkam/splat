@@ -16,11 +16,11 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", :as => :rails_health_check
 
-  # Simplified OIDC authentication
-  get "/login", to: "oidc_auth#login", as: :login
-  get "/login/start", to: "oidc_auth#start_oidc"
-  get "/auth/callback", to: "oidc_auth#callback"
-  delete "/logout", to: "oidc_auth#logout", as: :logout
+  # Simplified OIDC authentication (TODO: implement oidc_auth controller)
+  # get "/login", to: "oidc_auth#login", as: :login
+  # get "/login/start", to: "oidc_auth#start_oidc"
+  # get "/auth/callback", to: "oidc_auth#callback"
+  # delete "/logout", to: "oidc_auth#logout", as: :logout
 
   # Render dynamic PWA files from app/views/pwa/* (remember to link manifest in application.html.erb)
   # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
@@ -50,7 +50,11 @@ Rails.application.routes.draw do
   end
   
   # MCP (Model Context Protocol) endpoint
- namespace :mcp, defaults: {format: "json"} do
-   match "/", to: "mcp#handle_mcp_request", via: [:get, :post, :put, :patch, :delete, :head, :options]
- end
+  namespace :mcp, defaults: {format: "json"} do
+    match "/", to: "mcp#handle_mcp_request", via: [:get, :post, :put, :patch, :delete, :head, :options]
+  end
+
+  # Settings (singleton resource)
+  get "settings", to: "settings#index"
+  put "settings", to: "settings#update"
 end

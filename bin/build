@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Default to both platforms if no argument provided
+# Pass "amd64" or "arm64" to build just one platform
+PLATFORMS=${1:-"linux/amd64,linux/arm64"}
+
+if [ "$1" = "amd64" ]; then
+  PLATFORMS="linux/amd64"
+elif [ "$1" = "arm64" ]; then
+  PLATFORMS="linux/arm64"
+fi
+
+AMD_host="dkam@100.111.180.71"
+
+echo "Building for platforms: $PLATFORMS"
+echo "Using multi-platform build with remote builders"
+echo "AMD host: $AMD_host"
+
+# Setup multi-builder if it doesn't exist
+if ! docker buildx ls | grep -q "multi-builder"; then
+  echo "Creating multi-builder with remote AMD host..."
+  docker buildx create --name multi-builder \
+    --driver docker-container \
+    --platform linux/arm64 \
+    --use
+  docker buildx create --name multi-builder --append \
+    --driver docker-container \
+    --platform linux/amd64 \
+    ssh://$AMD_host
+fi
+
+# Update VERSION file with current version
+echo "Updating VERSION file..."
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')")
+echo "$VERSION" > VERSION
+echo "VERSION updated to: $(cat VERSION)"
+
+# Use the multi-builder
+docker buildx use multi-builder
+
+# docker buildx build \
+#  --platform "$PLATFORMS" \
+#   -t reg.tbdb.info/splat:latest \
+#   -t reg.tbdb.info/splat:$(git rev-parse HEAD) \
+#   --no-cache \
+#   --push .
+
+docker buildx build \
+  --platform "$PLATFORMS" \
+  -t reg.tbdb.info/splat:latest \
+  -t reg.tbdb.info/splat:$(git rev-parse HEAD) \
+  --no-cache \
+  --push .
+
+
+#  -t ghcr.io/dkam/splat:latest \
+#  -t ghcr.io/dkam/splat:$(git rev-parse HEAD) \

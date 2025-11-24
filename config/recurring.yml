@@ -10,11 +10,11 @@
 #     schedule: at 5am every day
 
 development:
-  cleanup_old_events:
-    class: "CleanupEventsJob"
+  data_retention_cleanup:
+    class: "DataRetentionJob"
     schedule: at 2am every day
 
 production:
-  cleanup_old_events:
-    class: "CleanupEventsJob"
+  data_retention_cleanup:
+    class: "DataRetentionJob"
     schedule: at 2am every day

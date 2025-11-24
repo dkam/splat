@@ -10,14 +10,15 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2025_10_21_125803) do
+ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.integer "duration", default: 0, null: false
     t.string "environment"
     t.string "event_id", null: false
     t.string "exception_type"
     t.text "exception_value"
-    t.json "fingerprint"
+    t.string "fingerprint", limit: 1000
     t.bigint "issue_id"
     t.text "message"
     t.json "payload"
@@ -30,6 +31,7 @@ ActiveRecord::Schema[8.1].define(version: 2025_10_21_125803) do
     t.datetime "timestamp", null: false
     t.string "transaction_name"
     t.datetime "updated_at", null: false
+    t.index ["duration"], name: "index_events_on_duration"
     t.index ["environment"], name: "index_events_on_environment"
     t.index ["event_id"], name: "index_events_on_event_id", unique: true
     t.index ["exception_type"], name: "index_events_on_exception_type"
@@ -69,6 +71,16 @@ ActiveRecord::Schema[8.1].define(version: 2025_10_21_125803) do
     t.datetime "updated_at", null: false
     t.index ["public_key"], name: "index_projects_on_public_key", unique: true
     t.index ["slug"], name: "index_projects_on_slug", unique: true
+  end
+
+  create_table "settings", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "duckdb_migration_batch_size", default: 1000, null: false
+    t.boolean "enable_duckdb_migration", default: true, null: false
+    t.integer "events_stats_retention_days", default: 90, null: false
+    t.integer "payload_retention_days", default: 1, null: false
+    t.integer "transactions_stats_retention_days", default: 30, null: false
+    t.datetime "updated_at", null: false
   end
 
   create_table "transactions", force: :cascade do |t|

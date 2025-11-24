@@ -1,0 +1,21 @@
+#!/bin/bash
+
+AMD_host="dkam@100.111.180.71"
+
+echo "Checking Docker setup on $AMD_host..."
+
+# Check if Docker is installed
+echo "1. Checking if Docker is installed:"
+ssh $AMD_host "which docker" || echo "❌ Docker not found"
+
+# Check if Docker daemon is running
+echo -e "\n2. Checking if Docker daemon is running:"
+ssh $AMD_host "docker info" 2>/dev/null && echo "✅ Docker daemon running" || echo "❌ Docker daemon not running"
+
+# Check Docker version
+echo -e "\n3. Docker version (if installed):"
+ssh $AMD_host "docker --version" 2>/dev/null || echo "❌ Cannot get Docker version"
+
+# Check if we can run Docker commands
+echo -e "\n4. Testing Docker access:"
+ssh $AMD_host "docker ps" 2>/dev/null && echo "✅ Can run Docker commands" || echo "❌ Cannot run Docker commands"

@@ -1,0 +1,106 @@
+<div class="max-w-4xl mx-auto px-4 py-8">
+  <div class="flex justify-between items-center mb-8">
+    <h1 class="font-bold text-3xl">Data Retention Settings</h1>
+    <%#= link_to "← Back to Projects", projects_path, class: "text-blue-600 hover:text-blue-800" %>
+  </div>
+
+  <% if flash[:notice] %>
+    <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-6">
+      <%= flash[:notice] %>
+    </div>
+  <% end %>
+
+  <% if flash[:alert] %>
+    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+      <%= flash[:alert] %>
+    </div>
+  <% end %>
+
+  <%= form_with(model: @setting, url: settings_path, method: :put, class: "space-y-6") do |form| %>
+    <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800">Event Data Retention</h2>
+      <p class="text-gray-600 mb-4">Configure how long to keep error event data and payloads</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <%= form.label :event_payloads_retention_days, "Keep Event Payloads", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :event_payloads_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Full JSON payloads for debugging (recommended: 7 days)</p>
+        </div>
+
+        <div>
+          <%= form.label :events_data_retention_days, "Keep Event Records", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :events_data_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Basic event data for trend analysis (recommended: 30 days)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800">Transaction Data Retention</h2>
+      <p class="text-gray-600 mb-4">Configure how long to keep performance transaction data and measurements</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <%= form.label :transaction_measurements_retention_days, "Keep Transaction Measurements", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :transaction_measurements_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Detailed performance measurements (recommended: 7 days)</p>
+        </div>
+
+        <div>
+          <%= form.label :transactions_data_retention_days, "Keep Transaction Records", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :transactions_data_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Basic performance data for trends (recommended: 90 days)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800">Current Status</h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="text-center p-4 bg-gray-50 rounded">
+          <div class="text-2xl font-bold text-blue-600">
+            <%= number_with_delimiter(Event.count) %>
+          </div>
+          <div class="text-sm text-gray-600">Total Events</div>
+          <div class="text-xs text-gray-500 mt-1">
+            <%= number_with_delimiter(Event.where.not(payload: nil).count) %> with payloads
+          </div>
+        </div>
+
+        <div class="text-center p-4 bg-gray-50 rounded">
+          <div class="text-2xl font-bold text-green-600">
+            <%= number_with_delimiter(Transaction.count) %>
+          </div>
+          <div class="text-sm text-gray-600">Total Transactions</div>
+          <div class="text-xs text-gray-500 mt-1">
+            <%= number_with_delimiter(Transaction.where.not(measurements: nil).count) %> with measurements
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 p-4 bg-blue-50 rounded">
+        <div class="text-sm text-blue-800">
+          <strong>Data cleanup runs daily at 2am</strong> - Old payloads will be set to NULL and very old records deleted according to your retention settings.
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-end">
+      <%= form.submit "Update Settings", class: "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded focus:outline-none focus:shadow-outline" %>
+    </div>
+  <% end %>
+</div>
