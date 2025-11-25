@@ -11,20 +11,20 @@ class DataRetentionJob < ApplicationJob
     setting = Setting.instance
 
     # 1. Clean up old event payloads (set to NULL)
-    payload_cleanup_count = Event.where("created_at < ?", setting.event_payloads_cutoff_date)
-                                .where.not(payload: nil)
-                                .update_all(payload: nil)
+    payload_cleanup_count = Event.where("timestamp < ?", setting.event_payloads_cutoff_date)
+      .where.not(payload: nil)
+      .update_all(payload: nil)
 
     # 2. Clean up old transaction measurements (set to NULL)
-    measurements_cleanup_count = Transaction.where("created_at < ?", setting.transaction_measurements_cutoff_date)
-                                          .where.not(measurements: nil)
-                                          .update_all(measurements: nil)
+    measurements_cleanup_count = Transaction.where("timestamp < ?", setting.transaction_measurements_cutoff_date)
+      .where.not(measurements: nil)
+      .update_all(measurements: nil)
 
     # 3. Delete very old event records
-    events_deleted_count = Event.where("created_at < ?", setting.events_data_cutoff_date).delete_all
+    events_deleted_count = Event.where("timestamp < ?", setting.events_data_cutoff_date).delete_all
 
     # 4. Delete very old transaction records
-    transactions_deleted_count = Transaction.where("created_at < ?", setting.transactions_data_cutoff_date).delete_all
+    transactions_deleted_count = Transaction.where("timestamp < ?", setting.transactions_data_cutoff_date).delete_all
 
     duration = Time.current - start_time
 
