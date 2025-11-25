@@ -36,14 +36,3 @@ class CreateEvents < ActiveRecord::Migration[8.1]
     add_index :events, :environment
   end
 end
-
-    add_index :events, :event_id, unique: true
-    add_index :events, :timestamp
-    add_index :events, :exception_type
-    add_index :events, :issue_id
-    add_index :events, :environment
-    add_index :events, :platform
-    add_index :events, :transaction
-    add_index :events, [ :project_id, :event_id ], unique: true
-  end
-end

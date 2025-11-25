@@ -30,10 +30,9 @@ Rails.application.configure do
 
   # Replace the default in-process and non-durable queuing backend for Active Job.
   config.active_job.queue_adapter = :solid_queue
-  config.solid_queue.connects_to = { database: { writing: :queue } }
+  config.solid_queue.connects_to = {database: {writing: :queue}}
   config.preserve_finished_jobs = false
 
-  
   # Save emails to files instead of opening browser
   config.action_mailer.delivery_method = :file
   config.action_mailer.perform_deliveries = true

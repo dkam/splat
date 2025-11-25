@@ -33,13 +33,10 @@ ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
     t.datetime "updated_at", null: false
     t.index ["duration"], name: "index_events_on_duration"
     t.index ["environment"], name: "index_events_on_environment"
-    t.index ["event_id"], name: "index_events_on_event_id", unique: true
-    t.index ["exception_type"], name: "index_events_on_exception_type"
     t.index ["issue_id"], name: "index_events_on_issue_id"
-    t.index ["platform"], name: "index_events_on_platform"
+    t.index ["project_id", "event_id"], name: "index_events_on_project_id_and_event_id", unique: true
     t.index ["project_id"], name: "index_events_on_project_id"
     t.index ["timestamp"], name: "index_events_on_timestamp"
-    t.index ["transaction_name"], name: "index_events_on_transaction_name"
   end
 
   create_table "issues", force: :cascade do |t|
@@ -53,9 +50,8 @@ ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
     t.integer "status", default: 0, null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
-    t.index ["count"], name: "index_issues_on_count"
-    t.index ["fingerprint"], name: "index_issues_on_fingerprint", unique: true
     t.index ["last_seen"], name: "index_issues_on_last_seen"
+    t.index ["project_id", "fingerprint"], name: "index_issues_on_project_id_and_fingerprint", unique: true
     t.index ["project_id"], name: "index_issues_on_project_id"
     t.index ["status"], name: "index_issues_on_status"
   end
@@ -75,11 +71,10 @@ ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
 
   create_table "settings", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.integer "duckdb_migration_batch_size", default: 1000, null: false
-    t.boolean "enable_duckdb_migration", default: true, null: false
-    t.integer "events_stats_retention_days", default: 90, null: false
-    t.integer "payload_retention_days", default: 1, null: false
-    t.integer "transactions_stats_retention_days", default: 30, null: false
+    t.integer "event_payloads_retention_days", default: 7, null: false
+    t.integer "events_data_retention_days", default: 30, null: false
+    t.integer "transaction_measurements_retention_days", default: 7, null: false
+    t.integer "transactions_data_retention_days", default: 90, null: false
     t.datetime "updated_at", null: false
   end
 
@@ -103,14 +98,10 @@ ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
     t.datetime "updated_at", null: false
     t.integer "view_time"
     t.index ["duration"], name: "index_transactions_on_duration"
-    t.index ["environment", "timestamp"], name: "index_transactions_on_environment_and_timestamp"
-    t.index ["http_method"], name: "index_transactions_on_http_method"
-    t.index ["http_status"], name: "index_transactions_on_http_status"
     t.index ["project_id", "timestamp"], name: "index_transactions_on_project_id_and_timestamp"
+    t.index ["project_id", "transaction_id"], name: "index_transactions_on_project_id_and_transaction_id", unique: true
     t.index ["project_id"], name: "index_transactions_on_project_id"
     t.index ["timestamp"], name: "index_transactions_on_timestamp"
-    t.index ["transaction_id"], name: "index_transactions_on_transaction_id", unique: true
-    t.index ["transaction_name", "timestamp"], name: "index_transactions_on_transaction_name_and_timestamp"
     t.index ["transaction_name"], name: "index_transactions_on_transaction_name"
   end
 

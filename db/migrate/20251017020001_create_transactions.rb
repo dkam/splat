@@ -36,14 +36,3 @@ class CreateTransactions < ActiveRecord::Migration[8.1]
     add_index :transactions, :duration
   end
 end
-
-    add_index :transactions, :transaction_id, unique: true
-    add_index :transactions, :timestamp
-    add_index :transactions, :transaction_name
-    add_index :transactions, :duration
-    add_index :transactions, [ :transaction_name, :timestamp ]
-    add_index :transactions, [ :environment, :timestamp ]
-    add_index :transactions, :http_status
-    add_index :transactions, :http_method
-  end
-end
