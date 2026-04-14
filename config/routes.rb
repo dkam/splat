@@ -1,4 +1,6 @@
 Rails.application.routes.draw do
+  # OIDC Backchannel Logout
+  post "/oidc/logout", to: "oidc_auth#backchannel_logout"
   mount ActionCable.server => "/cable"
   mount MissionControl::Jobs::Engine, at: "/jobs"
 

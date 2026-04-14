@@ -908,7 +908,7 @@ module Mcp
       result += "**Last Seen:** #{issue.last_seen.strftime('%Y-%m-%d %H:%M:%S')}\n"
       result += "**Project:** #{issue.project.name}\n\n"
 
-      if recent_event
+      if recent_event && recent_event.payload
         result += "### Most Recent Stack Trace\n\n"
         frames = recent_event.payload.dig("exception", "values", 0, "stacktrace", "frames")
 
@@ -921,7 +921,11 @@ module Mcp
             result += "  at #{function} (#{filename}:#{lineno})\n"
           end
           result += "```\n"
+        else
+          result += "No stack trace available for this event.\n"
         end
+      else
+        result += "No events found for this issue.\n"
       end
 
       result

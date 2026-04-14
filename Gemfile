@@ -1,7 +1,7 @@
 source "https://rubygems.org"
 
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
-gem "rails", "~> 8.1.0"
+gem "rails", "~> 8.1.3"
 # The modern asset pipeline for Rails [https://github.com/rails/propshaft]
 gem "propshaft"
 # Use sqlite3 as the database for Active Record
@@ -34,7 +34,7 @@ gem "solid_cable"
 gem "dotenv-rails", groups: [:development, :test]
 
 # Pagination
-gem "pagy"
+gem "pagy", "~> 9.0"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false

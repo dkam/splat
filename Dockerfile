@@ -8,7 +8,7 @@
 # For a containerized dev environment, see Dev Containers: https://guides.rubyonrails.org/getting_started_with_devcontainer.html
 
 # Make sure RUBY_VERSION matches the Ruby version in .ruby-version
-ARG RUBY_VERSION=3.4.6
+ARG RUBY_VERSION=4.0.2
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 
 # Rails app lives here
@@ -18,6 +18,8 @@ WORKDIR /rails
 ARG TARGETPLATFORM
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y curl libjemalloc2 libvips sqlite3 wget unzip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
     case "$TARGETPLATFORM" in \
       "linux/amd64") \
@@ -32,8 +34,7 @@ RUN apt-get update -qq && \
     cp /tmp/duckdb/duckdb.h /tmp/duckdb/duckdb.hpp /usr/local/include/ && \
     cp /tmp/duckdb/libduckdb.so /usr/local/lib/ && \
     ldconfig && \
-    rm -rf /tmp/libduckdb.zip /tmp/duckdb && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+    rm -rf /tmp/libduckdb.zip /tmp/duckdb
 
 # Set production environment variables and enable jemalloc for reduced memory usage and latency.
 ENV RAILS_ENV="production" \

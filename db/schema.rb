@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
+ActiveRecord::Schema[8.1].define(version: 2025_11_25_092919) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration", default: 0, null: false
@@ -54,6 +54,19 @@ ActiveRecord::Schema[8.1].define(version: 2025_11_24_090039) do
     t.index ["project_id", "fingerprint"], name: "index_issues_on_project_id_and_fingerprint", unique: true
     t.index ["project_id"], name: "index_issues_on_project_id"
     t.index ["status"], name: "index_issues_on_status"
+  end
+
+  create_table "oidc_sessions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "oidc_sid", null: false
+    t.string "session_id", null: false
+    t.datetime "updated_at", null: false
+    t.string "user_email", null: false
+    t.index ["expires_at"], name: "index_oidc_sessions_on_expires_at"
+    t.index ["oidc_sid"], name: "index_oidc_sessions_on_oidc_sid", unique: true
+    t.index ["session_id"], name: "index_oidc_sessions_on_session_id"
+    t.index ["user_email"], name: "index_oidc_sessions_on_user_email"
   end
 
   create_table "projects", force: :cascade do |t|

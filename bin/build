@@ -10,7 +10,7 @@ elif [ "$1" = "arm64" ]; then
   PLATFORMS="linux/arm64"
 fi
 
-AMD_host="dkam@100.111.180.71"
+AMD_host="dkam@100.90.210.72"
 
 echo "Building for platforms: $PLATFORMS"
 echo "Using multi-platform build with remote builders"
