@@ -18,10 +18,6 @@
                 <span class="font-medium text-red-600"><%= @open_issue_counts[project.id] || 0 %></span>
               </div>
               <div class="flex justify-between">
-                <span class="text-gray-600">Total Events:</span>
-                <span class="font-medium"><%= @event_counts[project.id] || 0 %></span>
-              </div>
-              <div class="flex justify-between">
                 <span class="text-gray-600">Last Activity:</span>
                 <span class="font-medium">
                   <% if (last_at = @last_event_at[project.id]) %>

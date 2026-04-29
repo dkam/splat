@@ -6,16 +6,18 @@ class ProjectsController < ApplicationController
   def index
     @projects = Project.all.order(updated_at: :desc)
 
-    counts = Rails.cache.fetch("projects_index_counts", expires_in: 30.seconds) do
+    # Only the issues-table aggregates here — the issues table is small and indexed.
+    # Event.group(:project_id).count is a full-table scan over the (potentially huge)
+    # events table and was hanging the index page. Per-project event totals and last
+    # activity now come from the issues table (last_seen) which is cheap.
+    counts = Rails.cache.fetch("projects_index_counts/v2", expires_in: 30.seconds, race_condition_ttl: 10.seconds) do
       {
         open_issues: Issue.open.group(:project_id).count,
-        events: Event.group(:project_id).count,
-        last_event: Event.group(:project_id).maximum(:timestamp)
+        last_seen: Issue.group(:project_id).maximum(:last_seen)
       }
     end
     @open_issue_counts = counts[:open_issues]
-    @event_counts = counts[:events]
-    @last_event_at = counts[:last_event]
+    @last_event_at = counts[:last_seen]
   end
 
   def show
