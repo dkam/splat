@@ -679,13 +679,14 @@ module Mcp
       transactions = transactions.where(environment: environment) if environment.present?
       transactions = transactions.where(release: release) if release.present?
 
-      total_count = transactions.count
+      # Single pass: pull duration, db_time, view_time in one query
+      rows = transactions.pluck(:duration, :db_time, :view_time)
+      total_count = rows.size
       return render_no_data("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count == 0
 
-      # Calculate statistics
-      durations = transactions.pluck(:duration).sort
-      db_times = transactions.pluck(:db_time).compact
-      view_times = transactions.pluck(:view_time).compact
+      durations = rows.map(&:first).sort
+      db_times = rows.map { |r| r[1] }.compact
+      view_times = rows.map { |r| r[2] }.compact
 
       percentiles = calculate_percentiles(durations)
       db_percentiles = calculate_percentiles(db_times) if db_times.any?
@@ -1229,9 +1230,11 @@ module Mcp
       result += "**Before Period:** #{before_label}\n"
       result += "**After Period:** #{after_label}\n\n"
 
-      # Calculate statistics
+      # Calculate statistics — pluck once, derive count from the array
       before_durations = before_transactions.pluck(:duration).sort
       after_durations = after_transactions.pluck(:duration).sort
+      before_count = before_durations.size
+      after_count = after_durations.size
 
       before_stats = calculate_percentiles(before_durations)
       after_stats = calculate_percentiles(after_durations)
@@ -1244,7 +1247,7 @@ module Mcp
       result += "### Performance Summary\n\n"
       result += "| Metric | Before | After | Change |\n"
       result += "|--------|--------|-------|--------|\n"
-      result += "| **Requests** | #{before_transactions.count} | #{after_transactions.count} | #{format_count_change(before_transactions.count, after_transactions.count)} |\n"
+      result += "| **Requests** | #{before_count} | #{after_count} | #{format_count_change(before_count, after_count)} |\n"
 
       if before_stats[:avg] && after_stats[:avg]
         avg_change = format_percentage_change(before_stats[:avg], after_stats[:avg])

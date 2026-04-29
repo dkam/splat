@@ -20,6 +20,8 @@ class ApplicationController < ActionController::Base
   end
 
   def queue_depth
-    @queue_depth ||= SolidQueue::ReadyExecution.count
+    @queue_depth ||= Rails.cache.fetch("solid_queue_ready_count", expires_in: 5.seconds) do
+      SolidQueue::ReadyExecution.count
+    end
   end
 end

@@ -20,9 +20,13 @@ class EventsController < ApplicationController
 
     @pagy, @events = pagy(events, limit: 25)
 
-    # Get unique values for filters
-    @environments = @project.events.pluck(:environment).compact.uniq.sort
-    @exception_types = @project.events.pluck(:exception_type).compact.uniq.sort
+    # Distinct values for filter dropdowns — cached because they pluck from the full events table
+    @environments = Rails.cache.fetch("project_#{@project.id}_event_environments", expires_in: 5.minutes) do
+      @project.events.distinct.pluck(:environment).compact.sort
+    end
+    @exception_types = Rails.cache.fetch("project_#{@project.id}_event_exception_types", expires_in: 5.minutes) do
+      @project.events.distinct.pluck(:exception_type).compact.sort
+    end
   end
 
   def show

@@ -7,9 +7,12 @@ class Event < ApplicationRecord
   validates :event_id, presence: true, uniqueness: true
   validates :timestamp, presence: true
 
-  after_create_commit do
-    broadcast_refresh_to(issue)
-  end
+  # Per-event broadcasts are throttled to avoid swamping Solid Queue / Cable during error bursts.
+  # The Issue#after_update_commit callback covers issue-status changes; this only refreshes
+  # event-list views at most once per BROADCAST_THROTTLE per stream.
+  BROADCAST_THROTTLE = 5.seconds
+
+  after_create_commit :throttled_broadcast_refresh
 
   scope :recent, -> { order(timestamp: :desc) }
   scope :by_issue, ->(issue_id) { where(issue_id: issue_id) }
@@ -116,11 +119,22 @@ class Event < ApplicationRecord
 
   private
 
-  def broadcast_refresh_to(issue)
-    issue.broadcast_refresh_later
-    project.broadcast_refresh_later
-    project.broadcast_issues_refresh
-    project.broadcast_events_refresh
+  def throttled_broadcast_refresh
+    if issue&.persisted?
+      throttle_broadcast("issue:#{issue_id}") { issue.broadcast_refresh_later }
+    end
+    throttle_broadcast("project:#{project_id}:events") { project.broadcast_events_refresh }
+    throttle_broadcast("project:#{project_id}:issues") { project.broadcast_issues_refresh }
+  end
+
+  def throttle_broadcast(key)
+    cache_key = "event_broadcast_throttle:#{key}"
+    # fetch only invokes the block on a cache miss; subsequent calls within the
+    # TTL return the cached marker and skip the (expensive) broadcast enqueue.
+    Rails.cache.fetch(cache_key, expires_in: BROADCAST_THROTTLE) do
+      yield
+      true
+    end
   end
 
   def extract_fields_from_payload

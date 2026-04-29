@@ -34,13 +34,21 @@ class Issue < ApplicationRecord
 
   def self.group_event(event_payload, project)
     fingerprint = generate_fingerprint(event_payload)
-
-    find_or_create_by(project: project, fingerprint: fingerprint) do |issue|
-      issue.title = extract_title(event_payload)
-      issue.exception_type = extract_exception_type(event_payload)
-      issue.first_seen = Time.current
-      issue.last_seen = Time.current
-      issue.status = :open
+    attempts = 0
+    begin
+      find_or_create_by!(project: project, fingerprint: fingerprint) do |issue|
+        issue.title = extract_title(event_payload)
+        issue.exception_type = extract_exception_type(event_payload)
+        issue.first_seen = Time.current
+        issue.last_seen = Time.current
+        issue.status = :open
+      end
+    rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+      # Race: another worker won the INSERT between our SELECT and our INSERT.
+      # Retry once — the second find_by will see the committed row.
+      attempts += 1
+      retry if attempts < 2
+      raise
     end
   end
 

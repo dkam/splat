@@ -18,6 +18,13 @@ class IssuesController < ApplicationController
     end.recent
 
     @pagy, @issues = pagy(issues, limit: 25)
+
+    counts_by_status = Rails.cache.fetch("project_#{@project.id}_issue_counts", expires_in: 30.seconds) do
+      @project.issues.group(:status).count
+    end
+    @open_count = counts_by_status[Issue.statuses["open"]] || 0
+    @resolved_count = counts_by_status[Issue.statuses["resolved"]] || 0
+    @ignored_count = counts_by_status[Issue.statuses["ignored"]] || 0
   end
 
   def show

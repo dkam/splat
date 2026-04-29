@@ -8,6 +8,17 @@ default: &default
   adapter: sqlite3
   max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
   timeout: 5000
+  # WAL with synchronous=NORMAL is the high-throughput SQLite config:
+  # readers don't block writers, single fsync per checkpoint instead of per
+  # commit. mmap_size + cache_size reduce IO under burst-write load.
+  pragmas:
+    journal_mode: wal
+    synchronous: normal
+    foreign_keys: "on"
+    busy_timeout: 5000
+    cache_size: -20000      # ~20 MB of page cache (negative = KB)
+    mmap_size: 134217728    # 128 MB memory-mapped IO
+    temp_store: memory
 
 development:
   primary:

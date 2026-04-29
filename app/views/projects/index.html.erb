@@ -15,17 +15,17 @@
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
                 <span class="text-gray-600">Open Issues:</span>
-                <span class="font-medium text-red-600"><%= project.issues.open.count %></span>
+                <span class="font-medium text-red-600"><%= @open_issue_counts[project.id] || 0 %></span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-600">Total Events:</span>
-                <span class="font-medium"><%= project.events.count %></span>
+                <span class="font-medium"><%= @event_counts[project.id] || 0 %></span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-600">Last Activity:</span>
                 <span class="font-medium">
-                  <% if project.events.any? %>
-                    <%= time_ago_in_words(project.events.maximum(:timestamp)) %> ago
+                  <% if (last_at = @last_event_at[project.id]) %>
+                    <%= time_ago_in_words(last_at) %> ago
                   <% else %>
                     Never
                   <% end %>
