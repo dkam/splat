@@ -318,7 +318,7 @@ module Mcp
               },
               endpoint: {
                 type: "string",
-                description: "Filter by endpoint name (partial match)"
+                description: "Filter by endpoint name (case-insensitive substring match, e.g. 'works' matches 'WorksController#show')"
               },
               http_status: {
                 type: "string",
@@ -352,8 +352,8 @@ module Mcp
             type: "object",
             properties: {
               transaction_id: {
-                type: "integer",
-                description: "The database ID of the transaction"
+                type: "string",
+                description: "Either the internal numeric ID (e.g. '12345') or the Sentry transaction UUID (32 hex chars, e.g. 'abc123...'). UUIDs match the event_id used by get_event."
               }
             },
             required: ["transaction_id"]
@@ -653,7 +653,12 @@ module Mcp
     end
 
     def get_transaction(args)
-      transaction = Transaction.includes(:project).find(args["transaction_id"])
+      id_str = args["transaction_id"].to_s
+      transaction = if id_str.match?(/\A\d+\z/)
+        Transaction.includes(:project).find(id_str)
+      else
+        Transaction.includes(:project).find_by!(transaction_id: id_str)
+      end
 
       text = format_transaction_detail(transaction)
 
@@ -1116,26 +1121,64 @@ module Mcp
 
     def format_transaction_detail(txn)
       result = "## Transaction ##{txn.id}: #{txn.transaction_name}\n\n"
+      result += "**Transaction UUID:** #{txn.transaction_id}\n"
       result += "**Duration:** #{txn.duration.round}ms\n"
       result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
       result += "**Project:** #{txn.project.name}\n"
       result += "**Environment:** #{txn.environment}\n" if txn.environment
+      result += "**Release:** #{txn.release}\n" if txn.release
+      result += "**Server:** #{txn.server_name}\n" if txn.server_name
 
       if txn.db_time || txn.view_time
         result += "\n### Time Breakdown\n"
         result += "- Database: #{txn.db_time.round}ms (#{txn.db_overhead_percentage}%)\n" if txn.db_time
         result += "- View: #{txn.view_time.round}ms (#{txn.view_overhead_percentage}%)\n" if txn.view_time
-        result += "- Other: #{txn.other_time.round}ms\n" if txn.other_time > 0
+        if txn.duration.to_i > 0
+          other_pct = (txn.other_time.to_f / txn.duration * 100).round(2)
+          result += "- Other (middleware/queue): #{txn.other_time.round}ms (#{other_pct}%)\n"
+        end
       end
 
-      if txn.http_method || txn.http_status
+      if txn.http_method || txn.http_status || txn.http_url
         result += "\n### HTTP Request\n"
         result += "- Method: #{txn.http_method}\n" if txn.http_method
         result += "- Status: #{txn.http_status}\n" if txn.http_status
         result += "- URL: #{txn.http_url}\n" if txn.http_url
+
+        query_params = parse_query_params(txn.http_url)
+        if query_params.any?
+          result += "- Query Params:\n"
+          query_params.each { |k, v| result += "  - #{k}: #{v}\n" }
+        end
+      end
+
+      if txn.query_count > 0
+        result += "\n### Query Analysis\n"
+        result += "- Total queries: #{txn.query_count}\n"
+        result += "- Unique patterns: #{txn.unique_query_patterns}\n"
+        if txn.has_n_plus_one_queries?
+          result += "- ⚠️ Potential N+1 patterns (#{txn.potential_n_plus_one_queries.size}):\n"
+          txn.potential_n_plus_one_queries.first(5).each do |pattern|
+            count = txn.query_patterns.dig(pattern, "count")
+            result += "  - `#{pattern}`#{count ? " (×#{count})" : ""}\n"
+          end
+        end
+      end
+
+      if txn.tags.is_a?(Hash) && txn.tags.any?
+        result += "\n### Tags\n"
+        txn.tags.each { |k, v| result += "- **#{k}:** #{v}\n" }
       end
 
       result
+    end
+
+    def parse_query_params(url)
+      return {} if url.blank? || !url.include?("?")
+      query = url.split("?", 2).last
+      URI.decode_www_form(query).to_h
+    rescue ArgumentError
+      {}
     end
 
     def format_endpoint_summary(endpoint, total_count, hours, environment, release,
