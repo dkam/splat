@@ -25,10 +25,12 @@ class DataRetentionJob < ApplicationJob
       measurements: nil
     )
 
-    # 3. Delete very old event records
-    events_deleted_count = batched_delete_all(
-      Event.where("timestamp < ?", setting.events_data_cutoff_date)
-    )
+    # 3. Delete very old event records (delete_all skips counter_cache;
+    #    we snapshot affected issues and recount them after the deletes).
+    events_scope = Event.where("timestamp < ?", setting.events_data_cutoff_date)
+    affected_issue_ids = events_scope.distinct.pluck(:issue_id).compact
+    events_deleted_count = batched_delete_all(events_scope)
+    recount_issues(affected_issue_ids)
 
     # 4. Delete very old transaction records
     transactions_deleted_count = batched_delete_all(
@@ -71,5 +73,15 @@ class DataRetentionJob < ApplicationJob
       sleep SLEEP_BETWEEN_BATCHES
     end
     total
+  end
+
+  def recount_issues(issue_ids)
+    return if issue_ids.empty?
+    issue_ids.each_slice(BATCH_SIZE) do |batch|
+      Issue.where(id: batch).update_all(
+        "count = (SELECT COUNT(*) FROM events WHERE events.issue_id = issues.id)"
+      )
+      sleep SLEEP_BETWEEN_BATCHES
+    end
   end
 end

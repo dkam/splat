@@ -2,7 +2,7 @@
 
 class Event < ApplicationRecord
   belongs_to :project
-  belongs_to :issue, optional: true
+  belongs_to :issue, optional: true, counter_cache: :count
 
   validates :event_id, presence: true, uniqueness: true
   validates :timestamp, presence: true

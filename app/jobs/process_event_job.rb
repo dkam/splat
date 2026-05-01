@@ -8,9 +8,8 @@ class ProcessEventJob < ApplicationJob
 
     if event.issue
       event.issue.open! if event.issue.resolved?
-      Issue.where(id: event.issue.id).update_all(
-        "count = count + 1, last_seen = #{Issue.connection.quote(event.timestamp)}"
-      )
+      # `count` is maintained by counter_cache on Event#belongs_to :issue.
+      Issue.where(id: event.issue.id).update_all(last_seen: event.timestamp)
     end
 
     Rails.logger.info "Processed event #{event.id}: #{event.exception_type}"
