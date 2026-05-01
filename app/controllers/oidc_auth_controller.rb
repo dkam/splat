@@ -32,12 +32,19 @@ class OidcAuthController < ApplicationController
     # Generate state for CSRF protection
     session[:auth_state] = SecureRandom.hex(16)
 
+    # PKCE: generate verifier and S256 challenge (RFC 7636)
+    code_verifier = SecureRandom.urlsafe_base64(64).tr("=", "")
+    session[:pkce_verifier] = code_verifier
+    code_challenge = Base64.urlsafe_encode64(Digest::SHA256.digest(code_verifier), padding: false)
+
     # Build authorization URI
     auth_params = {
       scope: "openid email profile",
       response_type: "code",
       state: session[:auth_state],
-      redirect_uri: oidc_client.redirect_uri
+      redirect_uri: oidc_client.redirect_uri,
+      code_challenge: code_challenge,
+      code_challenge_method: "S256"
     }
 
     # Redirect to OIDC provider
@@ -61,10 +68,17 @@ class OidcAuthController < ApplicationController
       return
     end
 
+    code_verifier = session.delete(:pkce_verifier)
+    if code_verifier.blank?
+      Rails.logger.error "OIDC callback missing PKCE code_verifier in session"
+      redirect_to login_path, alert: "Invalid authentication state. Please try again."
+      return
+    end
+
     begin
       # Exchange authorization code for tokens using gem
       oidc_client.authorization_code = params[:code]
-      access_token = oidc_client.access_token!
+      access_token = oidc_client.access_token!(code_verifier: code_verifier)
 
       # Extract user info from ID token only
       id_token = access_token.id_token

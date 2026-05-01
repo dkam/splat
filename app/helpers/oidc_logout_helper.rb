@@ -1,0 +1,2 @@
+module OidcLogoutHelper
+end

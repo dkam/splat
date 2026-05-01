@@ -1,0 +1,13 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  oidc_sid: oidc_sid_one
+  session_id: session_id_one
+  user_email: user1@example.com
+  expires_at: 2025-11-25 20:29:19
+
+two:
+  oidc_sid: oidc_sid_two
+  session_id: session_id_two
+  user_email: user2@example.com
+  expires_at: 2025-11-25 20:29:19

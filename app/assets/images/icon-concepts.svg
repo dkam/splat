@@ -1,0 +1,76 @@
+<svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="800" height="200" fill="#f8f9fa"/>
+
+  <!-- Concept 1: Bug Splat with Asterisk -->
+  <g transform="translate(100, 100)">
+    <!-- Splatter effect -->
+    <circle cx="0" cy="0" r="35" fill="#dc2626" opacity="0.8"/>
+    <ellipse cx="-8" cy="-12" rx="15" ry="8" fill="#ef4444" transform="rotate(-30 -8 -12)"/>
+    <ellipse cx="12" cy="8" rx="10" ry="6" fill="#dc2626" transform="rotate(45 12 8)"/>
+    <ellipse cx="-15" cy="5" rx="8" ry="5" fill="#b91c1c" transform="rotate(-60 -15 5)"/>
+
+    <!-- Asterisk -->
+    <text x="0" y="8" font-family="monospace" font-size="32" font-weight="bold" text-anchor="middle" fill="white">*</text>
+
+    <!-- Exclamation mark -->
+    <text x="18" y="-5" font-family="Arial" font-size="18" font-weight="bold" text-anchor="middle" fill="white">!</text>
+
+    <!-- Label -->
+    <text x="0" y="60" font-family="Arial" font-size="12" text-anchor="middle" fill="#6b7280">Bug Splat *</text>
+  </g>
+
+  <!-- Concept 2: Clean Ruby Asterisk -->
+  <g transform="translate(300, 100)">
+    <!-- Burst background -->
+    <circle cx="0" cy="0" r="28" fill="#dc2626"/>
+
+    <!-- Burst rays -->
+    <g stroke="#ef4444" stroke-width="2" opacity="0.7">
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(0)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(45)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(90)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(135)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(180)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(225)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(270)"/>
+      <line x1="0" y1="-35" x2="0" y2="-25" transform="rotate(315)"/>
+    </g>
+
+    <!-- Asterisk -->
+    <text x="0" y="8" font-family="monospace" font-size="36" font-weight="bold" text-anchor="middle" fill="white">*</text>
+
+    <!-- Label -->
+    <text x="0" y="60" font-family="Arial" font-size="12" text-anchor="middle" fill="#6b7280">Ruby Burst *</text>
+  </g>
+
+  <!-- Concept 3: Splat Text -->
+  <g transform="translate(500, 100)">
+    <!-- Text shadow/splatter -->
+    <text x="1" y="11" font-family="Impact, Arial Black" font-size="28" font-weight="900" text-anchor="middle" fill="#991b1b" opacity="0.3">SPLAT!</text>
+    <text x="0" y="10" font-family="Impact, Arial Black" font-size="28" font-weight="900" text-anchor="middle" fill="#dc2626">SPLAT!</text>
+
+    <!-- Drip effects -->
+    <ellipse cx="-25" cy="20" rx="3" ry="5" fill="#dc2626" opacity="0.7"/>
+    <ellipse cx="20" cy="18" rx="2" ry="4" fill="#ef4444" opacity="0.7"/>
+    <ellipse cx="0" cy="22" rx="2.5" ry="6" fill="#b91c1c" opacity="0.6"/>
+
+    <!-- Small asterisk accent -->
+    <text x="35" y="-5" font-family="monospace" font-size="14" font-weight="bold" fill="#dc2626">*</text>
+
+    <!-- Label -->
+    <text x="0" y="60" font-family="Arial" font-size="12" text-anchor="middle" fill="#6b7280">Impact Text</text>
+  </g>
+
+  <!-- Concept 4: Minimal Asterisk+Exclamation -->
+  <g transform="translate(650, 100)">
+    <!-- Simple background -->
+    <rect x="-25" y="-25" width="50" height="50" rx="8" fill="#dc2626"/>
+
+    <!-- Combined symbol -->
+    <text x="0" y="8" font-family="monospace" font-size="32" font-weight="bold" text-anchor="middle" fill="white">*!</text>
+
+    <!-- Label -->
+    <text x="0" y="60" font-family="Arial" font-size="12" text-anchor="middle" fill="#6b7280">Minimal *!</text>
+  </g>
+</svg>
