@@ -19,12 +19,7 @@ env_config = parsed[Rails.env] || parsed["default"] || {}
 
 Rails.application.config.x.ducklake = env_config.deep_symbolize_keys
 
-if Rails.application.config.eager_load
-  Rails.application.config.after_initialize do
-    begin
-      ApplicationDucklakeRecord.bootstrap!
-    rescue => e
-      Rails.logger.error("[DuckLake] bootstrap failed: #{e.class}: #{e.message}")
-    end
-  end
-end
+# Bootstrap is intentionally lazy — opening DuckDB at boot races with sibling
+# containers (splat + jobs share the catalog file) and a partial failure can
+# orphan a DuckDB::Database, which segfaults on later GC. Bootstrap happens
+# on first DuckLake call instead, after the app is fully up.

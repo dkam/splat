@@ -19,7 +19,17 @@ class ApplicationDucklakeRecord
   @database         = nil
 
   class << self
+    # Kill switch — set DUCKLAKE_DISABLED=true to make every DuckLake call a
+    # no-op. Used as an emergency rollback that doesn't require redeploying
+    # an old image: dual-writes are skipped, analytics queries return [], and
+    # bootstrap is never attempted (so no DuckDB::Database is ever created).
+    def disabled?
+      ENV["DUCKLAKE_DISABLED"].to_s.match?(/\A(1|true|yes)\z/i)
+    end
+
     def bootstrap!
+      raise Error, "DuckLake is disabled (DUCKLAKE_DISABLED=true)" if disabled?
+
       ApplicationDucklakeRecord.instance_variable_get(:@bootstrap_mutex).synchronize do
         return ApplicationDucklakeRecord.instance_variable_get(:@connection) if ApplicationDucklakeRecord.instance_variable_get(:@connection)
 
@@ -30,14 +40,18 @@ class ApplicationDucklakeRecord
 
         require "duckdb"
         database = DuckDB::Database.open
+        # Pin the Database on the class ivar BEFORE running any step that can
+        # raise. If we let `database` go out of scope on a partial failure,
+        # GC eventually calls duckdb_close on it, which can segfault while
+        # joining DuckDB's TaskScheduler threads.
+        ApplicationDucklakeRecord.instance_variable_set(:@database, database)
+
         connection = database.connect
+        ApplicationDucklakeRecord.instance_variable_set(:@connection, connection)
 
         configure_connection!(connection, config)
         attach_lake!(connection, config)
         load_schema!(connection)
-
-        ApplicationDucklakeRecord.instance_variable_set(:@database, database)
-        ApplicationDucklakeRecord.instance_variable_set(:@connection, connection)
       end
       ApplicationDucklakeRecord.instance_variable_get(:@connection)
     end
@@ -47,6 +61,7 @@ class ApplicationDucklakeRecord
     end
 
     def insert(attrs)
+      return false if disabled?
       raise Error, "table_name not set on #{name}" unless table_name
 
       cols = attrs.keys.map(&:to_s)
@@ -59,6 +74,8 @@ class ApplicationDucklakeRecord
     end
 
     def query(sql, *binds)
+      return [] if disabled?
+
       with_lock do
         result = binds.empty? ? connection.query(sql) : connection.query(sql, *binds)
         columns = result.columns.map(&:name)
@@ -67,6 +84,8 @@ class ApplicationDucklakeRecord
     end
 
     def execute(sql, *binds)
+      return nil if disabled?
+
       with_lock do
         binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
       end
