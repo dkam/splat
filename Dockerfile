@@ -29,7 +29,7 @@ RUN apt-get update -qq && \
       *) \
         echo "Unsupported platform: $TARGETPLATFORM" && exit 1 ;; \
     esac && \
-    wget "https://github.com/duckdb/duckdb/releases/download/v1.4.2/libduckdb-linux-${DUCKDB_ARCH}.zip" -O /tmp/libduckdb.zip && \
+    wget "https://github.com/duckdb/duckdb/releases/download/v1.5.1/libduckdb-linux-${DUCKDB_ARCH}.zip" -O /tmp/libduckdb.zip && \
     unzip /tmp/libduckdb.zip -d /tmp/duckdb && \
     cp /tmp/duckdb/duckdb.h /tmp/duckdb/duckdb.hpp /usr/local/include/ && \
     cp /tmp/duckdb/libduckdb.so /usr/local/lib/ && \
