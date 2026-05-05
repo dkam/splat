@@ -49,9 +49,16 @@ CREATE TABLE IF NOT EXISTS transactions (
   tags             JSON,
   measurements     JSON,
   spans_truncated  BOOLEAN DEFAULT FALSE,
+  query_count      INTEGER DEFAULT 0,
+  has_n_plus_one   BOOLEAN DEFAULT FALSE,
   created_at       TIMESTAMP,
   updated_at       TIMESTAMP
 );
+
+-- Idempotent column adds for existing deployments are handled in Ruby (see
+-- ApplicationDucklakeRecord#ensure_columns!) — DuckDB doesn't accept
+-- DEFAULT clauses on ADD COLUMN, so we check existence first then add bare
+-- columns + SET DEFAULT separately.
 
 -- Append-only span rows. DuckLake-only (no AR mirror) — span volume is
 -- 10–100× transactions, so columnar Parquet pays for itself fast.

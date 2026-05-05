@@ -56,6 +56,12 @@ class Transaction < ApplicationRecord
     enhanced_measurements["span_extracted_view_time"] = view_time if view_time.present?
     enhanced_measurements["query_analysis"] = query_analysis if query_analysis[:total_queries] > 0
 
+    # Promote summary fields out of measurements.query_analysis JSON onto
+    # first-class columns so dashboard aggregates don't have to json_extract
+    # per row × millions of rows. Same data, much cheaper to read in bulk.
+    query_count    = query_analysis[:total_queries].to_i
+    has_n_plus_one = query_analysis[:potential_n_plus_one].to_a.any?
+
     attributes = {
       project: project,
       timestamp: timestamp || Time.current,
@@ -71,7 +77,9 @@ class Transaction < ApplicationRecord
       http_status: response_data["status_code"],
       http_url: request_data["url"],
       tags: payload["tags"],
-      measurements: enhanced_measurements
+      measurements: enhanced_measurements,
+      query_count: query_count,
+      has_n_plus_one: has_n_plus_one
     }
 
     transaction = find_or_initialize_by(transaction_id: transaction_id)

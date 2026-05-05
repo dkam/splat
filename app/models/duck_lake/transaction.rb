@@ -144,17 +144,18 @@ module DuckLake
 
       private
 
-      # SUM of transactions whose measurements.query_analysis.potential_n_plus_one
-      # array is non-empty. measurements is JSON-typed in the schema but values
-      # arrive as serialized strings via `to_json` in the dual-write — DuckDB
-      # doesn't auto-coerce, so we cast explicitly.
+      # SUM of transactions where has_n_plus_one is TRUE. Promoted from
+      # measurements.query_analysis.potential_n_plus_one to a first-class
+      # column at ingest, so the aggregate can use bit-packed column scans
+      # instead of per-row json_extract on millions of rows.
       def n_plus_one_count_expr
-        "SUM(CASE WHEN COALESCE(json_array_length(json_extract(CAST(measurements AS JSON), '$.query_analysis.potential_n_plus_one')), 0) > 0 THEN 1 ELSE 0 END)"
+        "SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END)"
       end
 
-      # Number of SQL queries per transaction, from measurements.query_analysis.total_queries.
+      # Number of SQL queries per transaction. Promoted column; NULL on
+      # pre-promotion rows is treated as 0.
       def queries_expr
-        "COALESCE(CAST(json_extract(CAST(measurements AS JSON), '$.query_analysis.total_queries') AS INTEGER), 0)"
+        "COALESCE(query_count, 0)"
       end
 
       public

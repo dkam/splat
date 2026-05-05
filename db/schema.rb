@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_05_112623) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_05_133653) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration", default: 0, null: false
@@ -116,12 +116,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_112623) do
     t.integer "db_time"
     t.integer "duration", null: false
     t.string "environment"
+    t.boolean "has_n_plus_one", default: false, null: false
     t.string "http_method"
     t.string "http_status"
     t.string "http_url"
     t.json "measurements"
     t.string "op"
     t.integer "project_id", null: false
+    t.integer "query_count", default: 0, null: false
     t.string "release"
     t.string "server_name"
     t.boolean "spans_truncated", default: false, null: false
@@ -132,6 +134,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_112623) do
     t.datetime "updated_at", null: false
     t.integer "view_time"
     t.index ["duration"], name: "index_transactions_on_duration"
+    t.index ["project_id", "has_n_plus_one"], name: "index_transactions_with_n_plus_one", where: "has_n_plus_one = TRUE"
     t.index ["project_id", "timestamp"], name: "index_transactions_on_project_id_and_timestamp"
     t.index ["project_id", "transaction_id"], name: "index_transactions_on_project_id_and_transaction_id", unique: true
     t.index ["project_id"], name: "index_transactions_on_project_id"

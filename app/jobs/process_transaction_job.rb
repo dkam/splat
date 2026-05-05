@@ -46,6 +46,9 @@ class ProcessTransactionJob < ApplicationJob
       http_url: transaction.http_url,
       tags: transaction.tags,
       measurements: transaction.measurements,
+      spans_truncated: transaction.spans_truncated,
+      query_count: transaction.query_count,
+      has_n_plus_one: transaction.has_n_plus_one,
       created_at: transaction.created_at,
       updated_at: transaction.updated_at
     )

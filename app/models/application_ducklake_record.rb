@@ -57,6 +57,7 @@ class ApplicationDucklakeRecord
         primer = database.connect
         prepare_connection!(primer, config)
         load_schema!(primer)
+        ensure_columns!(primer)
         apply_partitioning!(primer)
       end
       ApplicationDucklakeRecord.instance_variable_get(:@database)
@@ -200,6 +201,26 @@ class ApplicationDucklakeRecord
     # current spec is empty or different.
     PARTITIONED_TABLES = %w[events transactions spans].freeze
     PARTITION_TRANSFORMS = %w[year month].freeze
+
+    # Idempotent column adds for evolving DuckLake-only tables (transactions,
+    # spans). DuckDB doesn't accept DEFAULT clauses on ALTER TABLE ADD COLUMN,
+    # so we check existence first then ADD bare + SET DEFAULT separately.
+    SCHEMA_COLUMN_ADDITIONS = [
+      ["transactions", "spans_truncated", "BOOLEAN", "FALSE"],
+      ["transactions", "query_count",    "INTEGER", "0"],
+      ["transactions", "has_n_plus_one", "BOOLEAN", "FALSE"]
+    ].freeze
+
+    def ensure_columns!(conn)
+      SCHEMA_COLUMN_ADDITIONS.each do |table, column, type, default|
+        present = conn.query(
+          "SELECT 1 FROM duckdb_columns() WHERE table_name = '#{quote(table)}' AND column_name = '#{quote(column)}'"
+        ).any?
+        next if present
+        conn.execute("ALTER TABLE #{table} ADD COLUMN #{column} #{type}")
+        conn.execute("ALTER TABLE #{table} ALTER COLUMN #{column} SET DEFAULT #{default}")
+      end
+    end
 
     def apply_partitioning!(conn)
       PARTITIONED_TABLES.each do |table|
