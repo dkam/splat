@@ -1,49 +1,10 @@
 # frozen_string_literal: true
 
+# Single-transaction detail only. The grouped surface — endpoints,
+# slow lists, N+1 worklist — moved to EndpointsController.
 class TransactionsController < ApplicationController
-  include Pagy::Backend
-
   before_action :set_project
   before_action :set_transaction, only: [:show]
-
-  def index
-    @time_range = params[:time_range] || "24h"
-    time_ago = case @time_range
-               when "1h" then 1.hour.ago
-               when "6h" then 6.hours.ago
-               when "24h" then 24.hours.ago
-               when "7d" then 7.days.ago
-               else 24.hours.ago
-               end
-    time_range = time_ago..Time.current
-
-    # Recent transactions list stays on AR (OLTP — find/show by id).
-    base_scope = @project.transactions.where("timestamp > ?", time_ago)
-    base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
-
-    # Aggregates come from DuckLake. Environment filter is best handled in
-    # DuckLake too when present.
-    duck_percentiles = ducklake_percentiles_for(time_range, environment: params[:environment])
-    @avg_duration = duck_percentiles[:avg]&.round || 0
-    @p95_duration = duck_percentiles[:p95] || 0
-    @p99_duration = duck_percentiles[:p99] || 0
-
-    @endpoints = ducklake_endpoints_by_impact(time_range, environment: params[:environment], limit: 20)
-
-    @endpoint_sparklines = DuckLake::Transaction.counts_by_bucket(
-      transaction_names: @endpoints.map { |e| e["transaction_name"] },
-      time_range: time_range,
-      buckets: 24,
-      project_id: @project.id,
-      environment: params[:environment]
-    )
-
-    @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
-
-    @environments = Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
-      @project.transactions.distinct.pluck(:environment).compact.sort
-    end
-  end
 
   def show
     respond_to do |format|
@@ -51,74 +12,6 @@ class TransactionsController < ApplicationController
       format.json { render json: transaction_data }
       format.csv { send_data transaction_csv, filename: "transaction_#{@transaction.transaction_id}.csv" }
     end
-  end
-
-  def slow
-    @time_range = params[:time_range] || "24h"
-    time_ago = case @time_range
-               when "1h" then 1.hour.ago
-               when "6h" then 6.hours.ago
-               when "24h" then 24.hours.ago
-               when "7d" then 7.days.ago
-               else 24.hours.ago
-               end
-
-    threshold = params[:threshold]&.to_i || 1000 # Default 1000ms = 1 second
-    transactions = @project.transactions
-      .where("timestamp > ?", time_ago)
-      .where("duration > ?", threshold)
-      .order(duration: :desc)
-
-    @pagy, @transactions = pagy(transactions, limit: 50)
-    @threshold = threshold
-  end
-
-  def n_plus_one
-    @time_range = params[:time_range] || "24h"
-    time_ago = case @time_range
-               when "1h"  then 1.hour.ago
-               when "6h"  then 6.hours.ago
-               when "24h" then 24.hours.ago
-               when "7d"  then 7.days.ago
-               when "30d" then 30.days.ago
-               else 24.hours.ago
-               end
-    time_range = time_ago..Time.current
-
-    @endpoints = DuckLake::Transaction.endpoints_by_n_plus_one(
-      time_range, project_id: @project.id, environment: params[:environment], limit: 50
-    )
-
-    @environments = Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
-      @project.transactions.distinct.pluck(:environment).compact.sort
-    end
-  end
-
-  def by_endpoint
-    @endpoint = params[:endpoint]
-    @time_range = params[:time_range] || "24h"
-    time_ago = case @time_range
-               when "1h" then 1.hour.ago
-               when "6h" then 6.hours.ago
-               when "24h" then 24.hours.ago
-               when "7d" then 7.days.ago
-               else 24.hours.ago
-               end
-    time_range = time_ago..Time.current
-
-    # Aggregates from DuckLake.
-    stats = DuckLake::Transaction.percentiles_for_endpoint(@endpoint, time_range, project_id: @project.id)
-    @avg_duration = stats["avg_duration"]&.to_f&.round || 0
-    @p95_duration = stats["p95_duration"]&.to_f&.round || 0
-    @p99_duration = stats["p99_duration"]&.to_f&.round || 0
-
-    # Paginated list stays on AR.
-    transactions = @project.transactions
-      .where(transaction_name: @endpoint)
-      .where("timestamp > ?", time_ago)
-      .order(timestamp: :desc)
-
-    @pagy, @transactions = pagy(transactions, limit: 50)
   end
 
   private
@@ -129,40 +22,6 @@ class TransactionsController < ApplicationController
 
   def set_transaction
     @transaction = @project.transactions.find(params[:id])
-  end
-
-  def ducklake_percentiles_for(time_range, environment: nil)
-    if environment.present?
-      sql = <<~SQL
-        SELECT
-          AVG(duration)                  AS avg,
-          quantile_cont(duration, 0.50)  AS p50,
-          quantile_cont(duration, 0.95)  AS p95,
-          quantile_cont(duration, 0.99)  AS p99
-        FROM transactions
-        WHERE timestamp BETWEEN ? AND ?
-          AND project_id = ?
-          AND environment = ?
-      SQL
-      row = DuckLake::Transaction.query(sql, time_range.begin, time_range.end, @project.id, environment).first || {}
-      {
-        avg: row["avg"]&.to_f || 0,
-        p50: row["p50"]&.to_f || 0,
-        p95: row["p95"]&.to_f || 0,
-        p99: row["p99"]&.to_f || 0
-      }
-    else
-      DuckLake::Transaction.percentiles(time_range, project_id: @project.id)
-    end
-  end
-
-  def ducklake_endpoints_by_impact(time_range, environment: nil, limit: 20)
-    DuckLake::Transaction.stats_by_endpoint_with_impact(
-      time_range,
-      project_id: @project.id,
-      environment: environment,
-      limit: limit
-    )
   end
 
   def transaction_data
@@ -208,96 +67,50 @@ class TransactionsController < ApplicationController
   end
 
   def transaction_csv
-    require 'csv'
+    require "csv"
 
     CSV.generate(headers: true) do |csv|
-      # Headers
       csv << [
-        'Transaction ID',
-        'Timestamp',
-        'Transaction Name',
-        'Operation',
-        'Duration (ms)',
-        'DB Time (ms)',
-        'View Time (ms)',
-        'Environment',
-        'Release',
-        'Server Name',
-        'HTTP Method',
-        'HTTP Status',
-        'HTTP URL',
-        'Total Queries',
-        'Unique Query Patterns',
-        'N+1 Patterns',
-        'DB Overhead %',
-        'View Overhead %',
-        'Other Time (ms)',
-        'Controller',
-        'Action',
-        'Created At'
+        "Transaction ID", "Timestamp", "Transaction Name", "Operation",
+        "Duration (ms)", "DB Time (ms)", "View Time (ms)",
+        "Environment", "Release", "Server Name",
+        "HTTP Method", "HTTP Status", "HTTP URL",
+        "Total Queries", "Unique Query Patterns", "N+1 Patterns",
+        "DB Overhead %", "View Overhead %", "Other Time (ms)",
+        "Controller", "Action", "Created At"
       ]
 
-      # Data row
       csv << [
-        @transaction.transaction_id,
-        @transaction.timestamp,
-        @transaction.transaction_name,
-        @transaction.op,
-        @transaction.duration,
-        @transaction.db_time,
-        @transaction.view_time,
-        @transaction.environment,
-        @transaction.release,
-        @transaction.server_name,
-        @transaction.http_method,
-        @transaction.http_status,
-        @transaction.http_url,
-        @transaction.query_count,
-        @transaction.unique_query_patterns,
-        @transaction.potential_n_plus_one_queries.size,
-        @transaction.db_overhead_percentage,
-        @transaction.view_overhead_percentage,
-        @transaction.other_time,
-        @transaction.controller,
-        @transaction.action,
-        @transaction.created_at
+        @transaction.transaction_id, @transaction.timestamp, @transaction.transaction_name, @transaction.op,
+        @transaction.duration, @transaction.db_time, @transaction.view_time,
+        @transaction.environment, @transaction.release, @transaction.server_name,
+        @transaction.http_method, @transaction.http_status, @transaction.http_url,
+        @transaction.query_count, @transaction.unique_query_patterns, @transaction.potential_n_plus_one_queries.size,
+        @transaction.db_overhead_percentage, @transaction.view_overhead_percentage, @transaction.other_time,
+        @transaction.controller, @transaction.action, @transaction.created_at
       ]
 
-      # Add query patterns as additional rows if present
       if @transaction.query_patterns.any?
-        csv << [] # Empty row for separation
-        csv << ['Query Patterns Details']
-        csv << ['Pattern', 'Count', 'Example Query']
-
+        csv << []
+        csv << ["Query Patterns Details"]
+        csv << ["Pattern", "Count", "Example Query"]
         @transaction.query_patterns.each do |pattern, data|
-          csv << [
-            pattern,
-            data[:count],
-            data[:examples]&.first&.truncate(200) || 'N/A'
-          ]
+          csv << [pattern, data[:count], data[:examples]&.first&.truncate(200) || "N/A"]
         end
       end
 
-      # Add N+1 warnings as additional rows if present
       if @transaction.has_n_plus_one_queries?
-        csv << [] # Empty row for separation
-        csv << ['N+1 Query Warnings']
-        csv << ['Pattern']
-
-        @transaction.potential_n_plus_one_queries.each do |pattern|
-          csv << [pattern]
-        end
+        csv << []
+        csv << ["N+1 Query Warnings"]
+        csv << ["Pattern"]
+        @transaction.potential_n_plus_one_queries.each { |pattern| csv << [pattern] }
       end
 
-      # Add tags as additional rows if present
       if @transaction.tags.present? && @transaction.tags.any?
-        csv << [] # Empty row for separation
-        csv << ['Tags']
-        csv << ['Key', 'Value']
-
-        @transaction.tags.each do |key, value|
-          csv << [key, value]
-        end
+        csv << []
+        csv << ["Tags"]
+        csv << ["Key", "Value"]
+        @transaction.tags.each { |key, value| csv << [key, value] }
       end
     end
   end

@@ -41,15 +41,16 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :events, only: [:index, :show, :destroy]
+    resources :events, only: [:show, :destroy]
 
-    resources :transactions, only: [:index, :show] do
+    resources :endpoints, only: [:index] do
       collection do
-        get :slow
-        get :by_endpoint
+        get :detail
         get :n_plus_one
       end
     end
+
+    resources :transactions, only: [:show], constraints: { id: /\d+/ }
   end
   
   # MCP (Model Context Protocol) endpoint

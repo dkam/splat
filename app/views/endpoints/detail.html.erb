@@ -1,6 +1,6 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-8">
-    <%= link_to "← Performance", project_transactions_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+    <%= link_to "← Performance", project_endpoints_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
   </div>
 
   <div class="mb-6">
@@ -33,7 +33,7 @@
 
   <!-- Filters -->
   <div class="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
-    <%= form_with url: by_endpoint_project_transactions_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
+    <%= form_with url: detail_project_endpoints_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
       <%= f.hidden_field :endpoint, value: @endpoint %>
 
       <div class="flex-1 min-w-[150px]">

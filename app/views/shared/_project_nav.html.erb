@@ -1,0 +1,18 @@
+<%# Project-level tab strip, rendered above the page content on every
+    project-scoped page. Active tab is determined by controller_name. %>
+<div class="w-full mb-4 border-b border-gray-200">
+  <nav class="flex gap-1" aria-label="Project sections">
+    <%= link_to project_path(project.slug),
+        class: "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors #{project_nav_active?(:overview) ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'}" do %>
+      Overview
+    <% end %>
+    <%= link_to project_issues_path(project.slug),
+        class: "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors #{project_nav_active?(:errors) ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'}" do %>
+      🐛 Errors
+    <% end %>
+    <%= link_to project_endpoints_path(project.slug),
+        class: "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors #{project_nav_active?(:performance) ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'}" do %>
+      🚀 Performance
+    <% end %>
+  </nav>
+</div>

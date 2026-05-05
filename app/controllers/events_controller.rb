@@ -6,36 +6,18 @@ class EventsController < ApplicationController
   before_action :set_project
   before_action :set_event, only: [:show, :destroy]
 
-  def index
-    events = @project.events.recent
-
-    # Filter by issue if provided
-    events = events.by_issue(params[:issue_id]) if params[:issue_id].present?
-
-    # Filter by environment if provided
-    events = events.by_environment(params[:environment]) if params[:environment].present?
-
-    # Filter by exception type if provided
-    events = events.by_exception_type(params[:exception_type]) if params[:exception_type].present?
-
-    @pagy, @events = pagy(events, limit: 25)
-
-    # Distinct values for filter dropdowns — cached because they pluck from the full events table
-    @environments = Rails.cache.fetch("project_#{@project.id}_event_environments", expires_in: 5.minutes) do
-      @project.events.distinct.pluck(:environment).compact.sort
-    end
-    @exception_types = Rails.cache.fetch("project_#{@project.id}_event_exception_types", expires_in: 5.minutes) do
-      @project.events.distinct.pluck(:exception_type).compact.sort
-    end
-  end
-
   def show
     @issue = @event.issue
   end
 
   def destroy
+    issue = @event.issue
     @event.destroy
-    redirect_to project_events_path(@project.slug), notice: "Event deleted"
+    if issue
+      redirect_to project_issue_path(@project.slug, issue), notice: "Event deleted"
+    else
+      redirect_to project_path(@project.slug), notice: "Event deleted"
+    end
   end
 
   private

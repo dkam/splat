@@ -1,6 +1,26 @@
 module ApplicationHelper
   include Pagy::Frontend
 
+  # Maps each section of the project-level tab strip to the controllers
+  # that belong to it. Used by `_project_nav` to highlight the active tab.
+  PROJECT_NAV_SECTIONS = {
+    overview:    %w[projects],
+    errors:      %w[issues events],
+    performance: %w[endpoints transactions]
+  }.freeze
+
+  def project_nav_active?(section)
+    return false unless @project
+    controllers = PROJECT_NAV_SECTIONS.fetch(section, [])
+    return false if controllers.empty?
+    # Overview only matches when on projects#show, not projects#index
+    if section == :overview
+      controllers.include?(controller_name) && action_name == "show"
+    else
+      controllers.include?(controller_name)
+    end
+  end
+
   # Format duration in milliseconds to human-readable string
   def format_duration(ms)
     return "N/A" if ms.nil?

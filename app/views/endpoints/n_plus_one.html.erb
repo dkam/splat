@@ -1,6 +1,6 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-6">
-    <%= link_to "← Back to Performance", project_transactions_path(@project.slug, time_range: @time_range), class: "text-blue-600 hover:text-blue-800 text-sm" %>
+    <%= link_to "← Back to Performance", project_endpoints_path(@project.slug, time_range: @time_range), class: "text-blue-600 hover:text-blue-800 text-sm" %>
     <h1 class="text-3xl font-bold text-gray-900 mt-2">Endpoints with N+1 Issues</h1>
     <p class="text-gray-600 mt-2">
       Endpoints where multiple requests showed the same SQL pattern repeated more than 3 times — a classic N+1
@@ -11,7 +11,7 @@
   <!-- Time range tabs -->
   <div class="mb-6 flex gap-2 flex-wrap">
     <% %w[1h 6h 24h 7d 30d].each do |range| %>
-      <%= link_to range, n_plus_one_project_transactions_path(@project.slug, time_range: range, environment: params[:environment]),
+      <%= link_to range, n_plus_one_project_endpoints_path(@project.slug, time_range: range, environment: params[:environment]),
           class: "px-3 py-1 rounded-md text-sm font-medium #{@time_range == range ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}" %>
     <% end %>
   </div>
@@ -34,7 +34,7 @@
           <% @endpoints.each do |endpoint| %>
             <tr class="hover:bg-gray-50">
               <td class="px-6 py-4 whitespace-nowrap">
-                <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint["transaction_name"], time_range: @time_range),
+                <%= link_to detail_project_endpoints_path(@project.slug, name: endpoint["transaction_name"], time_range: @time_range),
                     class: "text-blue-600 hover:text-blue-800 font-medium" do %>
                   <%= endpoint["transaction_name"] %>
                 <% end %>

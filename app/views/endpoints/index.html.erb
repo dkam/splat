@@ -12,7 +12,7 @@
 
   <!-- Filters -->
   <div class="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
-    <%= form_with url: project_transactions_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
+    <%= form_with url: project_endpoints_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
       <div class="flex-1 min-w-[150px]">
         <%= f.label :time_range, "Time Range", class: "block text-sm font-medium text-gray-700 mb-1" %>
         <%= f.select :time_range,
@@ -61,11 +61,11 @@
 
   <!-- Quick Links -->
   <div class="mb-6 flex gap-4 flex-wrap">
-    <%= link_to slow_project_transactions_path(@project.slug, time_range: @time_range),
+    <%= link_to project_endpoints_path(@project.slug, time_range: @time_range),
         class: "bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-lg border border-red-200 transition-colors" do %>
       🐌 View Slow Transactions (>1s)
     <% end %>
-    <%= link_to n_plus_one_project_transactions_path(@project.slug, time_range: @time_range),
+    <%= link_to n_plus_one_project_endpoints_path(@project.slug, time_range: @time_range),
         class: "bg-orange-50 hover:bg-orange-100 text-orange-700 font-medium py-2 px-4 rounded-lg border border-orange-200 transition-colors" do %>
       ⚠ View N+1 Issues
     <% end %>
@@ -94,7 +94,7 @@
             <% @endpoints.each do |endpoint| %>
               <tr class="hover:bg-gray-50">
                 <td class="px-6 py-4 whitespace-nowrap">
-                  <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint["transaction_name"], time_range: @time_range),
+                  <%= link_to detail_project_endpoints_path(@project.slug, name: endpoint["transaction_name"], time_range: @time_range),
                       class: "text-blue-600 hover:text-blue-800 font-medium" do %>
                     <%= endpoint["transaction_name"] %>
                   <% end %>
