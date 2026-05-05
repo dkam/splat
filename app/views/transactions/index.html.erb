@@ -67,22 +67,24 @@
     <% end %>
   </div>
 
-  <!-- Slow Endpoints Table -->
+  <!-- Top Endpoints by Impact -->
   <div class="mb-8">
-    <h2 class="text-xl font-bold text-gray-900 mb-4">Slowest Endpoints</h2>
-    <% if @slow_endpoints.any? %>
+    <h2 class="text-xl font-bold text-gray-900 mb-4">Top Endpoints by Impact</h2>
+    <% if @endpoints.any? %>
       <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
               <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endpoint</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Duration</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Max Duration</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Time Spent</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">P95</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Max</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
             </tr>
           </thead>
           <tbody class="bg-white divide-y divide-gray-200">
-            <% @slow_endpoints.each do |endpoint| %>
+            <% @endpoints.each do |endpoint| %>
               <tr class="hover:bg-gray-50">
                 <td class="px-6 py-4 whitespace-nowrap">
                   <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint.transaction_name, time_range: @time_range),
@@ -91,8 +93,18 @@
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
+                  <span class="font-semibold text-gray-900">
+                    <%= format_duration(endpoint.time_spent) %>
+                  </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-right">
                   <span class="font-semibold <%= duration_color_class(endpoint.avg_duration) %>">
                     <%= format_duration(endpoint.avg_duration) %>
+                  </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-right">
+                  <span class="font-semibold <%= duration_color_class(endpoint.p95_duration) %>">
+                    <%= format_duration(endpoint.p95_duration) %>
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">

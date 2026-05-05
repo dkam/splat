@@ -28,7 +28,7 @@ class TransactionsController < ApplicationController
     @p95_duration = duck_percentiles[:p95] || 0
     @p99_duration = duck_percentiles[:p99] || 0
 
-    @slow_endpoints = ducklake_slow_endpoints_for(time_range, environment: params[:environment], limit: 20)
+    @endpoints = ducklake_endpoints_by_impact(time_range, environment: params[:environment], limit: 20)
 
     @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
 
@@ -127,26 +127,13 @@ class TransactionsController < ApplicationController
     end
   end
 
-  def ducklake_slow_endpoints_for(time_range, environment: nil, limit: 20)
-    rows =
-      if environment.present?
-        DuckLake::Transaction.query(<<~SQL, time_range.begin, time_range.end, @project.id, environment, limit)
-          SELECT
-            transaction_name,
-            AVG(duration)  AS avg_duration,
-            MAX(duration)  AS max_duration,
-            COUNT(*)       AS count
-          FROM transactions
-          WHERE timestamp BETWEEN ? AND ?
-            AND project_id = ?
-            AND environment = ?
-          GROUP BY transaction_name
-          ORDER BY avg_duration DESC
-          LIMIT ?
-        SQL
-      else
-        DuckLake::Transaction.stats_by_endpoint(time_range, project_id: @project.id, limit: limit)
-      end
+  def ducklake_endpoints_by_impact(time_range, environment: nil, limit: 20)
+    rows = DuckLake::Transaction.stats_by_endpoint_with_impact(
+      time_range,
+      project_id: @project.id,
+      environment: environment,
+      limit: limit
+    )
     rows.map { |r| OpenStruct.new(r.transform_keys(&:to_sym)) }
   end
 

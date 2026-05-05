@@ -21,9 +21,9 @@ class ProjectsController < ApplicationController
   end
 
   def show
-    @recent_issues = @project.open_issues.limit(20)
-    @recent_events = @project.recent_events(limit: 10)
-    @recent_transactions = @project.recent_transactions(limit: 10)
+    @recent_issues = @project.open_issues.limit(5)
+    @recent_events = @project.recent_events(limit: 5)
+    @top_endpoints = @project.top_endpoints_by_impact(limit: 5)
     @event_count_24h = @project.event_count(24.hours.ago..Time.current)
     @transaction_count_24h = @project.transaction_count(24.hours.ago..Time.current)
     @avg_response_time = @project.avg_response_time

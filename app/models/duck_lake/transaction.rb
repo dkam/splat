@@ -31,6 +31,36 @@ module DuckLake
         query(sql, *binds)
       end
 
+      def stats_by_endpoint_with_impact(time_range = 24.hours.ago..Time.current,
+                                        project_id: nil, environment: nil, limit: nil)
+        sql = +<<~SQL
+          SELECT
+            transaction_name,
+            COUNT(*)                       AS count,
+            AVG(duration)                  AS avg_duration,
+            MAX(duration)                  AS max_duration,
+            quantile_cont(duration, 0.95)  AS p95_duration,
+            AVG(duration) * COUNT(*)       AS time_spent
+          FROM transactions
+          WHERE timestamp BETWEEN ? AND ?
+        SQL
+        binds = [time_range.begin, time_range.end]
+
+        if project_id.present?
+          sql << " AND project_id = ?\n"
+          binds << project_id.to_i
+        end
+        if environment.present?
+          sql << " AND environment = ?\n"
+          binds << environment
+        end
+
+        sql << "GROUP BY transaction_name ORDER BY time_spent DESC"
+        sql << " LIMIT #{limit.to_i}" if limit
+
+        query(sql, *binds)
+      end
+
       def percentiles(time_range = 24.hours.ago..Time.current, project_id: nil)
         sql = +<<~SQL
           SELECT

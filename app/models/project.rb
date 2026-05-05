@@ -107,6 +107,10 @@ class Project < ApplicationRecord
     DuckLake::Transaction.stats_by_endpoint(time_range, project_id: id, limit: limit)
   end
 
+  def top_endpoints_by_impact(limit: 5, time_range: 24.hours.ago..Time.current)
+    DuckLake::Transaction.stats_by_endpoint_with_impact(time_range, project_id: id, limit: limit)
+  end
+
   def response_time_by_hour(time_range: 24.hours.ago..Time.current)
     DuckLake::Transaction.response_time_by_hour(time_range, project_id: id)
   end
