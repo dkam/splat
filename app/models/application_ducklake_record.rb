@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 # Base class for DuckLake-backed analytics models. Owns a single shared
-# DuckDB::Database + Connection (guarded by a Mutex), bootstraps the lake on
-# first use, and exposes a narrow insert/query/execute API.
+# DuckDB::Database; each thread gets its own DuckDB::Connection off it,
+# attached to the same lake. DuckLake handles concurrent reads/writes via
+# its catalog snapshot model — no Ruby-side mutex needed on the hot path.
 #
 # Subclasses set `self.table_name` and use the class-level API directly —
 # there are no instances. Analytics call sites pass raw SQL to `query` and
@@ -13,10 +14,9 @@ class ApplicationDucklakeRecord
 
   class_attribute :table_name, instance_accessor: false
 
-  @bootstrap_mutex  = Mutex.new
-  @connection_mutex = Mutex.new
-  @connection       = nil
-  @database         = nil
+  @bootstrap_mutex = Mutex.new
+  @database        = nil
+  @config          = nil
 
   class << self
     # Kill switch — set DUCKLAKE_DISABLED=true to make every DuckLake call a
@@ -31,7 +31,7 @@ class ApplicationDucklakeRecord
       raise Error, "DuckLake is disabled (DUCKLAKE_DISABLED=true)" if disabled?
 
       ApplicationDucklakeRecord.instance_variable_get(:@bootstrap_mutex).synchronize do
-        return ApplicationDucklakeRecord.instance_variable_get(:@connection) if ApplicationDucklakeRecord.instance_variable_get(:@connection)
+        return ApplicationDucklakeRecord.instance_variable_get(:@database) if ApplicationDucklakeRecord.instance_variable_get(:@database)
         if ApplicationDucklakeRecord.instance_variable_get(:@bootstrap_attempted)
           raise Error, "DuckLake bootstrap previously failed; restart the process to retry"
         end
@@ -50,23 +50,27 @@ class ApplicationDucklakeRecord
         # TaskScheduler threads. With it pinned, a failed bootstrap is just
         # an error — no orphan, no segfault.
         ApplicationDucklakeRecord.instance_variable_set(:@database, database)
+        ApplicationDucklakeRecord.instance_variable_set(:@config, config)
 
-        connection = database.connect
-        configure_connection!(connection, config)
-        attach_lake!(connection, config)
-        load_schema!(connection)
-        apply_partitioning!(connection)
-
-        # Publish @connection only after the schema is fully loaded. Other
-        # threads see nil until then and block on this mutex, instead of
-        # racing in and querying tables that don't exist yet.
-        ApplicationDucklakeRecord.instance_variable_set(:@connection, connection)
+        # Primer connection runs schema + partitioning once. Per-thread
+        # connections each prepare themselves (LOAD + ATTACH) on first use.
+        primer = database.connect
+        prepare_connection!(primer, config)
+        load_schema!(primer)
+        apply_partitioning!(primer)
       end
-      ApplicationDucklakeRecord.instance_variable_get(:@connection)
+      ApplicationDucklakeRecord.instance_variable_get(:@database)
     end
 
     def connection
-      ApplicationDucklakeRecord.instance_variable_get(:@connection) || bootstrap!
+      Thread.current[:ducklake_conn] ||= begin
+        bootstrap! unless ApplicationDucklakeRecord.instance_variable_get(:@database)
+        database = ApplicationDucklakeRecord.instance_variable_get(:@database)
+        config = ApplicationDucklakeRecord.instance_variable_get(:@config)
+        conn = database.connect
+        prepare_connection!(conn, config)
+        conn
+      end
     end
 
     def insert(attrs)
@@ -78,32 +82,31 @@ class ApplicationDucklakeRecord
       sql = "INSERT INTO #{table_name} (#{cols.join(", ")}) VALUES (#{placeholders})"
       values = attrs.values.map { |v| serialize(v) }
 
-      with_lock { connection.execute(sql, *values) }
+      connection.execute(sql, *values)
       true
     end
 
     def query(sql, *binds)
       return [] if disabled?
 
-      with_lock do
-        result = binds.empty? ? connection.query(sql) : connection.query(sql, *binds)
-        columns = result.columns.map(&:name)
-        result.each.map { |row| columns.zip(row).to_h }
-      end
+      result = binds.empty? ? connection.query(sql) : connection.query(sql, *binds)
+      columns = result.columns.map(&:name)
+      result.each.map { |row| columns.zip(row).to_h }
     end
 
     def execute(sql, *binds)
       return nil if disabled?
 
-      with_lock do
-        binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
-      end
+      binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
     end
 
     private
 
-    def with_lock(&block)
-      ApplicationDucklakeRecord.instance_variable_get(:@connection_mutex).synchronize(&block)
+    # Per-connection setup: LOAD extensions, S3 config, ATTACH the lake,
+    # USE the catalog. INSTALL is once-per-database in bootstrap!.
+    def prepare_connection!(conn, config)
+      configure_connection!(conn, config)
+      attach_lake!(conn, config)
     end
 
     def serialize(value)
