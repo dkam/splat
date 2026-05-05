@@ -3,8 +3,6 @@ Use use the oauth
 
 # Splat - Lightweight Error Tracker
 
-This software is beta quality. If you'd like to try it out, find bugs, security flaws and improvements, please do.  
-
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
 
 This app has zero authentication by default but supports OIDC.
@@ -26,6 +24,8 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Single-Tenant Design** - Simple setup, no user management overhead
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
 - ✅ **Performance Monitoring** - Transaction data with lightweight metrics
+- ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
+- ✅ **OLTP + OLAP storage** - SQLite for ingestion and OLTP, DuckLake (DuckDB + parquet) for analytics over long retention
 - ✅ **MCP Integration** - Query errors via Claude and AI assistants
 - ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
@@ -35,7 +35,7 @@ When you need error tracking that:
 - Your code assistant can grab issues and stack traces from
 - Shows errors within seconds
 - Can be understood and modified in one sitting
-- Rails 8 / Ruby 3.4.6 / SQLite3 + Solid stack (Queue/Cache/Cable) - SQLite-first architecture
+- Rails 8 / Ruby 3.4.6 / SQLite (OLTP) + DuckLake (OLAP) + Solid stack (Queue/Cache/Cable)
 
 
 ## Screenshots
@@ -250,6 +250,19 @@ At 26 transactions/second sustained with **~950k transactions in database (4.7GB
 - ✅ Database size has no impact on ingestion performance ( so far )
 
 Rails 8.1's SQLite optimizations (WAL mode, connection pooling) handle write-heavy workloads efficiently.
+
+### Storage Architecture: OLTP + OLAP
+
+Splat stores every event and transaction in two places, each chosen for what it's good at:
+
+- **SQLite (OLTP)** — source of truth for ingestion, find-by-id lookups, status changes, and the recent-firehose views. Fast, embedded, no operational overhead. SQLite retention can be aggressive (e.g. 14–30 days) without losing analytical history.
+- **DuckLake (OLAP)** — every event/transaction is mirror-written to a DuckDB-managed parquet store on local disk or S3. All time-windowed aggregates — endpoint stats, percentile breakdowns, response-time charts, the "Top Endpoints by Impact" table, even the project dashboard's 24-hour counts — read from DuckLake. Columnar scans over parquet are dramatically faster than row scans for these queries, and retention can be set independently and longer than SQLite (e.g. months of history at low storage cost).
+
+The two stores have separate retention jobs, so you can keep weeks of OLTP detail and months of OLAP history without bloating either one.
+
+#### Endpoint Impact Ranking
+
+The performance dashboard ranks endpoints by **time spent** (`avg_duration × count`) rather than average duration. A 50ms endpoint hit 10,000×/day costs more total time than a 2s endpoint hit 5×/day — sorting by impact tells you where optimisation actually pays back. The same table also surfaces P95 alongside, so a tail-heavy endpoint isn't hidden by a low average.
 
 ## Maintenance
 
