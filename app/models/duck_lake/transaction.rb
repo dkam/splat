@@ -50,7 +50,7 @@ module DuckLake
       end
 
       def stats_by_endpoint_with_impact(time_range = 24.hours.ago..Time.current,
-                                        project_id: nil, environment: nil, limit: nil)
+                                        project_id: nil, environment: nil, name_query: nil, limit: nil)
         sql = +<<~SQL
           SELECT
             transaction_name,
@@ -75,6 +75,10 @@ module DuckLake
         if environment.present?
           sql << " AND environment = ?\n"
           binds << environment
+        end
+        if name_query.present?
+          sql << " AND transaction_name LIKE ?\n"
+          binds << "%#{name_query}%"
         end
 
         sql << "GROUP BY transaction_name ORDER BY time_spent DESC"
