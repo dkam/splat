@@ -92,6 +92,10 @@ class Project < ApplicationRecord
     DuckLake::Transaction.percentiles(time_range, project_id: id)[:avg] || 0
   end
 
+  def p50_response_time(time_range = 24.hours.ago..Time.current)
+    DuckLake::Transaction.percentiles(time_range, project_id: id)[:p50] || 0
+  end
+
   def p95_response_time(time_range = 24.hours.ago..Time.current)
     DuckLake::Transaction.percentiles(time_range, project_id: id)[:p95] || 0
   end

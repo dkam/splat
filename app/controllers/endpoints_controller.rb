@@ -22,7 +22,7 @@ class EndpointsController < ApplicationController
     base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
 
     duck_percentiles = ducklake_percentiles_for(time_range, environment: params[:environment])
-    @avg_duration = duck_percentiles[:avg]&.round || 0
+    @p50_duration = duck_percentiles[:p50] || 0
     @p95_duration = duck_percentiles[:p95] || 0
     @p99_duration = duck_percentiles[:p99] || 0
 
@@ -50,7 +50,7 @@ class EndpointsController < ApplicationController
     time_range = time_ago..Time.current
 
     stats = DuckLake::Transaction.percentiles_for_endpoint(@endpoint, time_range, project_id: @project.id)
-    @avg_duration = stats["avg_duration"]&.to_f&.round || 0
+    @p50_duration = stats["p50_duration"]&.to_f&.round || 0
     @p95_duration = stats["p95_duration"]&.to_f&.round || 0
     @p99_duration = stats["p99_duration"]&.to_f&.round || 0
 

@@ -26,7 +26,7 @@ class ProjectsController < ApplicationController
     @top_endpoints = @project.top_endpoints_by_impact(limit: 5)
     @event_count_24h = @project.event_count(24.hours.ago..Time.current)
     @transaction_count_24h = @project.transaction_count(24.hours.ago..Time.current)
-    @avg_response_time = @project.avg_response_time
+    @p50_response_time = @project.p50_response_time
     @queue_depth = queue_depth
     @open_issue_count = Rails.cache.fetch("project_#{@project.id}_open_issue_count", expires_in: 30.seconds) do
       @project.issues.open.count
