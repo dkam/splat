@@ -9,6 +9,11 @@
         <% end %>
       </div>
 
+      <!-- Project context: Overview / Errors / Performance -->
+      <% if @project&.persisted? %>
+        <%= render "shared/project_nav", project: @project %>
+      <% end %>
+
       <!-- Right side: System Status & Authentication -->
       <div class="flex items-center space-x-6">
         <!-- Settings Link -->
