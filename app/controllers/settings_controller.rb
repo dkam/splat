@@ -24,7 +24,10 @@ class SettingsController < ApplicationController
       :event_payloads_retention_days,
       :events_data_retention_days,
       :transaction_measurements_retention_days,
-      :transactions_data_retention_days
+      :transactions_data_retention_days,
+      :ducklake_events_retention_days,
+      :ducklake_transactions_retention_days,
+      :ducklake_issues_retention_days
     )
   end
 end

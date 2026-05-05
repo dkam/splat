@@ -68,9 +68,47 @@
     </div>
 
     <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800">DuckLake (Analytics) Retention</h2>
+      <p class="text-gray-600 mb-4">
+        DuckLake holds the long-tail copy used for percentiles, group-by-endpoint, and time-bucketing.
+        Columnar storage is cheap, so these can run a lot longer than the SQLite values above.
+      </p>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div>
+          <%= form.label :ducklake_events_retention_days, "Keep Events", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :ducklake_events_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Default: 365 days</p>
+        </div>
+
+        <div>
+          <%= form.label :ducklake_transactions_retention_days, "Keep Transactions", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :ducklake_transactions_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Default: 365 days</p>
+        </div>
+
+        <div>
+          <%= form.label :ducklake_issues_retention_days, "Keep Issue Snapshots", class: "block text-sm font-medium text-gray-700 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :ducklake_issues_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600">days</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Default: 730 days</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white shadow rounded-lg p-6">
       <h2 class="text-xl font-semibold mb-4 text-gray-800">Current Status</h2>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">SQLite (hot)</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div class="text-center p-4 bg-gray-50 rounded">
           <div class="text-2xl font-bold text-blue-600">
             <%= number_with_delimiter(Event.count) %>
@@ -92,9 +130,44 @@
         </div>
       </div>
 
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">DuckLake (analytics)</h3>
+      <%
+        ducklake_counts =
+          begin
+            {
+              events:       ApplicationDucklakeRecord.query("SELECT COUNT(*) AS n FROM events").first["n"],
+              transactions: ApplicationDucklakeRecord.query("SELECT COUNT(*) AS n FROM transactions").first["n"],
+              issues:       ApplicationDucklakeRecord.query("SELECT COUNT(*) AS n FROM issues").first["n"]
+            }
+          rescue => e
+            { error: "#{e.class}: #{e.message}" }
+          end
+      %>
+      <% if ducklake_counts[:error] %>
+        <div class="p-4 bg-red-50 rounded text-sm text-red-700">
+          DuckLake unavailable: <%= ducklake_counts[:error] %>
+        </div>
+      <% else %>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="text-center p-4 bg-gray-50 rounded">
+            <div class="text-2xl font-bold text-blue-600"><%= number_with_delimiter(ducklake_counts[:events]) %></div>
+            <div class="text-sm text-gray-600">Events</div>
+          </div>
+          <div class="text-center p-4 bg-gray-50 rounded">
+            <div class="text-2xl font-bold text-green-600"><%= number_with_delimiter(ducklake_counts[:transactions]) %></div>
+            <div class="text-sm text-gray-600">Transactions</div>
+          </div>
+          <div class="text-center p-4 bg-gray-50 rounded">
+            <div class="text-2xl font-bold text-purple-600"><%= number_with_delimiter(ducklake_counts[:issues]) %></div>
+            <div class="text-sm text-gray-600">Issue snapshots</div>
+          </div>
+        </div>
+      <% end %>
+
       <div class="mt-4 p-4 bg-blue-50 rounded">
         <div class="text-sm text-blue-800">
-          <strong>Data cleanup runs daily at 2am</strong> - Old payloads will be set to NULL and very old records deleted according to your retention settings.
+          <strong>SQLite cleanup</strong> runs daily at 2am via <code>DataRetentionJob</code>.
+          <strong>DuckLake cleanup</strong> runs via <code>DuckLake::RetentionJob</code> (schedule via Solid Queue recurring).
         </div>
       </div>
     </div>
