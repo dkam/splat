@@ -19,14 +19,16 @@ module DuckLake
       events_deleted = delete_older_than("events", setting.ducklake_events_cutoff_date)
       transactions_deleted = delete_older_than("transactions", setting.ducklake_transactions_cutoff_date)
       issues_deleted = delete_older_than("issues", setting.ducklake_issues_cutoff_date, column: "last_seen")
+      spans_deleted = delete_older_than("spans", setting.ducklake_spans_cutoff_date)
 
       Rails.logger.info "[DuckLake] retention done in #{(Time.current - start).round(2)}s — " \
-        "events=#{events_deleted} transactions=#{transactions_deleted} issues=#{issues_deleted}"
+        "events=#{events_deleted} transactions=#{transactions_deleted} issues=#{issues_deleted} spans=#{spans_deleted}"
 
       {
         events_deleted: events_deleted,
         transactions_deleted: transactions_deleted,
-        issues_deleted: issues_deleted
+        issues_deleted: issues_deleted,
+        spans_deleted: spans_deleted
       }
     end
 

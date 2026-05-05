@@ -48,8 +48,34 @@ CREATE TABLE IF NOT EXISTS transactions (
   http_url         VARCHAR,
   tags             JSON,
   measurements     JSON,
+  spans_truncated  BOOLEAN DEFAULT FALSE,
   created_at       TIMESTAMP,
   updated_at       TIMESTAMP
+);
+
+-- Append-only span rows. DuckLake-only (no AR mirror) — span volume is
+-- 10–100× transactions, so columnar Parquet pays for itself fast.
+-- Compression assumes rows are clustered by transaction at write time
+-- (one INSERT per transaction in ProcessTransactionJob); that lets RLE
+-- collapse repeated project_id/trace_id/transaction_id within a row group.
+-- description is normalized at ingest (literals stripped) so it dictionary-
+-- encodes well — and as a bonus, SQL literal values never hit disk.
+CREATE TABLE IF NOT EXISTS spans (
+  project_id     INTEGER NOT NULL,
+  trace_id       VARCHAR NOT NULL,
+  transaction_id VARCHAR NOT NULL,
+  span_id        VARCHAR NOT NULL,
+  parent_span_id VARCHAR,
+  timestamp      TIMESTAMP NOT NULL,
+  end_timestamp  TIMESTAMP NOT NULL,
+  op             VARCHAR,
+  status         VARCHAR,
+  description    VARCHAR,
+  tags           JSON,
+  data           JSON,
+  depth          INTEGER NOT NULL,
+  sequence       INTEGER NOT NULL,
+  created_at     TIMESTAMP
 );
 
 -- Issues are mutable in AR; we record snapshots in DuckLake on each event

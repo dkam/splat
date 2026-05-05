@@ -81,6 +81,21 @@ module ApplicationHelper
     )
   end
 
+  # Tailwind colour for a span's bar in the waterfall view, keyed off the
+  # Sentry op prefix. Op taxonomy is ~30 distinct values; bucketing by prefix
+  # gets us 90% of the legibility for none of the per-op upkeep.
+  def span_op_color(op)
+    return "bg-gray-400" if op.blank?
+    case op
+    when /\Adb\./           then "bg-blue-500"
+    when /\Ahttp\./         then "bg-orange-500"
+    when /\A(?:view|template|render)\./ then "bg-green-500"
+    when /\Acache\./        then "bg-purple-500"
+    when /\Aqueue\./        then "bg-pink-500"
+    else "bg-gray-500"
+    end
+  end
+
   # Return CSS class based on duration performance
   def duration_color_class(ms)
     return "text-gray-400" if ms.nil?

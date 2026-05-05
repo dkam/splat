@@ -225,6 +225,22 @@
     </div>
   <% end %>
 
+  <!-- Span Waterfall -->
+  <% if @spans&.any? %>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold text-gray-900">Span Waterfall</h2>
+        <span class="text-xs text-gray-500"><%= @spans.size %> span<%= "s" unless @spans.size == 1 %></span>
+      </div>
+      <% if @transaction.spans_truncated %>
+        <div class="mb-3 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded">
+          Showing first <%= @spans.size - 1 %> child spans; the rest were dropped at ingest (cap is 1000 per transaction).
+        </div>
+      <% end %>
+      <%= render "waterfall", spans: @spans, transaction: @transaction %>
+    </div>
+  <% end %>
+
   <!-- Measurements -->
   <% if @transaction.measurements.present? && @transaction.measurements.any? %>
     <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">

@@ -17,6 +17,11 @@ backlog with implementation notes) and mark it as `In progress` here.
   Booko already sends `release` via Sentry's standard config. (Commits `485a664`,
   `15f3df7`)
 - **N+1 query detection** — surfaced at the dashboard level. (Commit `1dc7c13`)
+- **Span waterfall** — full per-transaction span tree stored in DuckLake
+  (columnar, partitioned by year+month, with RLE/dictionary compression),
+  rendered as a tiered waterfall on the transaction detail page. SQL
+  normalization at ingest doubles as PII scrubbing — literal values never
+  reach disk. Capped at 1000 spans per transaction; 30-day retention.
 
 ## High value, low effort (next)
 

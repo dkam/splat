@@ -86,6 +86,26 @@ class ApplicationDucklakeRecord
       true
     end
 
+    # Bulk insert: writes many rows in a single VALUES (...), (...), ... INSERT.
+    # All rows must share the same set of keys (uses keys of the first row).
+    # One round-trip and — importantly for compression — one Parquet row group
+    # cluster, so RLE/dictionary encoding can crush the repeating fields.
+    def multi_insert(rows)
+      return false if disabled?
+      raise Error, "table_name not set on #{name}" unless table_name
+      return true if rows.empty?
+
+      key_order = rows.first.keys
+      cols = key_order.map(&:to_s)
+      placeholders = "(#{Array.new(cols.size, "?").join(", ")})"
+      sql = "INSERT INTO #{table_name} (#{cols.join(", ")}) VALUES " +
+            Array.new(rows.size, placeholders).join(", ")
+      binds = rows.flat_map { |r| key_order.map { |k| serialize(r[k]) } }
+
+      connection.execute(sql, *binds)
+      true
+    end
+
     def query(sql, *binds)
       return [] if disabled?
 
@@ -178,7 +198,7 @@ class ApplicationDucklakeRecord
     # tables that already have a current partition spec. DuckLake records
     # each ALTER as a new metadata snapshot, so we only ALTER when the
     # current spec is empty or different.
-    PARTITIONED_TABLES = %w[events transactions].freeze
+    PARTITIONED_TABLES = %w[events transactions spans].freeze
     PARTITION_TRANSFORMS = %w[year month].freeze
 
     def apply_partitioning!(conn)

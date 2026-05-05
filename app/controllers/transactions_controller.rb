@@ -7,6 +7,12 @@ class TransactionsController < ApplicationController
   before_action :set_transaction, only: [:show]
 
   def show
+    @spans = DuckLake::Span.for_transaction(
+      @transaction.transaction_id,
+      project_id: @project.id,
+      near_timestamp: @transaction.timestamp
+    )
+
     respond_to do |format|
       format.html
       format.json { render json: transaction_data }

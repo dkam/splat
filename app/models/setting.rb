@@ -18,7 +18,8 @@ class Setting < ApplicationRecord
       # DuckLake (cold/analytics) retention — longer, columnar storage is cheap.
       ducklake_events_retention_days: 365,
       ducklake_transactions_retention_days: 365,
-      ducklake_issues_retention_days: 730
+      ducklake_issues_retention_days: 730,
+      ducklake_spans_retention_days: 30
     }
   end
 
@@ -51,6 +52,10 @@ class Setting < ApplicationRecord
     ducklake_issues_retention_days.days.ago
   end
 
+  def ducklake_spans_cutoff_date
+    ducklake_spans_retention_days.days.ago
+  end
+
   # Validation
   validates :event_payloads_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
   validates :events_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
@@ -59,4 +64,5 @@ class Setting < ApplicationRecord
   validates :ducklake_events_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :ducklake_transactions_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :ducklake_issues_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
+  validates :ducklake_spans_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
 end

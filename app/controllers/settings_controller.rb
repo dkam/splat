@@ -27,7 +27,8 @@ class SettingsController < ApplicationController
       :transactions_data_retention_days,
       :ducklake_events_retention_days,
       :ducklake_transactions_retention_days,
-      :ducklake_issues_retention_days
+      :ducklake_issues_retention_days,
+      :ducklake_spans_retention_days
     )
   end
 end

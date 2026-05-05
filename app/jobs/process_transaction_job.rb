@@ -13,6 +13,7 @@ class ProcessTransactionJob < ApplicationJob
     end
 
     mirror_to_ducklake(transaction)
+    mirror_spans_to_ducklake(transaction, payload)
 
     Rails.logger.info "Processed transaction #{transaction.id}: #{transaction.transaction_name} (#{transaction.duration}ms)"
   rescue => e
@@ -50,5 +51,91 @@ class ProcessTransactionJob < ApplicationJob
     )
   rescue => e
     Rails.logger.error "[DuckLake] transaction mirror failed (#{transaction.transaction_id}): #{e.class}: #{e.message}"
+  end
+
+  SPAN_CAP = 1000
+
+  def mirror_spans_to_ducklake(transaction, payload)
+    raw_spans = Array(payload["spans"])
+    trace_ctx = payload.dig("contexts", "trace") || {}
+
+    root_start = parse_ts(payload["start_timestamp"])
+    root_end   = parse_ts(payload["timestamp"]) || transaction.timestamp
+    root_id    = trace_ctx["span_id"] || SecureRandom.hex(8)
+    trace_id   = trace_ctx["trace_id"] || SecureRandom.hex(16)
+
+    children = raw_spans.sort_by { |s| s["start_timestamp"].to_f }
+    if children.size > SPAN_CAP
+      children = children.first(SPAN_CAP)
+      transaction.update!(spans_truncated: true) if transaction.respond_to?(:spans_truncated=)
+    end
+
+    parent_depth = { root_id => 0 }
+    rows = []
+    rows << build_row(
+      project_id: transaction.project_id,
+      trace_id: trace_id, transaction_id: transaction.transaction_id,
+      span_id: root_id, parent_span_id: nil,
+      start_ts: root_start || transaction.timestamp,
+      end_ts: root_end,
+      op: trace_ctx["op"] || transaction.op,
+      status: trace_ctx.dig("status") || "ok",
+      description: payload["transaction"],
+      tags: trace_ctx["tags"], data: trace_ctx["data"],
+      depth: 0, sequence: 0
+    )
+
+    children.each_with_index do |s, i|
+      parent_id = s["parent_span_id"]
+      depth = (parent_depth[parent_id] || 0) + 1
+      parent_depth[s["span_id"]] = depth if s["span_id"]
+
+      rows << build_row(
+        project_id: transaction.project_id,
+        trace_id: s["trace_id"] || trace_id,
+        transaction_id: transaction.transaction_id,
+        span_id: s["span_id"] || SecureRandom.hex(8),
+        parent_span_id: parent_id,
+        start_ts: parse_ts(s["start_timestamp"]) || transaction.timestamp,
+        end_ts: parse_ts(s["timestamp"]) || transaction.timestamp,
+        op: s["op"], status: s["status"],
+        description: s["description"],
+        tags: s["tags"], data: s["data"],
+        depth: depth, sequence: i + 1
+      )
+    end
+
+    DuckLake::Span.multi_insert(rows)
+  rescue => e
+    Rails.logger.error "[DuckLake] span mirror failed (#{transaction.transaction_id}): #{e.class}: #{e.message}"
+  end
+
+  def build_row(project_id:, trace_id:, transaction_id:, span_id:, parent_span_id:,
+                start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
+    {
+      project_id: project_id,
+      trace_id: trace_id,
+      transaction_id: transaction_id,
+      span_id: span_id,
+      parent_span_id: parent_span_id,
+      timestamp: start_ts,
+      end_timestamp: end_ts,
+      op: op,
+      status: status,
+      description: Transaction::SqlNormalizer.normalize(description),
+      tags: tags,
+      data: data,
+      depth: depth.to_i,
+      sequence: sequence.to_i,
+      created_at: Time.current
+    }
+  end
+
+  def parse_ts(value)
+    case value
+    when Numeric then Time.at(value)
+    when String  then (Time.parse(value) rescue nil)
+    when Time    then value
+    end
   end
 end

@@ -27,6 +27,7 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
 - ✅ **N+1 Query Detection** - Mines `measurements.query_analysis` from the transaction span analyzer, ranks endpoints by N+1 prevalence, exposes a dedicated worklist and an MCP tool
 - ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
+- ✅ **Span Waterfall** - Per-transaction span tree stored in DuckLake (columnar, compressed) and rendered as a tiered timeline on the transaction detail page
 - ✅ **OLTP + OLAP storage** - SQLite for ingestion and OLTP, DuckLake (DuckDB + parquet) for analytics over long retention
 - ✅ **MCP Integration** - Query errors via Claude and AI assistants
 - ✅ **Minimal Dependencies** - Rails + SQLite + DuckDB + Solid Queue
@@ -265,6 +266,14 @@ The two stores have separate retention jobs, so you can keep weeks of OLTP detai
 #### Endpoint Impact Ranking
 
 The performance dashboard ranks endpoints by **time spent** (`avg_duration × count`) rather than average duration. A 50ms endpoint hit 10,000×/day costs more total time than a 2s endpoint hit 5×/day — sorting by impact tells you where optimisation actually pays back. The same table also surfaces P95 alongside, so a tail-heavy endpoint isn't hidden by a low average.
+
+#### Span Storage and SQL Normalization
+
+Each transaction's span tree is stored in DuckLake (columnar parquet) and rendered as a waterfall on the transaction detail page. Spans are 10–100× the volume of transactions, but DuckLake's per-column dictionary + RLE compression — combined with one ingest-time pass — keeps storage manageable:
+
+- **SQL normalization at ingest:** span descriptions like `SELECT * FROM users WHERE id = 42 AND email = 'alice@example.com'` are rewritten to `SELECT * FROM users WHERE id = ? AND email = ?` *before* being written to disk. The parameterized form dictionary-encodes to ~2 bytes per row instead of 500+.
+- **Privacy bonus:** because literals never reach disk, user IDs, email addresses in WHERE clauses, names in INSERTs, and tokens in URL paths are automatically redacted. We can show you the *pattern* of the offending query, but not the literal values that triggered it. This is a deliberate trade-off — and a documented commitment, not an accident.
+- **Cap and retention:** spans are capped at 1000 per transaction (excess dropped, transaction flagged) and retained for 30 days by default (configurable separately from transactions, since span volume is far higher).
 
 ## Maintenance
 
