@@ -150,6 +150,13 @@ class ApplicationDucklakeRecord
       conn.execute("INSTALL ducklake")
       conn.execute("LOAD ducklake")
 
+      # DuckLake commits a new catalog snapshot per write; under burst load
+      # (event/transaction/span ingest from many workers concurrently) the
+      # default 10-retry optimistic-concurrency loop exceeds. Bump to 100;
+      # collisions are still rare, retries are cheap, and 10× headroom
+      # absorbs a backlog catch-up without losing writes.
+      conn.execute("SET ducklake_max_retry_count = 100")
+
       return unless config[:storage].to_s == "s3"
 
       conn.execute("INSTALL httpfs")
