@@ -55,6 +55,7 @@ class ApplicationDucklakeRecord
         configure_connection!(connection, config)
         attach_lake!(connection, config)
         load_schema!(connection)
+        apply_partitioning!(connection)
 
         # Publish @connection only after the schema is fully loaded. Other
         # threads see nil until then and block on this mutex, instead of
@@ -168,6 +169,42 @@ class ApplicationDucklakeRecord
         next if cleaned.empty?
         conn.execute(cleaned)
       end
+    end
+
+    # Apply year+month partitioning to events and transactions, skipping
+    # tables that already have a current partition spec. DuckLake records
+    # each ALTER as a new metadata snapshot, so we only ALTER when the
+    # current spec is empty or different.
+    PARTITIONED_TABLES = %w[events transactions].freeze
+    PARTITION_TRANSFORMS = %w[year month].freeze
+
+    def apply_partitioning!(conn)
+      PARTITIONED_TABLES.each do |table|
+        current = current_partition_transforms(conn, table)
+        next if current == PARTITION_TRANSFORMS
+
+        conn.execute(
+          "ALTER TABLE #{table} SET PARTITIONED BY (year(timestamp), month(timestamp))"
+        )
+      end
+    end
+
+    def current_partition_transforms(conn, table)
+      sql = <<~SQL
+        SELECT pc.transform
+        FROM __ducklake_metadata_splat_lake.main.ducklake_partition_info pi
+        JOIN __ducklake_metadata_splat_lake.main.ducklake_partition_column pc
+          ON pc.partition_id = pi.partition_id
+        JOIN __ducklake_metadata_splat_lake.main.ducklake_table t
+          ON t.table_id = pi.table_id
+        WHERE t.table_name = '#{quote(table)}'
+          AND pi.end_snapshot IS NULL
+        ORDER BY pc.partition_key_index
+      SQL
+      result = conn.query(sql)
+      result.each.map { |row| row.first }
+    rescue
+      []
     end
 
     def quote(str)

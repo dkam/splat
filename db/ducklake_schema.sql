@@ -68,3 +68,8 @@ CREATE TABLE IF NOT EXISTS issues (
   created_at     TIMESTAMP,
   updated_at     TIMESTAMP
 );
+
+-- Partitioning (year+month of timestamp on events/transactions) is applied
+-- by ApplicationDucklakeRecord#apply_partitioning! at boot, not here —
+-- DuckLake records each ALTER as a new metadata snapshot, so re-running
+-- this file on every boot would grow the catalog unnecessarily.
