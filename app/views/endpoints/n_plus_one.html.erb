@@ -26,8 +26,7 @@
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">% Affected</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Queries</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Max Queries</th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Duration</th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">P95</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Latency</th>
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
@@ -59,15 +58,15 @@
                   <%= max_q %>
                 </span>
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right">
-                <span class="font-semibold <%= duration_color_class(endpoint["avg_duration"]) %>">
-                  <%= format_duration(endpoint["avg_duration"]) %>
-                </span>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right">
-                <span class="font-semibold <%= duration_color_class(endpoint["p95_duration"]) %>">
-                  <%= format_duration(endpoint["p95_duration"]) %>
-                </span>
+              <td class="px-6 py-3 whitespace-nowrap text-right">
+                <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-0 text-sm leading-tight">
+                  <span class="text-gray-400 text-right">avg</span>
+                  <span class="font-semibold <%= duration_color_class(endpoint["avg_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["avg_duration"]) %></span>
+                  <span class="text-gray-400 text-right">p95</span>
+                  <span class="font-semibold <%= duration_color_class(endpoint["p95_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p95_duration"]) %></span>
+                  <span class="text-gray-400 text-right">p99</span>
+                  <span class="font-semibold <%= duration_color_class(endpoint["p99_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p99_duration"]) %></span>
+                </div>
               </td>
             </tr>
           <% end %>

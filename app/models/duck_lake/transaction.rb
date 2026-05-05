@@ -56,8 +56,8 @@ module DuckLake
             transaction_name,
             COUNT(*)                       AS count,
             AVG(duration)                  AS avg_duration,
-            MAX(duration)                  AS max_duration,
             quantile_cont(duration, 0.95)  AS p95_duration,
+            quantile_cont(duration, 0.99)  AS p99_duration,
             AVG(duration) * COUNT(*)       AS time_spent,
             #{n_plus_one_count_expr}       AS n_plus_one_count,
             AVG(#{queries_expr})           AS avg_queries,
@@ -95,6 +95,7 @@ module DuckLake
             ROUND(100.0 * #{n_plus_one_count_expr} / COUNT(*), 1) AS n_plus_one_pct,
             AVG(duration)                                  AS avg_duration,
             quantile_cont(duration, 0.95)                  AS p95_duration,
+            quantile_cont(duration, 0.99)                  AS p99_duration,
             AVG(#{queries_expr})                           AS avg_queries,
             MAX(#{queries_expr})                           AS max_queries
           FROM transactions
