@@ -22,9 +22,9 @@ class IssuesController < ApplicationController
     counts_by_status = Rails.cache.fetch("project_#{@project.id}_issue_counts", expires_in: 30.seconds) do
       @project.issues.group(:status).count
     end
-    @open_count = counts_by_status[Issue.statuses["open"]] || 0
-    @resolved_count = counts_by_status[Issue.statuses["resolved"]] || 0
-    @ignored_count = counts_by_status[Issue.statuses["ignored"]] || 0
+    @open_count = counts_by_status["open"] || 0
+    @resolved_count = counts_by_status["resolved"] || 0
+    @ignored_count = counts_by_status["ignored"] || 0
 
     @sparkline_buckets = 24
     @sparkline_range = 24.hours.ago..Time.current
