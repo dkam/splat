@@ -13,7 +13,10 @@ class Project < ApplicationRecord
   scope :by_slug, ->(slug) { where(slug: slug) }
   scope :by_public_key, ->(key) { where(public_key: key) }
 
-  before_validation :generate_slug, if: :name?
+  # Slug is the stable identifier in the DSN URL — generate only when blank
+  # (i.e. on create) so renaming the display name later doesn't silently
+  # change the slug and break every client already pointing at the old DSN.
+  before_validation :generate_slug, if: -> { name? && slug.blank? }
   before_validation :generate_public_key, if: -> { public_key.blank? }
 
   def broadcast_issues_refresh
