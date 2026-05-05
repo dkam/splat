@@ -164,6 +164,8 @@ module Mcp
         get_transaction(arguments)
       when "get_endpoint_summary"
         get_endpoint_summary(arguments)
+      when "get_endpoint_timeseries"
+        get_endpoint_timeseries(arguments)
       when "get_transactions_by_endpoint"
         get_transactions_by_endpoint(arguments)
       when "compare_endpoint_performance"
@@ -284,13 +286,13 @@ module Mcp
         },
         {
           name: "get_transaction_stats",
-          description: "Get performance statistics including percentiles and slowest endpoints",
+          description: "Get overall performance percentiles plus the top endpoints ranked by total time spent (avg duration × request count). Use this to find where the app is actually spending its time, not just where individual outliers are slow. Each endpoint includes time_spent, avg, p95, and request count.",
           inputSchema: {
             type: "object",
             properties: {
               endpoint: {
                 type: "string",
-                description: "Filter by specific endpoint name (e.g., 'AlertsController#index')"
+                description: "Filter the overall percentile block to one endpoint (e.g., 'AlertsController#index'). The top-endpoints list is always project-wide."
               },
               time_range_hours: {
                 type: "integer",
@@ -299,10 +301,42 @@ module Mcp
               },
               limit: {
                 type: "integer",
-                description: "Maximum number of slowest endpoints (default: 10, max: 50)",
+                description: "Maximum number of top endpoints to return (default: 10, max: 50)",
                 default: 10
               }
             }
+          }
+        },
+        {
+          name: "get_endpoint_timeseries",
+          description: "Time-bucketed metrics (count, avg, p50, p95, p99) for a single endpoint over a time range. Useful for spotting regressions ('did p95 jump after the 14:00 deploy?') or load patterns. Missing buckets are zero-filled.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              endpoint: {
+                type: "string",
+                description: "Endpoint name (e.g., 'AlertsController#index')"
+              },
+              hours: {
+                type: "integer",
+                description: "Time range in hours (default: 24, max: 168)",
+                default: 24
+              },
+              buckets: {
+                type: "integer",
+                description: "Number of buckets to split the range into (default: 24 → 1-hour buckets for a 24h range; min: 4, max: 168)",
+                default: 24
+              },
+              environment: {
+                type: "string",
+                description: "Filter by environment (optional)"
+              },
+              release: {
+                type: "string",
+                description: "Filter by application version/release (optional)"
+              }
+            },
+            required: ["endpoint"]
           }
         },
         {
@@ -625,9 +659,9 @@ module Mcp
         ).first["n"]
       end
 
-      slowest_endpoints = DuckLake::Transaction.stats_by_endpoint(time_range, limit: limit)
+      top_endpoints = DuckLake::Transaction.stats_by_endpoint_with_impact(time_range, limit: limit)
 
-      text = format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours, endpoint)
+      text = format_transaction_stats(percentiles, top_endpoints, total_count, time_range_hours, endpoint)
 
       render json: {
         jsonrpc: "2.0",
@@ -728,6 +762,30 @@ module Mcp
         percentiles, db_percentiles, view_percentiles,
         slowest_request, fastest_request
       )
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: text }]
+        }
+      }
+    end
+
+    def get_endpoint_timeseries(args)
+      endpoint = args["endpoint"]
+      hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
+      buckets = [[args["buckets"]&.to_i || 24, 4].max, 168].min
+      environment = args["environment"]
+      release = args["release"]
+      time_range = hours.hours.ago..Time.current
+
+      series = DuckLake::Transaction.time_series_for_endpoint(
+        endpoint, time_range,
+        bucket_count: buckets, environment: environment, release: release
+      )
+
+      text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
 
       render json: {
         jsonrpc: "2.0",
@@ -1116,7 +1174,7 @@ module Mcp
       result
     end
 
-    def format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours, endpoint = nil)
+    def format_transaction_stats(percentiles, top_endpoints, total_count, time_range_hours, endpoint = nil)
       result = "## Transaction Performance Statistics\n\n"
       result += "**Endpoint:** #{endpoint}\n" if endpoint.present?
       result += "**Time Range:** Last #{time_range_hours} hour(s)\n"
@@ -1133,10 +1191,16 @@ module Mcp
       result += "- **P95:** #{percentiles[:p95].round}ms\n"
       result += "- **P99:** #{percentiles[:p99].round}ms\n\n"
 
-      if slowest_endpoints.any?
-        result += endpoint.present? ? "### Sample Requests\n\n" : "### Slowest Endpoints\n\n"
-        slowest_endpoints.each do |row|
-          result += "- **#{row["transaction_name"]}** - Avg: #{row["avg_duration"].to_f.round}ms (#{row["count"]} requests)\n"
+      if top_endpoints.any?
+        result += "### Top Endpoints by Impact (avg × count)\n\n"
+        result += "| Endpoint | Time Spent | Avg | P95 | Count |\n"
+        result += "|---|---:|---:|---:|---:|\n"
+        top_endpoints.each do |row|
+          result += "| #{row["transaction_name"]} " \
+                   "| #{format_ms(row["time_spent"])} " \
+                   "| #{format_ms(row["avg_duration"])} " \
+                   "| #{format_ms(row["p95_duration"])} " \
+                   "| #{row["count"]} |\n"
         end
       end
 
@@ -1275,6 +1339,39 @@ module Mcp
       end
 
       result
+    end
+
+    def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
+      bucket_minutes = (hours * 60.0 / buckets).round
+
+      header = "## Endpoint Time Series: #{endpoint}\n\n"
+      header += "**Time Range:** Last #{hours} hour(s)\n"
+      header += "**Buckets:** #{buckets} × #{bucket_minutes}m\n"
+      header += "**Environment:** #{environment}\n" if environment.present?
+      header += "**Release:** #{release}\n" if release.present?
+      header += "\n"
+
+      if series.all? { |b| b[:count].zero? }
+        return header + "No requests in this window.\n"
+      end
+
+      header += "| Bucket Start | Count | Avg | P50 | P95 | P99 | Max |\n"
+      header += "|---|---:|---:|---:|---:|---:|---:|\n"
+      series.each do |b|
+        header += "| #{b[:bucket_start].strftime('%Y-%m-%d %H:%M')} " \
+                 "| #{b[:count]} " \
+                 "| #{format_ms(b[:avg_duration])} " \
+                 "| #{format_ms(b[:p50_duration])} " \
+                 "| #{format_ms(b[:p95_duration])} " \
+                 "| #{format_ms(b[:p99_duration])} " \
+                 "| #{format_ms(b[:max_duration])} |\n"
+      end
+      header
+    end
+
+    def format_ms(value)
+      return "—" if value.nil?
+      "#{value.to_f.round}ms"
     end
 
     def format_transactions_by_endpoint(transactions, endpoint, hours, environment, release)

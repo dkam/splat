@@ -130,6 +130,61 @@ module DuckLake
         query(sql, *binds).first || {}
       end
 
+      # Time-bucketed metrics for one endpoint — count + percentiles per bucket.
+      # Bucket size is computed from the time range and bucket_count; missing
+      # buckets are zero-filled so callers always get a complete series.
+      def time_series_for_endpoint(endpoint, time_range = 24.hours.ago..Time.current,
+                                   bucket_count: 24, project_id: nil, environment: nil, release: nil)
+        bucket_seconds = ((time_range.end - time_range.begin) / bucket_count.to_f).to_f
+        return [] if bucket_seconds <= 0
+
+        sql = +<<~SQL
+          SELECT
+            CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
+            COUNT(*)                       AS count,
+            AVG(duration)                  AS avg_duration,
+            quantile_cont(duration, 0.50)  AS p50_duration,
+            quantile_cont(duration, 0.95)  AS p95_duration,
+            quantile_cont(duration, 0.99)  AS p99_duration,
+            MAX(duration)                  AS max_duration
+          FROM transactions
+          WHERE transaction_name = ?
+            AND timestamp BETWEEN ? AND ?
+        SQL
+        binds = [time_range.begin, bucket_seconds, endpoint, time_range.begin, time_range.end]
+
+        if project_id.present?
+          sql << " AND project_id = ?"
+          binds << project_id.to_i
+        end
+        if environment.present?
+          sql << " AND environment = ?"
+          binds << environment
+        end
+        if release.present?
+          sql << " AND release = ?"
+          binds << release
+        end
+
+        sql << " GROUP BY bucket_idx ORDER BY bucket_idx"
+        rows = query(sql, *binds)
+        by_idx = rows.index_by { |r| r["bucket_idx"].to_i }
+
+        Array.new(bucket_count) do |i|
+          row = by_idx[i]
+          bucket_start = time_range.begin + (i * bucket_seconds)
+          {
+            bucket_start: bucket_start,
+            count: row ? row["count"].to_i : 0,
+            avg_duration: row && row["avg_duration"]&.to_f,
+            p50_duration: row && row["p50_duration"]&.to_f,
+            p95_duration: row && row["p95_duration"]&.to_f,
+            p99_duration: row && row["p99_duration"]&.to_f,
+            max_duration: row && row["max_duration"]&.to_f
+          }
+        end
+      end
+
       def response_time_by_hour(time_range = 24.hours.ago..Time.current, project_id: nil)
         sql = +<<~SQL
           SELECT
@@ -149,6 +204,51 @@ module DuckLake
 
         sql << " GROUP BY hour_bucket ORDER BY hour_bucket"
         query(sql, *binds)
+      end
+
+      # Bucketed transaction counts keyed by transaction_name, for sparklines.
+      # Returns { transaction_name => [count_in_bucket_0, count_in_bucket_1, ...] }
+      # with a zero-filled array of length `buckets` for every name passed in.
+      def counts_by_bucket(transaction_names:, time_range: 24.hours.ago..Time.current,
+                           buckets: 24, project_id: nil, environment: nil)
+        result = transaction_names.to_h { |n| [n, Array.new(buckets, 0)] }
+        return result if transaction_names.blank?
+
+        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
+        return result if bucket_seconds <= 0
+
+        placeholders = Array.new(transaction_names.size, "?").join(",")
+
+        sql = +<<~SQL
+          SELECT
+            transaction_name,
+            CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
+            COUNT(*) AS c
+          FROM transactions
+          WHERE timestamp BETWEEN ? AND ?
+            AND transaction_name IN (#{placeholders})
+        SQL
+        binds = [time_range.begin, bucket_seconds, time_range.begin, time_range.end, *transaction_names]
+
+        if project_id.present?
+          sql << " AND project_id = ?\n"
+          binds << project_id.to_i
+        end
+        if environment.present?
+          sql << " AND environment = ?\n"
+          binds << environment
+        end
+
+        sql << "GROUP BY transaction_name, bucket_idx"
+
+        query(sql, *binds).each do |row|
+          name = row["transaction_name"]
+          idx = row["bucket_idx"].to_i.clamp(0, buckets - 1)
+          next unless result.key?(name)
+          result[name][idx] = row["c"].to_i
+        end
+
+        result
       end
 
       def slow(min_duration_ms:, time_range: 24.hours.ago..Time.current, project_id: nil,
