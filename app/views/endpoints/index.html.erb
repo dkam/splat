@@ -138,9 +138,14 @@
                 </td>
                 <td class="px-6 py-4 text-right">
                   <% n = endpoint["n_plus_one_count"].to_i %>
-                  <% if n > 0 %>
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800" title="Transactions with detected N+1 patterns">
-                      ⚠ <%= n %> / <%= endpoint["count"] %>
+                  <% total = endpoint["count"].to_i %>
+                  <% if n > 0 && total > 0 %>
+                    <% pct = (n.to_f / total * 100) %>
+                    <% pct_label = pct >= 99.95 ? "100%" : "#{pct.round(1)}%" %>
+                    <% tooltip = "#{number_with_delimiter(n)} of #{number_with_delimiter(total)} transactions tripped the N+1 detector (#{pct.round(2)}%)" %>
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800"
+                          title="<%= tooltip %>">
+                      ⚠ <%= pct_label %>
                     </span>
                   <% else %>
                     <span class="text-gray-400 text-sm">—</span>
