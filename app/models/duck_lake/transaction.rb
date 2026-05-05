@@ -23,6 +23,24 @@ module DuckLake
         (query(sql, *binds).first || {})["c"].to_i
       end
 
+      def error_count_in_range(time_range: nil, project_id: nil)
+        sql = +"SELECT COUNT(*) AS c FROM transactions"
+        binds = []
+        clauses = ["TRY_CAST(http_status AS INTEGER) >= 500"]
+
+        if time_range
+          clauses << "timestamp BETWEEN ? AND ?"
+          binds << time_range.begin << time_range.end
+        end
+        if project_id.present?
+          clauses << "project_id = ?"
+          binds << project_id.to_i
+        end
+
+        sql << " WHERE " << clauses.join(" AND ")
+        (query(sql, *binds).first || {})["c"].to_i
+      end
+
       def stats_by_endpoint(time_range = 24.hours.ago..Time.current, project_id: nil, limit: nil)
         sql = +<<~SQL
           SELECT

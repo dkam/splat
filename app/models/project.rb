@@ -81,11 +81,10 @@ class Project < ApplicationRecord
 
   def error_rate(time_range = 24.hours.ago..Time.current)
     total_requests = transaction_count(time_range)
-    error_events = event_count(time_range)
-
     return 0 if total_requests == 0
 
-    (error_events.to_f / total_requests * 100).round(2)
+    error_requests = DuckLake::Transaction.error_count_in_range(time_range: time_range, project_id: id)
+    (error_requests.to_f / total_requests * 100).round(2)
   end
 
   def avg_response_time(time_range = 24.hours.ago..Time.current)
