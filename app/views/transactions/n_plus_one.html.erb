@@ -34,39 +34,39 @@
           <% @endpoints.each do |endpoint| %>
             <tr class="hover:bg-gray-50">
               <td class="px-6 py-4 whitespace-nowrap">
-                <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint.transaction_name, time_range: @time_range),
+                <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint["transaction_name"], time_range: @time_range),
                     class: "text-blue-600 hover:text-blue-800 font-medium" do %>
-                  <%= endpoint.transaction_name %>
+                  <%= endpoint["transaction_name"] %>
                 <% end %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                  ⚠ <%= number_with_delimiter(endpoint.n_plus_one_count.to_i) %> / <%= number_with_delimiter(endpoint.total_count.to_i) %>
+                  ⚠ <%= number_with_delimiter(endpoint["n_plus_one_count"].to_i) %> / <%= number_with_delimiter(endpoint["total_count"].to_i) %>
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
-                <% pct = endpoint.n_plus_one_pct.to_f %>
+                <% pct = endpoint["n_plus_one_pct"].to_f %>
                 <span class="font-semibold <%= pct >= 50 ? 'text-red-700' : pct >= 10 ? 'text-orange-600' : 'text-gray-700' %>">
                   <%= pct %>%
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right text-gray-700">
-                <%= endpoint.avg_queries.to_f.round(1) %>
+                <%= endpoint["avg_queries"].to_f.round(1) %>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
-                <% max_q = endpoint.max_queries.to_i %>
+                <% max_q = endpoint["max_queries"].to_i %>
                 <span class="font-semibold <%= max_q > 50 ? 'text-red-700' : max_q > 20 ? 'text-orange-600' : 'text-gray-700' %>">
                   <%= max_q %>
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
-                <span class="font-semibold <%= duration_color_class(endpoint.avg_duration) %>">
-                  <%= format_duration(endpoint.avg_duration) %>
+                <span class="font-semibold <%= duration_color_class(endpoint["avg_duration"]) %>">
+                  <%= format_duration(endpoint["avg_duration"]) %>
                 </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
-                <span class="font-semibold <%= duration_color_class(endpoint.p95_duration) %>">
-                  <%= format_duration(endpoint.p95_duration) %>
+                <span class="font-semibold <%= duration_color_class(endpoint["p95_duration"]) %>">
+                  <%= format_duration(endpoint["p95_duration"]) %>
                 </span>
               </td>
             </tr>

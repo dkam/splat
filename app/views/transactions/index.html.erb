@@ -94,13 +94,13 @@
             <% @endpoints.each do |endpoint| %>
               <tr class="hover:bg-gray-50">
                 <td class="px-6 py-4 whitespace-nowrap">
-                  <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint.transaction_name, time_range: @time_range),
+                  <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint["transaction_name"], time_range: @time_range),
                       class: "text-blue-600 hover:text-blue-800 font-medium" do %>
-                    <%= endpoint.transaction_name %>
+                    <%= endpoint["transaction_name"] %>
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-center">
-                  <% spark = @endpoint_sparklines[endpoint.transaction_name] %>
+                  <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
                     <span class="text-blue-500">
                       <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} requests in window") %>
@@ -111,32 +111,32 @@
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
                   <span class="font-semibold text-gray-900">
-                    <%= format_duration(endpoint.time_spent) %>
+                    <%= format_duration(endpoint["time_spent"]) %>
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
-                  <span class="font-semibold <%= duration_color_class(endpoint.avg_duration) %>">
-                    <%= format_duration(endpoint.avg_duration) %>
+                  <span class="font-semibold <%= duration_color_class(endpoint["avg_duration"]) %>">
+                    <%= format_duration(endpoint["avg_duration"]) %>
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
-                  <span class="font-semibold <%= duration_color_class(endpoint.p95_duration) %>">
-                    <%= format_duration(endpoint.p95_duration) %>
+                  <span class="font-semibold <%= duration_color_class(endpoint["p95_duration"]) %>">
+                    <%= format_duration(endpoint["p95_duration"]) %>
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
-                  <span class="font-semibold <%= duration_color_class(endpoint.max_duration) %>">
-                    <%= format_duration(endpoint.max_duration) %>
+                  <span class="font-semibold <%= duration_color_class(endpoint["max_duration"]) %>">
+                    <%= format_duration(endpoint["max_duration"]) %>
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
-                  <span class="<%= 'text-sm' if endpoint.count >= 100_000 %>">
-                    <%= number_with_delimiter(endpoint.count) %>
+                  <span class="<%= 'text-sm' if endpoint["count"] >= 100_000 %>">
+                    <%= number_with_delimiter(endpoint["count"]) %>
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">
-                  <% avg_q = endpoint.avg_queries.to_f.round(1) %>
-                  <% max_q = endpoint.max_queries.to_i %>
+                  <% avg_q = endpoint["avg_queries"].to_f.round(1) %>
+                  <% max_q = endpoint["max_queries"].to_i %>
                   <% if max_q > 0 %>
                     <span class="<%= max_q > 20 ? 'text-red-700 font-semibold' : '' %>"><%= avg_q %> / <%= max_q %></span>
                   <% else %>
@@ -144,10 +144,10 @@
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
-                  <% n = endpoint.n_plus_one_count.to_i %>
+                  <% n = endpoint["n_plus_one_count"].to_i %>
                   <% if n > 0 %>
                     <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800" title="Transactions with detected N+1 patterns">
-                      ⚠ <%= n %> / <%= endpoint.count %>
+                      ⚠ <%= n %> / <%= endpoint["count"] %>
                     </span>
                   <% else %>
                     <span class="text-gray-400 text-sm">—</span>
