@@ -60,10 +60,14 @@
   </div>
 
   <!-- Quick Links -->
-  <div class="mb-6 flex gap-4">
+  <div class="mb-6 flex gap-4 flex-wrap">
     <%= link_to slow_project_transactions_path(@project.slug, time_range: @time_range),
         class: "bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-lg border border-red-200 transition-colors" do %>
       🐌 View Slow Transactions (>1s)
+    <% end %>
+    <%= link_to n_plus_one_project_transactions_path(@project.slug, time_range: @time_range),
+        class: "bg-orange-50 hover:bg-orange-100 text-orange-700 font-medium py-2 px-4 rounded-lg border border-orange-200 transition-colors" do %>
+      ⚠ View N+1 Issues
     <% end %>
   </div>
 
@@ -76,11 +80,14 @@
           <thead class="bg-gray-50">
             <tr>
               <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endpoint</th>
+              <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Trend</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Time Spent</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">P95</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Max</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Queries (avg/max)</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">N+1</th>
             </tr>
           </thead>
           <tbody class="bg-white divide-y divide-gray-200">
@@ -90,6 +97,16 @@
                   <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint.transaction_name, time_range: @time_range),
                       class: "text-blue-600 hover:text-blue-800 font-medium" do %>
                     <%= endpoint.transaction_name %>
+                  <% end %>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center">
+                  <% spark = @endpoint_sparklines[endpoint.transaction_name] %>
+                  <% if spark&.any? { |v| v.to_i.positive? } %>
+                    <span class="text-blue-500">
+                      <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} requests in window") %>
+                    </span>
+                  <% else %>
+                    <span class="text-gray-300 text-sm">—</span>
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
@@ -116,6 +133,25 @@
                   <span class="<%= 'text-sm' if endpoint.count >= 100_000 %>">
                     <%= number_with_delimiter(endpoint.count) %>
                   </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">
+                  <% avg_q = endpoint.avg_queries.to_f.round(1) %>
+                  <% max_q = endpoint.max_queries.to_i %>
+                  <% if max_q > 0 %>
+                    <span class="<%= max_q > 20 ? 'text-red-700 font-semibold' : '' %>"><%= avg_q %> / <%= max_q %></span>
+                  <% else %>
+                    <span class="text-gray-400">—</span>
+                  <% end %>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-right">
+                  <% n = endpoint.n_plus_one_count.to_i %>
+                  <% if n > 0 %>
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800" title="Transactions with detected N+1 patterns">
+                      ⚠ <%= n %> / <%= endpoint.count %>
+                    </span>
+                  <% else %>
+                    <span class="text-gray-400 text-sm">—</span>
+                  <% end %>
                 </td>
               </tr>
             <% end %>

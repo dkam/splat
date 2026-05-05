@@ -58,7 +58,10 @@ module DuckLake
             AVG(duration)                  AS avg_duration,
             MAX(duration)                  AS max_duration,
             quantile_cont(duration, 0.95)  AS p95_duration,
-            AVG(duration) * COUNT(*)       AS time_spent
+            AVG(duration) * COUNT(*)       AS time_spent,
+            #{n_plus_one_count_expr}       AS n_plus_one_count,
+            AVG(#{queries_expr})           AS avg_queries,
+            MAX(#{queries_expr})           AS max_queries
           FROM transactions
           WHERE timestamp BETWEEN ? AND ?
         SQL
@@ -78,6 +81,58 @@ module DuckLake
 
         query(sql, *binds)
       end
+
+      # Ranks endpoints by raw N+1 prevalence — for the "performance issues"
+      # surface and the find_n_plus_one_endpoints MCP tool. Excludes endpoints
+      # with zero N+1 hits so the result is a focused worklist.
+      def endpoints_by_n_plus_one(time_range = 24.hours.ago..Time.current,
+                                  project_id: nil, environment: nil, limit: 20)
+        sql = +<<~SQL
+          SELECT
+            transaction_name,
+            COUNT(*)                                       AS total_count,
+            #{n_plus_one_count_expr}                       AS n_plus_one_count,
+            ROUND(100.0 * #{n_plus_one_count_expr} / COUNT(*), 1) AS n_plus_one_pct,
+            AVG(duration)                                  AS avg_duration,
+            quantile_cont(duration, 0.95)                  AS p95_duration,
+            AVG(#{queries_expr})                           AS avg_queries,
+            MAX(#{queries_expr})                           AS max_queries
+          FROM transactions
+          WHERE timestamp BETWEEN ? AND ?
+        SQL
+        binds = [time_range.begin, time_range.end]
+
+        if project_id.present?
+          sql << " AND project_id = ?\n"
+          binds << project_id.to_i
+        end
+        if environment.present?
+          sql << " AND environment = ?\n"
+          binds << environment
+        end
+
+        sql << "GROUP BY transaction_name HAVING n_plus_one_count > 0 ORDER BY n_plus_one_count DESC"
+        sql << " LIMIT #{limit.to_i}" if limit
+
+        query(sql, *binds)
+      end
+
+      private
+
+      # SUM of transactions whose measurements.query_analysis.potential_n_plus_one
+      # array is non-empty. measurements is JSON-typed in the schema but values
+      # arrive as serialized strings via `to_json` in the dual-write — DuckDB
+      # doesn't auto-coerce, so we cast explicitly.
+      def n_plus_one_count_expr
+        "SUM(CASE WHEN COALESCE(json_array_length(json_extract(CAST(measurements AS JSON), '$.query_analysis.potential_n_plus_one')), 0) > 0 THEN 1 ELSE 0 END)"
+      end
+
+      # Number of SQL queries per transaction, from measurements.query_analysis.total_queries.
+      def queries_expr
+        "COALESCE(CAST(json_extract(CAST(measurements AS JSON), '$.query_analysis.total_queries') AS INTEGER), 0)"
+      end
+
+      public
 
       def percentiles(time_range = 24.hours.ago..Time.current, project_id: nil)
         sql = +<<~SQL

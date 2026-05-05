@@ -30,6 +30,14 @@ class TransactionsController < ApplicationController
 
     @endpoints = ducklake_endpoints_by_impact(time_range, environment: params[:environment], limit: 20)
 
+    @endpoint_sparklines = DuckLake::Transaction.counts_by_bucket(
+      transaction_names: @endpoints.map(&:transaction_name),
+      time_range: time_range,
+      buckets: 24,
+      project_id: @project.id,
+      environment: params[:environment]
+    )
+
     @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
 
     @environments = Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
@@ -63,6 +71,28 @@ class TransactionsController < ApplicationController
 
     @pagy, @transactions = pagy(transactions, limit: 50)
     @threshold = threshold
+  end
+
+  def n_plus_one
+    @time_range = params[:time_range] || "24h"
+    time_ago = case @time_range
+               when "1h"  then 1.hour.ago
+               when "6h"  then 6.hours.ago
+               when "24h" then 24.hours.ago
+               when "7d"  then 7.days.ago
+               when "30d" then 30.days.ago
+               else 24.hours.ago
+               end
+    time_range = time_ago..Time.current
+
+    rows = DuckLake::Transaction.endpoints_by_n_plus_one(
+      time_range, project_id: @project.id, environment: params[:environment], limit: 50
+    )
+    @endpoints = rows.map { |r| OpenStruct.new(r.transform_keys(&:to_sym)) }
+
+    @environments = Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
+      @project.transactions.distinct.pluck(:environment).compact.sort
+    end
   end
 
   def by_endpoint

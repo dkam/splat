@@ -47,6 +47,7 @@ Rails.application.routes.draw do
       collection do
         get :slow
         get :by_endpoint
+        get :n_plus_one
       end
     end
   end

@@ -166,6 +166,8 @@ module Mcp
         get_endpoint_summary(arguments)
       when "get_endpoint_timeseries"
         get_endpoint_timeseries(arguments)
+      when "find_n_plus_one_endpoints"
+        find_n_plus_one_endpoints(arguments)
       when "get_transactions_by_endpoint"
         get_transactions_by_endpoint(arguments)
       when "compare_endpoint_performance"
@@ -303,6 +305,29 @@ module Mcp
                 type: "integer",
                 description: "Maximum number of top endpoints to return (default: 10, max: 50)",
                 default: 10
+              }
+            }
+          }
+        },
+        {
+          name: "find_n_plus_one_endpoints",
+          description: "List endpoints where transactions show N+1 query patterns (the same SQL pattern repeated >3 times in one request). Ranked by number of affected transactions. Returns N+1 count, total count, % affected, avg/max queries per request, and avg/p95 duration. Use this to find endpoints that need eager-loading or query consolidation.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              time_range_hours: {
+                type: "integer",
+                description: "Number of hours to look back (default: 24, max: 168)",
+                default: 24
+              },
+              environment: {
+                type: "string",
+                description: "Filter by environment (optional)"
+              },
+              limit: {
+                type: "integer",
+                description: "Maximum endpoints to return (default: 20, max: 100)",
+                default: 20
               }
             }
           }
@@ -762,6 +787,27 @@ module Mcp
         percentiles, db_percentiles, view_percentiles,
         slowest_request, fastest_request
       )
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: text }]
+        }
+      }
+    end
+
+    def find_n_plus_one_endpoints(args)
+      time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
+      environment = args["environment"]
+      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
+      time_range = time_range_hours.hours.ago..Time.current
+
+      rows = DuckLake::Transaction.endpoints_by_n_plus_one(
+        time_range, environment: environment, limit: limit
+      )
+
+      text = format_n_plus_one_endpoints(rows, time_range_hours, environment)
 
       render json: {
         jsonrpc: "2.0",
@@ -1339,6 +1385,30 @@ module Mcp
       end
 
       result
+    end
+
+    def format_n_plus_one_endpoints(rows, hours, environment)
+      header = "## Endpoints with N+1 Query Issues\n\n"
+      header += "**Time Range:** Last #{hours} hour(s)\n"
+      header += "**Environment:** #{environment}\n" if environment.present?
+      header += "\n"
+
+      if rows.empty?
+        return header + "No N+1 patterns detected in this window.\n"
+      end
+
+      header += "| Endpoint | N+1 / Total | % Affected | Avg Queries | Max Queries | Avg | P95 |\n"
+      header += "|---|---:|---:|---:|---:|---:|---:|\n"
+      rows.each do |r|
+        header += "| #{r["transaction_name"]} " \
+                 "| #{r["n_plus_one_count"]} / #{r["total_count"]} " \
+                 "| #{r["n_plus_one_pct"]}% " \
+                 "| #{r["avg_queries"].to_f.round(1)} " \
+                 "| #{r["max_queries"]} " \
+                 "| #{format_ms(r["avg_duration"])} " \
+                 "| #{format_ms(r["p95_duration"])} |\n"
+      end
+      header
     end
 
     def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
