@@ -247,63 +247,6 @@ class TransactionTest < ActiveSupport::TestCase
     assert_nil txn.measurement("nonexistent")
   end
 
-  test "stats_by_endpoint aggregates transaction statistics" do
-    3.times do |i|
-      @project.transactions.create!(
-        transaction_id: "stats-slow-#{i}",
-        transaction_name: "SlowEndpoint",
-        timestamp: Time.current,
-        duration: 500 + (i * 100),
-        db_time: 200 + (i * 50),
-        view_time: 100 + (i * 25)
-      )
-    end
-
-    2.times do |i|
-      @project.transactions.create!(
-        transaction_id: "stats-fast-#{i}",
-        transaction_name: "FastEndpoint",
-        timestamp: Time.current,
-        duration: 100 + (i * 10),
-        db_time: 50 + (i * 5)
-      )
-    end
-
-    stats = Transaction.stats_by_endpoint.to_a
-
-    assert_equal 2, stats.length
-
-    slow_stats = stats.find { |s| s.transaction_name == "SlowEndpoint" }
-    fast_stats = stats.find { |s| s.transaction_name == "FastEndpoint" }
-
-    assert_equal 600, slow_stats.avg_duration.to_i
-    assert_equal 3, slow_stats.count
-
-    assert_equal 105, fast_stats.avg_duration.to_i
-    assert_equal 2, fast_stats.count
-  end
-
-  test "percentiles calculates distribution correctly" do
-    # Create transactions with durations: 100, 200, 300, 400, 500
-    5.times do |i|
-      @project.transactions.create!(
-        transaction_id: "perc-#{i}",
-        transaction_name: "Test",
-        timestamp: Time.current,
-        duration: (i + 1) * 100
-      )
-    end
-
-    percentiles = Transaction.percentiles(nil, project_id: @project.id)
-
-    assert_equal 300, percentiles[:avg]
-    assert_equal 300, percentiles[:p50]
-    assert_equal 100, percentiles[:min]
-    assert_equal 500, percentiles[:max]
-    assert percentiles[:p95] >= 400
-    assert percentiles[:p99] >= 400
-  end
-
   test "time-based scopes filter correctly" do
     old_transaction = @project.transactions.create!(
       transaction_id: "old-1",

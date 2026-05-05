@@ -1,0 +1,38 @@
+# DuckLake configuration — analytics surface (DuckDB lakehouse format).
+#
+# Catalog: SQLite file holding metadata + inlined recent rows.
+# Data path: where parquet files are written when inlined data is flushed.
+#   Set storage: s3 (with the s3 block) to write parquet to S3 instead of local FS.
+#
+# Data inlining lets recent rows live in the catalog directly and only flush to
+# parquet when the row threshold is crossed — fast writes, no tiny-file problem.
+
+default: &default
+  catalog: storage/<%= Rails.env %>_ducklake_catalog.sqlite3
+  data_path: storage/<%= Rails.env %>_ducklake_data/
+  storage: local
+  # data_inlining_row_limit applies per ATTACH; 1000 rows is a reasonable
+  # default — small enough to flush quickly under load, large enough to avoid
+  # parquet files for low-traffic environments.
+  data_inlining_row_limit: 1000
+
+development:
+  <<: *default
+
+test:
+  <<: *default
+  catalog: storage/test_ducklake_catalog.sqlite3
+  data_path: tmp/test_ducklake_data/
+
+production:
+  <<: *default
+  catalog: <%= ENV.fetch("DUCKLAKE_CATALOG", "storage/ducklake.sqlite3") %>
+  data_path: <%= ENV.fetch("DUCKLAKE_DATA_PATH", "storage/parquet/") %>
+  storage: <%= ENV.fetch("DUCKLAKE_STORAGE", "local") %>
+  s3:
+    bucket: <%= ENV["DUCKLAKE_S3_BUCKET"] %>
+    prefix: <%= ENV.fetch("DUCKLAKE_S3_PREFIX", "splat/") %>
+    region: <%= ENV["AWS_REGION"] %>
+    access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"] %>
+    secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>
+    endpoint: <%= ENV["AWS_S3_ENDPOINT"] %>

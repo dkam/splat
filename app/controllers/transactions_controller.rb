@@ -15,33 +15,23 @@ class TransactionsController < ApplicationController
                when "7d" then 7.days.ago
                else 24.hours.ago
                end
+    time_range = time_ago..Time.current
 
+    # Recent transactions list stays on AR (OLTP — find/show by id).
     base_scope = @project.transactions.where("timestamp > ?", time_ago)
     base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
 
-    # Calculate stats efficiently
-    @avg_duration = base_scope.average(:duration)&.round || 0
+    # Aggregates come from DuckLake. Environment filter is best handled in
+    # DuckLake too when present.
+    duck_percentiles = ducklake_percentiles_for(time_range, environment: params[:environment])
+    @avg_duration = duck_percentiles[:avg]&.round || 0
+    @p95_duration = duck_percentiles[:p95] || 0
+    @p99_duration = duck_percentiles[:p99] || 0
 
-    # Use sampling for percentiles (SQLite can't do percentiles efficiently)
-    cache_key = "transaction_percentiles_#{@project.id}_#{@time_range}_#{Time.current.to_i / 300}"
-    percentiles = Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
-      calculate_percentiles_sampled(base_scope, 2000)
-    end
+    @slow_endpoints = ducklake_slow_endpoints_for(time_range, environment: params[:environment], limit: 20)
 
-    @p95_duration = percentiles[:p95] || 0
-    @p99_duration = percentiles[:p99] || 0
-
-    # Slow endpoints grouped by transaction_name
-    @slow_endpoints = base_scope
-      .group(:transaction_name)
-      .select("transaction_name, AVG(duration) as avg_duration, COUNT(*) as count, MAX(duration) as max_duration")
-      .order("avg_duration DESC")
-      .limit(20)
-
-    # Recent transactions
     @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
 
-    # Available environments for filter (cached)
     @environments = Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
       @project.transactions.distinct.pluck(:environment).compact.sort
     end
@@ -85,21 +75,19 @@ class TransactionsController < ApplicationController
                when "7d" then 7.days.ago
                else 24.hours.ago
                end
+    time_range = time_ago..Time.current
 
+    # Aggregates from DuckLake.
+    stats = DuckLake::Transaction.percentiles_for_endpoint(@endpoint, time_range, project_id: @project.id)
+    @avg_duration = stats["avg_duration"]&.to_f&.round || 0
+    @p95_duration = stats["p95_duration"]&.to_f&.round || 0
+    @p99_duration = stats["p99_duration"]&.to_f&.round || 0
+
+    # Paginated list stays on AR.
     transactions = @project.transactions
       .where(transaction_name: @endpoint)
       .where("timestamp > ?", time_ago)
       .order(timestamp: :desc)
-
-    # Calculate endpoint-specific stats
-    durations = transactions.pluck(:duration).sort
-    if durations.any?
-      @avg_duration = (durations.sum / durations.size.to_f).round
-      @p95_duration = durations[(durations.size * 0.95).to_i] || 0
-      @p99_duration = durations[(durations.size * 0.99).to_i] || 0
-    else
-      @avg_duration = @p95_duration = @p99_duration = 0
-    end
 
     @pagy, @transactions = pagy(transactions, limit: 50)
   end
@@ -112,6 +100,54 @@ class TransactionsController < ApplicationController
 
   def set_transaction
     @transaction = @project.transactions.find(params[:id])
+  end
+
+  def ducklake_percentiles_for(time_range, environment: nil)
+    if environment.present?
+      sql = <<~SQL
+        SELECT
+          AVG(duration)                  AS avg,
+          quantile_cont(duration, 0.50)  AS p50,
+          quantile_cont(duration, 0.95)  AS p95,
+          quantile_cont(duration, 0.99)  AS p99
+        FROM transactions
+        WHERE timestamp BETWEEN ? AND ?
+          AND project_id = ?
+          AND environment = ?
+      SQL
+      row = DuckLake::Transaction.query(sql, time_range.begin, time_range.end, @project.id, environment).first || {}
+      {
+        avg: row["avg"]&.to_f || 0,
+        p50: row["p50"]&.to_f || 0,
+        p95: row["p95"]&.to_f || 0,
+        p99: row["p99"]&.to_f || 0
+      }
+    else
+      DuckLake::Transaction.percentiles(time_range, project_id: @project.id)
+    end
+  end
+
+  def ducklake_slow_endpoints_for(time_range, environment: nil, limit: 20)
+    rows =
+      if environment.present?
+        DuckLake::Transaction.query(<<~SQL, time_range.begin, time_range.end, @project.id, environment, limit)
+          SELECT
+            transaction_name,
+            AVG(duration)  AS avg_duration,
+            MAX(duration)  AS max_duration,
+            COUNT(*)       AS count
+          FROM transactions
+          WHERE timestamp BETWEEN ? AND ?
+            AND project_id = ?
+            AND environment = ?
+          GROUP BY transaction_name
+          ORDER BY avg_duration DESC
+          LIMIT ?
+        SQL
+      else
+        DuckLake::Transaction.stats_by_endpoint(time_range, project_id: @project.id, limit: limit)
+      end
+    rows.map { |r| OpenStruct.new(r.transform_keys(&:to_sym)) }
   end
 
   def transaction_data
@@ -153,18 +189,6 @@ class TransactionsController < ApplicationController
       },
       created_at: @transaction.created_at,
       updated_at: @transaction.updated_at
-    }
-  end
-
-  def calculate_percentiles_sampled(base_scope, sample_size = 2000)
-    # Get recent sample (more representative than random)
-    sample = base_scope.order(timestamp: :desc).limit(sample_size).pluck(:duration).sort
-    return { avg: 0, p95: 0, p99: 0 } if sample.empty?
-
-    {
-      avg: (sample.sum / sample.size.to_f).round,
-      p95: sample[(sample.size * 0.95).to_i] || 0,
-      p99: sample[(sample.size * 0.99).to_i] || 0
     }
   end
 

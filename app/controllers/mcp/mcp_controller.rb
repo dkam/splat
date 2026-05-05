@@ -602,13 +602,30 @@ module Mcp
 
       time_range = time_range_hours.hours.ago..Time.current
 
-      # Filter by endpoint if specified
-      transactions = Transaction.where(timestamp: time_range)
-      transactions = transactions.by_name(endpoint) if endpoint.present?
+      if endpoint.present?
+        percentiles = DuckLake::Transaction.percentiles_for_endpoint(endpoint, time_range)
+        # Map endpoint-summary shape onto the percentiles formatter shape.
+        percentiles = {
+          avg: percentiles["avg_duration"]&.to_f || 0,
+          p50: percentiles["p50_duration"]&.to_f || 0,
+          p95: percentiles["p95_duration"]&.to_f || 0,
+          p99: percentiles["p99_duration"]&.to_f || 0,
+          min: percentiles["min_duration"]&.to_f || 0,
+          max: percentiles["max_duration"]&.to_f || 0
+        }
+        total_count = DuckLake::Transaction.query(
+          "SELECT COUNT(*) AS n FROM transactions WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?",
+          endpoint, time_range.begin, time_range.end
+        ).first["n"]
+      else
+        percentiles = DuckLake::Transaction.percentiles(time_range)
+        total_count = DuckLake::Transaction.query(
+          "SELECT COUNT(*) AS n FROM transactions WHERE timestamp BETWEEN ? AND ?",
+          time_range.begin, time_range.end
+        ).first["n"]
+      end
 
-      percentiles = Transaction.percentiles(time_range)
-      slowest_endpoints = Transaction.stats_by_endpoint(time_range).limit(limit)
-      total_count = transactions.count
+      slowest_endpoints = DuckLake::Transaction.stats_by_endpoint(time_range, limit: limit)
 
       text = format_transaction_stats(percentiles, slowest_endpoints, total_count, time_range_hours, endpoint)
 
@@ -630,18 +647,20 @@ module Mcp
       time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
       limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
 
-      transactions = Transaction.includes(:project)
-        .where("timestamp > ?", time_range_hours.hours.ago)
-        .where("duration >= ?", min_duration_ms)
-        .order(duration: :desc)
+      rows = DuckLake::Transaction.slow(
+        min_duration_ms: min_duration_ms,
+        time_range: time_range_hours.hours.ago..Time.current,
+        endpoint: endpoint,
+        http_status: http_status,
+        http_method: http_method,
+        environment: environment,
+        limit: limit
+      )
 
-      transactions = transactions.where("transaction_name LIKE ?", "%#{endpoint}%") if endpoint.present?
-      transactions = transactions.where(http_status: http_status) if http_status.present?
-      transactions = transactions.where(http_method: http_method) if http_method.present?
-      transactions = transactions.where(environment: environment) if environment.present?
-      transactions = transactions.limit(limit)
+      project_names = Project.where(id: rows.map { |r| r["project_id"] }.compact.uniq).pluck(:id, :name).to_h
+      rows.each { |r| r["project_name"] = project_names[r["project_id"]] }
 
-      text = format_slow_transactions(transactions, min_duration_ms, time_range_hours)
+      text = format_slow_transactions(rows, min_duration_ms, time_range_hours)
 
       render json: {
         jsonrpc: "2.0",
@@ -676,29 +695,33 @@ module Mcp
       hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
       environment = args["environment"]
       release = args["release"]
+      time_range = hours.hours.ago..Time.current
 
-      transactions = Transaction.includes(:project)
-        .where(transaction_name: endpoint)
-        .where("timestamp > ?", hours.hours.ago)
+      stats = DuckLake::Transaction.percentiles_for_endpoint(
+        endpoint, time_range, environment: environment, release: release
+      )
+      total_count = stats["count"].to_i
+      return render_no_data("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count.zero?
 
-      transactions = transactions.where(environment: environment) if environment.present?
-      transactions = transactions.where(release: release) if release.present?
+      percentiles = {
+        avg: stats["avg_duration"]&.to_f || 0,
+        p50: stats["p50_duration"]&.to_f || 0,
+        p95: stats["p95_duration"]&.to_f || 0,
+        p99: stats["p99_duration"]&.to_f || 0,
+        min: stats["min_duration"]&.to_f || 0,
+        max: stats["max_duration"]&.to_f || 0
+      }
+      db_percentiles =
+        if stats["avg_db_time"]
+          { avg: stats["avg_db_time"].to_f, p95: stats["p95_db_time"]&.to_f || 0 }
+        end
+      view_percentiles =
+        if stats["avg_view_time"]
+          { avg: stats["avg_view_time"].to_f, p95: stats["p95_view_time"]&.to_f || 0 }
+        end
 
-      # Single pass: pull duration, db_time, view_time in one query
-      rows = transactions.pluck(:duration, :db_time, :view_time)
-      total_count = rows.size
-      return render_no_data("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count == 0
-
-      durations = rows.map(&:first).sort
-      db_times = rows.map { |r| r[1] }.compact
-      view_times = rows.map { |r| r[2] }.compact
-
-      percentiles = calculate_percentiles(durations)
-      db_percentiles = calculate_percentiles(db_times) if db_times.any?
-      view_percentiles = calculate_percentiles(view_times) if view_times.any?
-
-      slowest_request = transactions.order(duration: :desc).first
-      fastest_request = transactions.order(duration: :asc).first
+      slowest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :desc)
+      fastest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :asc)
 
       text = format_endpoint_summary(
         endpoint, total_count, hours, environment, release,
@@ -713,6 +736,25 @@ module Mcp
           content: [{ type: "text", text: text }]
         }
       }
+    end
+
+    def endpoint_extreme_row(endpoint, time_range, environment, release, direction)
+      sql = +<<~SQL
+        SELECT id, duration, db_time, view_time, timestamp
+        FROM transactions
+        WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?
+      SQL
+      binds = [endpoint, time_range.begin, time_range.end]
+      if environment.present?
+        sql << " AND environment = ?"
+        binds << environment
+      end
+      if release.present?
+        sql << " AND release = ?"
+        binds << release
+      end
+      sql << " ORDER BY duration #{direction == :desc ? 'DESC' : 'ASC'} LIMIT 1"
+      DuckLake::Transaction.query(sql, *binds).first
     end
 
     def get_transactions_by_endpoint(args)
@@ -843,23 +885,32 @@ module Mcp
       }
     end
 
+    # Returns a sorted array of durations from DuckLake, ready for percentile calc.
     def get_transactions_by_filters(endpoint, hours, environment, release)
-      transactions = Transaction.includes(:project)
-        .where(transaction_name: endpoint)
-        .where("timestamp > ?", hours.hours.ago)
-
-      transactions = transactions.where(environment: environment) if environment.present?
-      transactions = transactions.where(release: release) if release.present?
-      transactions
+      durations_for(
+        endpoint,
+        hours.hours.ago..Time.current,
+        environment: environment,
+        release: release
+      )
     end
 
     def get_transactions_by_time_range(endpoint, start_time, end_time, environment)
-      transactions = Transaction.includes(:project)
-        .where(transaction_name: endpoint)
-        .where(timestamp: start_time..end_time)
+      durations_for(endpoint, start_time..end_time, environment: environment)
+    end
 
-      transactions = transactions.where(environment: environment) if environment.present?
-      transactions
+    def durations_for(endpoint, time_range, environment: nil, release: nil)
+      sql = +"SELECT duration FROM transactions WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?"
+      binds = [endpoint, time_range.begin, time_range.end]
+      if environment.present?
+        sql << " AND environment = ?"
+        binds << environment
+      end
+      if release.present?
+        sql << " AND release = ?"
+        binds << release
+      end
+      DuckLake::Transaction.query(sql, *binds).map { |r| r["duration"] }.sort
     end
 
     def render_no_data(message)
@@ -1083,16 +1134,9 @@ module Mcp
       result += "- **P99:** #{percentiles[:p99].round}ms\n\n"
 
       if slowest_endpoints.any?
-        if endpoint.present?
-          result += "### Sample Requests\n\n"
-          slowest_endpoints.each do |sample|
-            result += "- **#{sample.transaction_name}** - Avg: #{sample.avg_duration.to_f.round}ms (#{sample.count} requests)\n"
-          end
-        else
-          result += "### Slowest Endpoints\n\n"
-          slowest_endpoints.each do |endpoint_stat|
-            result += "- **#{endpoint_stat.transaction_name}** - Avg: #{endpoint_stat.avg_duration.to_f.round}ms (#{endpoint_stat.count} requests)\n"
-          end
+        result += endpoint.present? ? "### Sample Requests\n\n" : "### Slowest Endpoints\n\n"
+        slowest_endpoints.each do |row|
+          result += "- **#{row["transaction_name"]}** - Avg: #{row["avg_duration"].to_f.round}ms (#{row["count"]} requests)\n"
         end
       end
 
@@ -1108,12 +1152,12 @@ module Mcp
       result += "Found #{transactions.size} transaction(s):\n\n"
 
       transactions.each do |txn|
-        result += "**Transaction ##{txn.id}** - #{txn.transaction_name}\n"
-        result += "  - Duration: #{txn.duration.round}ms\n"
-        result += "  - Timestamp: #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        result += "  - HTTP: #{txn.http_method} #{txn.http_status}\n" if txn.http_method || txn.http_status
-        result += "  - Environment: #{txn.environment}\n" if txn.environment
-        result += "  - Project: #{txn.project.name}\n\n"
+        result += "**Transaction ##{txn["id"]}** - #{txn["transaction_name"]}\n"
+        result += "  - Duration: #{txn["duration"].round}ms\n"
+        result += "  - Timestamp: #{txn["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "  - HTTP: #{txn["http_method"]} #{txn["http_status"]}\n" if txn["http_method"] || txn["http_status"]
+        result += "  - Environment: #{txn["environment"]}\n" if txn["environment"]
+        result += "  - Project: #{txn["project_name"]}\n\n" if txn["project_name"]
       end
 
       result
@@ -1217,17 +1261,17 @@ module Mcp
       # Extreme examples
       result += "### Sample Requests\n\n"
       if fastest_request
-        result += "**Fastest Request:** #{fastest_request.duration.round}ms"
-        result += " (DB: #{fastest_request.db_time.round}ms)" if fastest_request.db_time
-        result += " (View: #{fastest_request.view_time.round}ms)" if fastest_request.view_time
-        result += " - #{fastest_request.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "**Fastest Request:** #{fastest_request["duration"].round}ms"
+        result += " (DB: #{fastest_request["db_time"].round}ms)" if fastest_request["db_time"]
+        result += " (View: #{fastest_request["view_time"].round}ms)" if fastest_request["view_time"]
+        result += " - #{fastest_request["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}\n"
       end
 
       if slowest_request
-        result += "**Slowest Request:** #{slowest_request.duration.round}ms"
-        result += " (DB: #{slowest_request.db_time.round}ms)" if slowest_request.db_time
-        result += " (View: #{slowest_request.view_time.round}ms)" if slowest_request.view_time
-        result += " - #{slowest_request.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "**Slowest Request:** #{slowest_request["duration"].round}ms"
+        result += " (DB: #{slowest_request["db_time"].round}ms)" if slowest_request["db_time"]
+        result += " (View: #{slowest_request["view_time"].round}ms)" if slowest_request["view_time"]
+        result += " - #{slowest_request["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}\n"
       end
 
       result
@@ -1273,9 +1317,10 @@ module Mcp
       result += "**Before Period:** #{before_label}\n"
       result += "**After Period:** #{after_label}\n\n"
 
-      # Calculate statistics — pluck once, derive count from the array
-      before_durations = before_transactions.pluck(:duration).sort
-      after_durations = after_transactions.pluck(:duration).sort
+      # before_transactions / after_transactions are already sorted Arrays of
+      # durations (see durations_for in the controller).
+      before_durations = before_transactions
+      after_durations = after_transactions
       before_count = before_durations.size
       after_count = after_durations.size
 

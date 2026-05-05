@@ -9,11 +9,16 @@ class Setting < ApplicationRecord
 
   def self.default_settings
     {
-      # Data retention policies (in days)
+      # AR (hot) retention — short, drives the OLTP/show-page surface.
       event_payloads_retention_days: 7,    # Keep full JSON payloads for 7 days
       events_data_retention_days: 30,      # Keep basic event data for 30 days
       transaction_measurements_retention_days: 7,  # Keep detailed measurements for 7 days
       transactions_data_retention_days: 90,  # Keep basic transaction data for 90 days
+
+      # DuckLake (cold/analytics) retention — longer, columnar storage is cheap.
+      ducklake_events_retention_days: 365,
+      ducklake_transactions_retention_days: 365,
+      ducklake_issues_retention_days: 730
     }
   end
 
@@ -34,9 +39,24 @@ class Setting < ApplicationRecord
     transactions_data_retention_days.days.ago
   end
 
+  def ducklake_events_cutoff_date
+    ducklake_events_retention_days.days.ago
+  end
+
+  def ducklake_transactions_cutoff_date
+    ducklake_transactions_retention_days.days.ago
+  end
+
+  def ducklake_issues_cutoff_date
+    ducklake_issues_retention_days.days.ago
+  end
+
   # Validation
   validates :event_payloads_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
   validates :events_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
   validates :transaction_measurements_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
   validates :transactions_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
+  validates :ducklake_events_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
+  validates :ducklake_transactions_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
+  validates :ducklake_issues_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
 end

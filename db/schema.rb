@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2025_11_25_092919) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_05_051701) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration", default: 0, null: false
@@ -84,6 +84,9 @@ ActiveRecord::Schema[8.1].define(version: 2025_11_25_092919) do
 
   create_table "settings", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.integer "ducklake_events_retention_days", default: 365, null: false
+    t.integer "ducklake_issues_retention_days", default: 730, null: false
+    t.integer "ducklake_transactions_retention_days", default: 365, null: false
     t.integer "event_payloads_retention_days", default: 7, null: false
     t.integer "events_data_retention_days", default: 30, null: false
     t.integer "transaction_measurements_retention_days", default: 7, null: false
