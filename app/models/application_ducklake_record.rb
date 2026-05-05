@@ -32,6 +32,10 @@ class ApplicationDucklakeRecord
 
       ApplicationDucklakeRecord.instance_variable_get(:@bootstrap_mutex).synchronize do
         return ApplicationDucklakeRecord.instance_variable_get(:@connection) if ApplicationDucklakeRecord.instance_variable_get(:@connection)
+        if ApplicationDucklakeRecord.instance_variable_get(:@bootstrap_attempted)
+          raise Error, "DuckLake bootstrap previously failed; restart the process to retry"
+        end
+        ApplicationDucklakeRecord.instance_variable_set(:@bootstrap_attempted, true)
 
         config = Rails.application.config.x.ducklake
         raise NotConfigured, "config/ducklake.yml not loaded" if config.blank?
@@ -40,18 +44,22 @@ class ApplicationDucklakeRecord
 
         require "duckdb"
         database = DuckDB::Database.open
-        # Pin the Database on the class ivar BEFORE running any step that can
-        # raise. If we let `database` go out of scope on a partial failure,
-        # GC eventually calls duckdb_close on it, which can segfault while
-        # joining DuckDB's TaskScheduler threads.
+        # Pin the Database on the class ivar IMMEDIATELY after open. If we
+        # let it go out of scope on a partial failure below, GC eventually
+        # calls duckdb_close on it, which segfaults while joining DuckDB's
+        # TaskScheduler threads. With it pinned, a failed bootstrap is just
+        # an error — no orphan, no segfault.
         ApplicationDucklakeRecord.instance_variable_set(:@database, database)
 
         connection = database.connect
-        ApplicationDucklakeRecord.instance_variable_set(:@connection, connection)
-
         configure_connection!(connection, config)
         attach_lake!(connection, config)
         load_schema!(connection)
+
+        # Publish @connection only after the schema is fully loaded. Other
+        # threads see nil until then and block on this mutex, instead of
+        # racing in and querying tables that don't exist yet.
+        ApplicationDucklakeRecord.instance_variable_set(:@connection, connection)
       end
       ApplicationDucklakeRecord.instance_variable_get(:@connection)
     end
