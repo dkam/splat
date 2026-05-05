@@ -75,7 +75,7 @@
   <div class="mb-8">
     <h2 class="text-xl font-bold text-gray-900 mb-4">Top Endpoints by Impact</h2>
     <% if @endpoints.any? %>
-      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
@@ -134,7 +134,7 @@
                     <%= number_with_delimiter(endpoint["count"]) %>
                   </span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">
+                <td class="px-6 py-4 text-right text-sm text-gray-600">
                   <% avg_q = endpoint["avg_queries"].to_f.round(1) %>
                   <% max_q = endpoint["max_queries"].to_i %>
                   <% if max_q > 0 %>
@@ -143,7 +143,7 @@
                     <span class="text-gray-400">—</span>
                   <% end %>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-right">
+                <td class="px-6 py-4 text-right">
                   <% n = endpoint["n_plus_one_count"].to_i %>
                   <% if n > 0 %>
                     <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800" title="Transactions with detected N+1 patterns">
