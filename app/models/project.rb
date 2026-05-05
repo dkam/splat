@@ -71,19 +71,11 @@ class Project < ApplicationRecord
   end
 
   def event_count(time_range = nil)
-    if time_range
-      events.where(timestamp: time_range).count
-    else
-      events.count
-    end
+    DuckLake::Event.count_in_range(time_range: time_range, project_id: id)
   end
 
   def transaction_count(time_range = nil)
-    if time_range
-      transactions.where(timestamp: time_range).count
-    else
-      transactions.count
-    end
+    DuckLake::Transaction.count_in_range(time_range: time_range, project_id: id)
   end
 
   def error_rate(time_range = 24.hours.ago..Time.current)

@@ -31,6 +31,23 @@ class ProjectsController < ApplicationController
     @open_issue_count = Rails.cache.fetch("project_#{@project.id}_open_issue_count", expires_in: 30.seconds) do
       @project.issues.open.count
     end
+
+    @sparkline_buckets = 24
+    time_range = 24.hours.ago..Time.current
+
+    @endpoint_sparklines = DuckLake::Transaction.counts_by_bucket(
+      transaction_names: @top_endpoints.map { |e| e["transaction_name"] },
+      time_range: time_range,
+      buckets: @sparkline_buckets,
+      project_id: @project.id
+    )
+
+    @issue_sparklines = DuckLake::Event.event_counts_by_bucket(
+      issue_ids: @recent_issues.map(&:id),
+      time_range: time_range,
+      buckets: @sparkline_buckets,
+      project_id: @project.id
+    )
   end
 
   def new

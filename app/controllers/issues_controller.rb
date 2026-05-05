@@ -25,6 +25,14 @@ class IssuesController < ApplicationController
     @open_count = counts_by_status[Issue.statuses["open"]] || 0
     @resolved_count = counts_by_status[Issue.statuses["resolved"]] || 0
     @ignored_count = counts_by_status[Issue.statuses["ignored"]] || 0
+
+    @sparkline_buckets = 24
+    @sparklines = DuckLake::Event.event_counts_by_bucket(
+      issue_ids: @issues.map(&:id),
+      time_range: 24.hours.ago..Time.current,
+      buckets: @sparkline_buckets,
+      project_id: @project.id
+    )
   end
 
   def show

@@ -5,6 +5,24 @@ module DuckLake
     self.table_name = "transactions"
 
     class << self
+      def count_in_range(time_range: nil, project_id: nil)
+        sql = +"SELECT COUNT(*) AS c FROM transactions"
+        binds = []
+        clauses = []
+
+        if time_range
+          clauses << "timestamp BETWEEN ? AND ?"
+          binds << time_range.begin << time_range.end
+        end
+        if project_id.present?
+          clauses << "project_id = ?"
+          binds << project_id.to_i
+        end
+
+        sql << " WHERE " << clauses.join(" AND ") if clauses.any?
+        (query(sql, *binds).first || {})["c"].to_i
+      end
+
       def stats_by_endpoint(time_range = 24.hours.ago..Time.current, project_id: nil, limit: nil)
         sql = +<<~SQL
           SELECT

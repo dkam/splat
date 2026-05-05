@@ -101,11 +101,11 @@
       <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
         <% @recent_issues.each do |issue| %>
           <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 p-4 transition-colors" do %>
-            <div class="flex justify-between items-start">
-              <div class="flex-1">
+            <div class="flex justify-between items-center gap-4">
+              <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-1">
                   <span class="font-mono text-sm text-gray-500">#<%= issue.id %></span>
-                  <h3 class="font-semibold text-gray-900"><%= issue.title %></h3>
+                  <h3 class="font-semibold text-gray-900 truncate"><%= issue.title %></h3>
                 </div>
                 <div class="flex items-center gap-4 text-sm text-gray-600">
                   <span><%= issue.exception_type %></span>
@@ -115,6 +115,12 @@
                   <span>Last seen <%= time_ago_in_words(issue.last_seen) %> ago</span>
                 </div>
               </div>
+              <% spark = @issue_sparklines[issue.id] %>
+              <% if spark&.any? { |v| v.to_i.positive? } %>
+                <span class="text-blue-500 shrink-0" title="Events per hour, last 24h">
+                  <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} events in last 24h") %>
+                </span>
+              <% end %>
             </div>
           <% end %>
         <% end %>
@@ -139,6 +145,7 @@
           <thead class="bg-gray-50">
             <tr>
               <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endpoint</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">24h</th>
               <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Time Spent</th>
               <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg</th>
               <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">P95</th>
@@ -152,6 +159,14 @@
                   <%= link_to by_endpoint_project_transactions_path(@project.slug, endpoint: endpoint["transaction_name"]),
                       class: "text-blue-600 hover:text-blue-800 font-medium" do %>
                     <%= endpoint["transaction_name"] %>
+                  <% end %>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-center">
+                  <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
+                  <% if spark&.any? { |v| v.to_i.positive? } %>
+                    <span class="text-blue-500">
+                      <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} requests in last 24h") %>
+                    </span>
                   <% end %>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-right">
