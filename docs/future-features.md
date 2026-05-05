@@ -59,6 +59,27 @@ in an allowed org can log in — no per-user email allowlist maintenance.
   for the org separately, otherwise `/user/orgs` won't list it. Document this
   in setup instructions.
 
+### Event payload fallback to DuckLake after AR nulls it
+`DataRetentionJob` nulls `events.payload` in AR at 7d (default), but the AR row
+itself sticks around until 30d (`events_data_retention_days`), and DuckLake
+keeps the full JSON for 365d (`ducklake_events_retention_days`). The event
+detail page silently loses breadcrumbs, request, tags, contexts, and the raw
+payload pretty-print between days 7 and 30 even though DuckLake still has
+them. Fix: when `Event#payload` is nil, fetch the JSON from DuckLake by
+`(project_id, event_id)` and memoize it so the existing accessors
+(`#breadcrumbs`, `#tags`, `#request`, `#contexts`, `#exception_details`) and
+the show view's `JSON.pretty_generate(@event.payload)` all transparently use
+the DuckLake copy. Touches:
+- `app/models/duck_lake/event.rb` (add a single-row payload lookup — currently
+  only has aggregations)
+- `app/models/event.rb` (memoized `payload` override that falls back when nil)
+
+Scope is the 7d–30d gap only; after 30d the AR row is `delete_all`d by
+`CleanupEventsJob` so the controller 404s before any fallback runs. Extending
+into the full DuckLake retention window (30d–365d) would mean routing
+`EventsController#show` through DuckLake when AR is missing — bigger change,
+park separately.
+
 ### `DuckLake::Issue` cleanup (internal)
 Drop the issue mirroring entirely. Every event ingest currently writes a new
 snapshot row that readers have to `MAX(updated_at)` over to recover current
