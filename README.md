@@ -25,6 +25,8 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
 - ✅ **Performance Monitoring** - Transaction data with lightweight metrics
 - ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
+- ✅ **N+1 Query Detection** - Mines `measurements.query_analysis` from the transaction span analyzer, ranks endpoints by N+1 prevalence, exposes a dedicated worklist and an MCP tool
+- ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
 - ✅ **OLTP + OLAP storage** - SQLite for ingestion and OLTP, DuckLake (DuckDB + parquet) for analytics over long retention
 - ✅ **MCP Integration** - Query errors via Claude and AI assistants
 - ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
@@ -516,7 +518,7 @@ Claude Code (VS Code extension) supports HTTP transport. In your workspace, you 
 
 **4. Restart Claude Desktop or VS Code**
 
-### Available MCP Tools (8 total)
+### Available MCP Tools
 
 **Issue Management:**
 - `list_recent_issues` - List recent issues by status
@@ -524,10 +526,16 @@ Claude Code (VS Code extension) supports HTTP transport. In your workspace, you 
 - `get_issue` - Get detailed issue with stack trace
 - `get_issue_events` - List event occurrences for an issue
 - `get_event` - Get full event details (request ID, breadcrumbs, context)
+- `resolve_issue` / `ignore_issue` / `reopen_issue` - Lifecycle transitions
 
 **Performance Monitoring:**
-- `get_transaction_stats` - Performance overview with percentiles
-- `search_slow_transactions` - Find slow requests
+- `get_transaction_stats` - Overall percentiles plus top endpoints ranked by total time spent (avg × count)
+- `get_endpoint_summary` - Per-endpoint percentiles (overall + DB + view) with fastest/slowest sample requests
+- `get_endpoint_timeseries` - Bucketed count + p50/p95/p99 for one endpoint over a time range — built for spotting regressions ("did p95 jump after the 14:00 deploy?")
+- `find_n_plus_one_endpoints` - Endpoints ranked by N+1 prevalence (% of transactions affected, avg/max queries per request) so you find the worst offenders quickly
+- `search_slow_transactions` - Find slow individual requests
+- `get_transactions_by_endpoint` - List recent transactions for one endpoint
+- `compare_endpoint_performance` - Before/after percentile comparison around a release or timestamp
 - `get_transaction` - Get detailed transaction breakdown
 
 ### Usage Examples
@@ -535,9 +543,10 @@ Claude Code (VS Code extension) supports HTTP transport. In your workspace, you 
 Once configured, you can ask Claude:
 - "List recent open issues in Splat"
 - "Search for NoMethodError issues in production"
-- "Show me performance stats for the last 24 hours"
-- "Find slow POST requests"
-- "Get event abc-123-def with full context and request ID"
+- "Where is the booko app spending its time?" → impact-ranked top endpoints
+- "Which endpoints have N+1 query problems?" → ranked worklist
+- "Show the p95 of UsersController#show over the last 7 days, hourly"
+- "Compare AlertsController#index performance before and after release v1.42.0"
 
 ## Full List of Environment Variables
 ```
