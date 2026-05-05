@@ -84,7 +84,7 @@
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Time Spent</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Latency</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Queries (avg/max)</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Queries</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">N+1</th>
             </tr>
           </thead>
@@ -127,13 +127,18 @@
                     <%= number_with_delimiter(endpoint["count"]) %>
                   </span>
                 </td>
-                <td class="px-6 py-4 text-right text-sm text-gray-600">
+                <td class="px-6 py-3 whitespace-nowrap text-right">
                   <% avg_q = endpoint["avg_queries"].to_f.round(1) %>
                   <% max_q = endpoint["max_queries"].to_i %>
                   <% if max_q > 0 %>
-                    <span class="<%= max_q > 20 ? 'text-red-700 font-semibold' : '' %>"><%= avg_q %> / <%= max_q %></span>
+                    <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-0 text-sm leading-tight">
+                      <span class="text-gray-400 text-right">avg</span>
+                      <span class="text-gray-700 text-right tabular-nums"><%= avg_q %></span>
+                      <span class="text-gray-400 text-right">max</span>
+                      <span class="<%= max_q > 20 ? 'text-red-700 font-semibold' : 'text-gray-700' %> text-right tabular-nums"><%= max_q %></span>
+                    </div>
                   <% else %>
-                    <span class="text-gray-400">—</span>
+                    <span class="text-gray-400 text-sm">—</span>
                   <% end %>
                 </td>
                 <td class="px-6 py-4 text-right">
