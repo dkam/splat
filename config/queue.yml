@@ -7,6 +7,10 @@ default: &default
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>
       polling_interval: 0.1
+  # Scheduler reads config/recurring.yml. Without this block the supervisor
+  # never starts a scheduler process — recurring tasks never fire.
+  schedulers:
+    - polling_interval: 1
 
 development:
   <<: *default
