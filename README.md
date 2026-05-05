@@ -29,7 +29,7 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
 - ✅ **OLTP + OLAP storage** - SQLite for ingestion and OLTP, DuckLake (DuckDB + parquet) for analytics over long retention
 - ✅ **MCP Integration** - Query errors via Claude and AI assistants
-- ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
+- ✅ **Minimal Dependencies** - Rails + SQLite + DuckDB + Solid Queue
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
 
 ### Why Splat?
