@@ -73,8 +73,10 @@
             <div class="flex items-center gap-4">
               <% spark = @sparklines[issue.id] %>
               <% if spark&.any? { |v| v.to_i.positive? } %>
-                <div class="text-blue-500" title="Events per hour, last 24h">
-                  <%= sparkline(spark, width: 120, height: 28, title: "#{spark.sum} events in last 24h") %>
+                <div class="text-blue-500" title="Events per hour, last 24h. Dashed lines = deploys.">
+                  <%= sparkline(spark, width: 120, height: 28,
+                      title: "#{spark.sum} events in last 24h, #{@deploy_markers.size} deploy#{'s' if @deploy_markers.size != 1}",
+                      markers: @deploy_markers, time_range: @sparkline_range) %>
                 </div>
               <% else %>
                 <div class="w-[120px] h-[28px]"></div>

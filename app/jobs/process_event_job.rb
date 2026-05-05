@@ -8,8 +8,12 @@ class ProcessEventJob < ApplicationJob
 
     if event.issue
       event.issue.open! if event.issue.resolved?
-      # `count` is maintained by counter_cache on Event#belongs_to :issue.
-      Issue.where(id: event.issue.id).update_all(last_seen: event.timestamp)
+      stamp_issue_release(event)
+    end
+
+    if event.release.present?
+      Release.record_sighting!(project: project, version: event.release,
+                               timestamp: event.timestamp, kind: :event)
     end
 
     mirror_to_ducklake(event)
@@ -25,6 +29,18 @@ class ProcessEventJob < ApplicationJob
   end
 
   private
+
+  def stamp_issue_release(event)
+    updates = { last_seen: event.timestamp }
+    if event.release.present?
+      updates[:last_seen_release] = event.release
+      # first_seen_release only set if currently blank; safe to over-update
+      # last_seen_release on every event since events arrive newer-than-old.
+      Issue.where(id: event.issue.id, first_seen_release: [nil, ""])
+        .update_all(first_seen_release: event.release)
+    end
+    Issue.where(id: event.issue.id).update_all(updates)
+  end
 
   # AR is the source of truth. DuckLake mirrors for analytics; failures here
   # must not break ingestion.

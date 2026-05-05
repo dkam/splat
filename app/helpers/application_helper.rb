@@ -16,7 +16,8 @@ module ApplicationHelper
   # Render a tiny inline-SVG bar sparkline. Each value becomes one bar; bars
   # scale to the max value in the series so a single chart's shape is what
   # tells you the story (not the absolute height).
-  def sparkline(values, width: 96, height: 24, color: "currentColor", title: nil)
+  def sparkline(values, width: 96, height: 24, color: "currentColor", title: nil,
+                markers: nil, time_range: nil)
     values = Array(values)
     return "".html_safe if values.empty?
 
@@ -34,10 +35,22 @@ module ApplicationHelper
       %(<rect x="#{x}" y="#{y}" width="#{bar_width.round(2)}" height="#{bar_height}" fill="#{color}" rx="0.5" />)
     end.compact.join
 
+    marker_lines = ""
+    if markers.present? && time_range
+      span = (time_range.end - time_range.begin).to_f
+      if span > 0
+        marker_lines = Array(markers).map do |m|
+          frac = ((m - time_range.begin).to_f / span).clamp(0, 1)
+          x = (frac * width).round(2)
+          %(<line x1="#{x}" x2="#{x}" y1="0" y2="#{height}" stroke="#9ca3af" stroke-width="1" stroke-dasharray="2,1" opacity="0.6" />)
+        end.join
+      end
+    end
+
     title_attr = title ? %(<title>#{ERB::Util.html_escape(title)}</title>) : ""
 
     tag.svg(
-      (title_attr + bars).html_safe,
+      (title_attr + marker_lines + bars).html_safe,
       viewBox: "0 0 #{width} #{height}",
       width: width,
       height: height,

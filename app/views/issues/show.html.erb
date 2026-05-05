@@ -91,6 +91,31 @@
     </div>
   </div>
 
+  <!-- Releases -->
+  <% if @issue.first_seen_release.present? || @issue.last_seen_release.present? %>
+    <% regression = @issue.first_seen_release.present? &&
+                    @issue.last_seen_release.present? &&
+                    @issue.first_seen_release != @issue.last_seen_release %>
+    <div class="mb-8 bg-white rounded-lg shadow p-6 border border-gray-200">
+      <h2 class="text-lg font-semibold text-gray-900 mb-3">Releases</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div class="text-sm text-gray-600 mb-1">First seen in</div>
+          <code class="text-sm font-mono text-gray-900 break-all"><%= @issue.first_seen_release.presence || "—" %></code>
+        </div>
+        <div>
+          <div class="text-sm text-gray-600 mb-1">Last seen in</div>
+          <code class="text-sm font-mono <%= regression ? "text-red-700" : "text-gray-900" %> break-all">
+            <%= @issue.last_seen_release.presence || "—" %>
+          </code>
+          <% if regression %>
+            <span class="ml-2 inline-block px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded">Spans multiple releases</span>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
   <!-- Fingerprint (for debugging) -->
   <details class="mb-8">
     <summary class="cursor-pointer text-sm text-gray-600 hover:text-gray-900">Show fingerprint</summary>

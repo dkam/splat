@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_05_051701) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_05_100000) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration", default: 0, null: false
@@ -45,7 +45,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_051701) do
     t.string "exception_type"
     t.string "fingerprint", null: false
     t.datetime "first_seen", null: false
+    t.string "first_seen_release"
     t.datetime "last_seen", null: false
+    t.string "last_seen_release"
     t.integer "project_id", null: false
     t.integer "status", default: 0, null: false
     t.string "title", null: false
@@ -80,6 +82,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_051701) do
     t.datetime "updated_at", null: false
     t.index ["public_key"], name: "index_projects_on_public_key", unique: true
     t.index ["slug"], name: "index_projects_on_slug", unique: true
+  end
+
+  create_table "releases", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "event_count", default: 0, null: false
+    t.datetime "first_seen_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.integer "project_id", null: false
+    t.integer "transaction_count", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.string "version", null: false
+    t.index ["project_id", "first_seen_at"], name: "index_releases_on_project_id_and_first_seen_at"
+    t.index ["project_id", "version"], name: "index_releases_on_project_id_and_version", unique: true
+    t.index ["project_id"], name: "index_releases_on_project_id"
   end
 
   create_table "settings", force: :cascade do |t|
@@ -123,5 +139,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_051701) do
 
   add_foreign_key "events", "projects"
   add_foreign_key "issues", "projects"
+  add_foreign_key "releases", "projects"
   add_foreign_key "transactions", "projects"
 end

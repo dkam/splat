@@ -27,12 +27,16 @@ class IssuesController < ApplicationController
     @ignored_count = counts_by_status[Issue.statuses["ignored"]] || 0
 
     @sparkline_buckets = 24
+    @sparkline_range = 24.hours.ago..Time.current
     @sparklines = DuckLake::Event.event_counts_by_bucket(
       issue_ids: @issues.map(&:id),
-      time_range: 24.hours.ago..Time.current,
+      time_range: @sparkline_range,
       buckets: @sparkline_buckets,
       project_id: @project.id
     )
+    @deploy_markers = @project.releases
+      .where(first_seen_at: @sparkline_range)
+      .pluck(:first_seen_at)
   end
 
   def show

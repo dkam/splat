@@ -7,6 +7,11 @@ class ProcessTransactionJob < ApplicationJob
     # Create the transaction record from Sentry payload
     transaction = Transaction.create_from_sentry_payload!(transaction_id, payload, project)
 
+    if transaction.release.present?
+      Release.record_sighting!(project: project, version: transaction.release,
+                               timestamp: transaction.timestamp, kind: :transaction)
+    end
+
     mirror_to_ducklake(transaction)
 
     Rails.logger.info "Processed transaction #{transaction.id}: #{transaction.transaction_name} (#{transaction.duration}ms)"

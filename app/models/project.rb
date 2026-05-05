@@ -4,6 +4,7 @@ class Project < ApplicationRecord
   has_many :events, dependent: :destroy
   has_many :issues, dependent: :destroy
   has_many :transactions, dependent: :destroy
+  has_many :releases, dependent: :destroy
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true
