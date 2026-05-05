@@ -33,21 +33,25 @@ class ProjectsController < ApplicationController
     end
 
     @sparkline_buckets = 24
-    time_range = 24.hours.ago..Time.current
+    @sparkline_range = 24.hours.ago..Time.current
 
     @endpoint_sparklines = DuckLake::Transaction.counts_by_bucket(
       transaction_names: @top_endpoints.map { |e| e["transaction_name"] },
-      time_range: time_range,
+      time_range: @sparkline_range,
       buckets: @sparkline_buckets,
       project_id: @project.id
     )
 
     @issue_sparklines = DuckLake::Event.event_counts_by_bucket(
       issue_ids: @recent_issues.map(&:id),
-      time_range: time_range,
+      time_range: @sparkline_range,
       buckets: @sparkline_buckets,
       project_id: @project.id
     )
+
+    @deploy_markers = @project.releases
+      .where(first_seen_at: @sparkline_range)
+      .pluck(:first_seen_at)
   end
 
   def new

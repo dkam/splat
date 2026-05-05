@@ -117,8 +117,10 @@
               </div>
               <% spark = @issue_sparklines[issue.id] %>
               <% if spark&.any? { |v| v.to_i.positive? } %>
-                <span class="text-blue-500 shrink-0" title="Events per hour, last 24h">
-                  <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} events in last 24h") %>
+                <span class="text-blue-500 shrink-0" title="Dashed lines = deploys">
+                  <%= sparkline(spark, width: 100, height: 24,
+                      title: "#{spark.sum} events in last 24h",
+                      markers: @deploy_markers, time_range: @sparkline_range) %>
                 </span>
               <% end %>
             </div>
@@ -164,8 +166,10 @@
                 <td class="px-4 py-3 whitespace-nowrap text-center">
                   <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
-                    <span class="text-blue-500">
-                      <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} requests in last 24h") %>
+                    <span class="text-blue-500" title="Dashed lines = deploys">
+                      <%= sparkline(spark, width: 100, height: 24,
+                          title: "#{spark.sum} requests in last 24h",
+                          markers: @deploy_markers, time_range: @sparkline_range) %>
                     </span>
                   <% end %>
                 </td>
