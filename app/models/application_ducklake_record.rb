@@ -41,6 +41,7 @@ class ApplicationDucklakeRecord
         raise NotConfigured, "config/ducklake.yml not loaded" if config.blank?
 
         ensure_paths!(config)
+        ensure_catalog_wal_mode!(config)
 
         require "duckdb"
         database = DuckDB::Database.open
@@ -144,6 +145,23 @@ class ApplicationDucklakeRecord
       if config[:storage].to_s != "s3"
         FileUtils.mkdir_p(Rails.root.join(config[:data_path]))
       end
+    end
+
+    # Set the catalog SQLite to WAL mode before DuckLake attaches it. Default
+    # rollback-journal mode is single-writer; under concurrent worker writes
+    # DuckLake's catalog commits hit "database is locked" constantly. WAL is
+    # persistent in the file header, so this is a no-op once set.
+    def ensure_catalog_wal_mode!(config)
+      catalog = Rails.root.join(config[:catalog]).to_s
+      return unless File.exist?(catalog) || File.writable?(File.dirname(catalog))
+
+      require "sqlite3"
+      db = SQLite3::Database.new(catalog)
+      db.execute("PRAGMA journal_mode=WAL")
+      db.execute("PRAGMA synchronous=NORMAL")
+      db.close
+    rescue => e
+      Rails.logger.warn "[DuckLake] could not set catalog WAL mode: #{e.class}: #{e.message}"
     end
 
     def configure_connection!(conn, config)
