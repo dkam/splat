@@ -4,18 +4,23 @@ class ProcessTransactionJob < ApplicationJob
   queue_as :default
 
   def perform(transaction_id:, payload:, project:)
-    # Create the transaction record from Sentry payload
-    transaction = Transaction.create_from_sentry_payload!(transaction_id, payload, project)
+    ar_ms = ms { @transaction = Transaction.create_from_sentry_payload!(transaction_id, payload, project) }
+    transaction = @transaction
 
     if transaction.release.present?
       Release.record_sighting!(project: project, version: transaction.release,
                                timestamp: transaction.timestamp, kind: :transaction)
     end
 
-    mirror_to_ducklake(transaction)
-    mirror_spans_to_ducklake(transaction, payload)
+    dl_tx_ms = ms { mirror_to_ducklake(transaction) }
+    dl_sp_ms = ms { mirror_spans_to_ducklake(transaction, payload) }
+    span_count = Array(payload["spans"]).size
 
-    Rails.logger.info "Processed transaction #{transaction.id}: #{transaction.transaction_name} (#{transaction.duration}ms)"
+    Rails.logger.info(
+      "Processed transaction #{transaction.id}: #{transaction.transaction_name} " \
+      "req=#{transaction.duration}ms ar=#{ar_ms}ms dl_tx=#{dl_tx_ms}ms " \
+      "dl_spans=#{dl_sp_ms}ms (#{span_count} spans)"
+    )
   rescue => e
     # Log but don't fail - performance data is nice-to-have
     Rails.logger.error "Failed to process transaction #{transaction_id}: #{e.message}"
@@ -24,6 +29,12 @@ class ProcessTransactionJob < ApplicationJob
   end
 
   private
+
+  def ms
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    yield
+    ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round(1)
+  end
 
   # AR is the source of truth. DuckLake mirrors for analytics; failures here
   # must not break ingestion.

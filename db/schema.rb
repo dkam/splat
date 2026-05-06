@@ -134,7 +134,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_133653) do
     t.datetime "updated_at", null: false
     t.integer "view_time"
     t.index ["duration"], name: "index_transactions_on_duration"
-    t.index ["project_id", "has_n_plus_one"], name: "index_transactions_with_n_plus_one", where: "has_n_plus_one = TRUE"
     t.index ["project_id", "timestamp"], name: "index_transactions_on_project_id_and_timestamp"
     t.index ["project_id", "transaction_id"], name: "index_transactions_on_project_id_and_transaction_id", unique: true
     t.index ["project_id"], name: "index_transactions_on_project_id"
