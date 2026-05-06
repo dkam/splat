@@ -4,17 +4,21 @@ class ProcessTransactionJob < ApplicationJob
   queue_as :default
 
   def perform(transaction_id:, payload:, project:)
-    ar_ms = ms { @transaction = Transaction.create_from_sentry_payload!(transaction_id, payload, project) }
-    transaction = @transaction
+    transaction = nil
+    ar_ms = with_span("ar.transaction.create") do
+      transaction = Transaction.create_from_sentry_payload!(transaction_id, payload, project)
+    end
 
     if transaction.release.present?
       Release.record_sighting!(project: project, version: transaction.release,
                                timestamp: transaction.timestamp, kind: :transaction)
     end
 
-    dl_tx_ms = ms { mirror_to_ducklake(transaction) }
-    dl_sp_ms = ms { mirror_spans_to_ducklake(transaction, payload) }
+    dl_tx_ms = with_span("ducklake.transaction.mirror") { mirror_to_ducklake(transaction) }
     span_count = Array(payload["spans"]).size
+    dl_sp_ms = with_span("ducklake.spans.mirror", data: { "splat.span_count" => span_count }) do
+      mirror_spans_to_ducklake(transaction, payload)
+    end
 
     Rails.logger.info(
       "Processed transaction #{transaction.id}: #{transaction.transaction_name} " \
@@ -30,9 +34,19 @@ class ProcessTransactionJob < ApplicationJob
 
   private
 
-  def ms
+  # Time a block, also emitting a Sentry child span when a parent
+  # transaction is active. with_child_span no-ops without a parent, so the
+  # timing always works even when traces aren't sampled.
+  def with_span(op, data: nil)
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    yield
+    if defined?(Sentry) && Sentry.initialized?
+      Sentry.with_child_span(op: op) do |span|
+        data&.each { |k, v| span&.set_data(k, v) }
+        yield
+      end
+    else
+      yield
+    end
     ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round(1)
   end
 
