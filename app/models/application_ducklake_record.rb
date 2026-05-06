@@ -15,6 +15,12 @@ class ApplicationDucklakeRecord
   class_attribute :table_name, instance_accessor: false
 
   @bootstrap_mutex = Mutex.new
+  # DuckLake commits each write to the catalog SQLite, which is
+  # single-writer even in WAL mode. Concurrent threads racing the SQLite
+  # write lock produce "database is locked" errors that DuckLake's
+  # snapshot-level retry loop doesn't always absorb. Serialize writes
+  # per-process so we never contend with ourselves; reads stay concurrent.
+  @write_mutex     = Mutex.new
   @database        = nil
   @config          = nil
 
@@ -84,7 +90,7 @@ class ApplicationDucklakeRecord
       sql = "INSERT INTO #{table_name} (#{cols.join(", ")}) VALUES (#{placeholders})"
       values = attrs.values.map { |v| serialize(v) }
 
-      connection.execute(sql, *values)
+      with_write_lock { connection.execute(sql, *values) }
       true
     end
 
@@ -104,7 +110,7 @@ class ApplicationDucklakeRecord
             Array.new(rows.size, placeholders).join(", ")
       binds = rows.flat_map { |r| key_order.map { |k| serialize(r[k]) } }
 
-      connection.execute(sql, *binds)
+      with_write_lock { connection.execute(sql, *binds) }
       true
     end
 
@@ -119,7 +125,9 @@ class ApplicationDucklakeRecord
     def execute(sql, *binds)
       return nil if disabled?
 
-      binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
+      with_write_lock do
+        binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
+      end
     end
 
     private
@@ -136,6 +144,10 @@ class ApplicationDucklakeRecord
       when Hash, Array then value.to_json
       else value
       end
+    end
+
+    def with_write_lock(&block)
+      ApplicationDucklakeRecord.instance_variable_get(:@write_mutex).synchronize(&block)
     end
 
     def ensure_paths!(config)
