@@ -185,9 +185,21 @@ class ApplicationDucklakeRecord
         options << "DATA_INLINING_ROW_LIMIT #{limit.to_i}"
       end
 
-      conn.execute(
-        "ATTACH IF NOT EXISTS 'ducklake:sqlite:#{quote(catalog)}' AS splat_lake (#{options.join(", ")})"
-      )
+      # Per-thread connections each ATTACH the lake. `IF NOT EXISTS` only
+      # checks the user alias `splat_lake`, but DuckLake's internal metadata
+      # DB `__ducklake_metadata_splat_lake` is created at database-instance
+      # level, not per-connection. After the primer attaches, sibling
+      # connections see the alias as missing but the metadata DB as already
+      # present and ATTACH errors with "already exists". The lake is still
+      # usable — `USE splat_lake` works because the alias propagates from
+      # the primer's attach. Swallow the benign error.
+      begin
+        conn.execute(
+          "ATTACH IF NOT EXISTS 'ducklake:sqlite:#{quote(catalog)}' AS splat_lake (#{options.join(", ")})"
+        )
+      rescue DuckDB::Error => e
+        raise unless e.message.include?("already exists")
+      end
       conn.execute("USE splat_lake")
     end
 
