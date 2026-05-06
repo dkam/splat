@@ -21,3 +21,7 @@ production:
   data_retention_cleanup:
     class: "DataRetentionJob"
     schedule: at 2am every day
+  ducklake_flush_inlined:
+    class: "DuckLake::FlushInlinedJob"
+    queue: low_priority
+    schedule: every 5 minutes
