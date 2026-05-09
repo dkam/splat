@@ -1,6 +1,8 @@
 require "test_helper"
 
 class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
   def setup
     @project = Project.create!(name: "Test Project", slug: "test", public_key: "test-key")
   end
@@ -198,6 +200,29 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
 
     processor = SentryProtocol::EnvelopeProcessor.new(envelope_body, @project)
     assert processor.process
+  end
+
+  test "skips housekeeping transactions (SolidCable, SolidQueue, ActiveStorage)" do
+    %w[SolidCable::TrimJob SolidQueue::ClaimJob ActiveStorage::AnalyzeJob].each do |name|
+      envelope_body = build_envelope(
+        event_id: "txn-#{name}",
+        items: [
+          {
+            type: "transaction",
+            payload: {
+              "transaction" => name,
+              "start_timestamp" => 1729238400.0,
+              "timestamp" => 1729238401.5
+            }
+          }
+        ]
+      )
+
+      assert_no_enqueued_jobs(only: ProcessTransactionJob) do
+        processor = SentryProtocol::EnvelopeProcessor.new(envelope_body, @project)
+        assert processor.process
+      end
+    end
   end
 
   test "processes transaction with event_id only in payload" do

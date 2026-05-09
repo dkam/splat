@@ -4,6 +4,15 @@ module SentryProtocol
   class EnvelopeProcessor
     class InvalidEnvelope < StandardError; end
 
+    # Housekeeping job transactions carry no actionable perf data and tend
+    # to ship oversized SQL breadcrumbs (e.g. SolidCable INSERTs of broadcast
+    # HTML) that bloat the SolidQueue DB when persisted as job arguments.
+    HOUSEKEEPING_TRANSACTION_PREFIXES = %w[
+      SolidCable::
+      SolidQueue::
+      ActiveStorage::
+    ].freeze
+
     attr_reader :raw_body, :project
 
     def initialize(raw_body, project)
@@ -190,6 +199,12 @@ module SentryProtocol
         )
         Rails.logger.debug "Queued event processing: #{event_id}"
       when "transaction"
+        transaction_name = item[:payload].is_a?(Hash) ? item[:payload]["transaction"] : nil
+        if housekeeping_transaction?(transaction_name)
+          Rails.logger.debug "Skipping housekeeping transaction: #{transaction_name}"
+          return
+        end
+
         ProcessTransactionJob.perform_later(
           transaction_id: event_id,
           payload: item[:payload],
@@ -211,6 +226,11 @@ module SentryProtocol
     def extract_event_id(payload)
       return nil unless payload.is_a?(Hash)
       payload[:event_id] || payload['event_id']
+    end
+
+    def housekeeping_transaction?(name)
+      return false unless name.is_a?(String)
+      HOUSEKEEPING_TRANSACTION_PREFIXES.any? { |prefix| name.start_with?(prefix) }
     end
   end
 end
