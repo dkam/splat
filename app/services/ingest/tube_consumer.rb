@@ -28,7 +28,12 @@ module Ingest
 
     def run
       until @stop
-        process_one_batch
+        begin
+          process_one_batch
+        rescue => e
+          log_exception("[#{self.class.name}] loop error (continuing)", e)
+          sleep 1
+        end
       end
     ensure
       @client.close rescue nil
