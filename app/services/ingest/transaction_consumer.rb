@@ -5,8 +5,6 @@ module Ingest
   # create_from_sentry_payload! per row, then push hydrated transaction +
   # span rows downstream as one packed body per tube per batch.
   class TransactionConsumer < TubeConsumer
-    SPAN_CAP = 1000
-
     def initialize(batch_size: DEFAULT_BATCH_SIZE)
       super(tube: Tuber::TRANSACTIONS_TUBE, batch_size: batch_size)
     end
@@ -65,10 +63,7 @@ module Ingest
       trace_id   = trace_ctx["trace_id"] || SecureRandom.hex(16)
 
       children = raw_spans.sort_by { |s| s["start_timestamp"].to_f }
-      if children.size > SPAN_CAP
-        children = children.first(SPAN_CAP)
-        transaction.update!(spans_truncated: true)
-      end
+      children = children.first(Transaction::SPAN_CAP) if children.size > Transaction::SPAN_CAP
 
       parent_depth = { root_id => 0 }
       rows = []

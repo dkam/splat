@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class Transaction < ApplicationRecord
+  # Spans beyond this cap are dropped at ingest. Stored as a column flag so
+  # the UI/MCP can warn when a waterfall is incomplete.
+  SPAN_CAP = 1000
+
   belongs_to :project
 
   validates :transaction_id, presence: true, uniqueness: true
@@ -79,7 +83,8 @@ class Transaction < ApplicationRecord
       tags: payload["tags"],
       measurements: enhanced_measurements,
       query_count: query_count,
-      has_n_plus_one: has_n_plus_one
+      has_n_plus_one: has_n_plus_one,
+      spans_truncated: payload["spans"].is_a?(Array) && payload["spans"].size > SPAN_CAP
     }
 
     # Scope the lookup by project_id so it can use the
@@ -158,8 +163,15 @@ class Transaction < ApplicationRecord
     measurements&.dig("query_analysis") || {}
   end
 
+  # Promoted to a real column at ingest (see #create_from_sentry_payload!).
+  # The column is the source of truth; the JSON stays for the patterns/examples.
   def query_count
-    query_analysis["total_queries"] || 0
+    super || query_analysis["total_queries"] || 0
+  end
+
+  def has_n_plus_one_queries?
+    return has_n_plus_one unless has_n_plus_one.nil?
+    potential_n_plus_one_queries.any?
   end
 
   def unique_query_patterns
@@ -168,10 +180,6 @@ class Transaction < ApplicationRecord
 
   def potential_n_plus_one_queries
     query_analysis["potential_n_plus_one"] || []
-  end
-
-  def has_n_plus_one_queries?
-    potential_n_plus_one_queries.any?
   end
 
   def query_patterns
