@@ -180,6 +180,17 @@ class ApplicationDucklakeRecord
       conn.execute("INSTALL ducklake")
       conn.execute("LOAD ducklake")
 
+      # DuckDB defaults memory_limit to ~80% of physical RAM PER CONNECTION
+      # and threads to physical cores. The ducklake worker has 5 consumer
+      # threads each holding its own connection — multiply that by the
+      # default and you OOM the container even with 2GB mem_limit. Splat's
+      # workload is small INSERTs and short SELECTs, not big analytics, so
+      # tight per-connection budgets are fine.
+      memory_limit = ENV.fetch("DUCKDB_MEMORY_LIMIT", "256MB")
+      threads_per_conn = ENV.fetch("DUCKDB_THREADS", "1").to_i
+      conn.execute("SET memory_limit = '#{quote(memory_limit)}'")
+      conn.execute("SET threads = #{threads_per_conn}")
+
       # DuckLake commits a new catalog snapshot per write; under burst load
       # (event/transaction/span ingest from many workers concurrently) the
       # default 10-retry optimistic-concurrency loop exceeds. Bump to 100;
