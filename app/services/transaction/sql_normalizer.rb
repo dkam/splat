@@ -7,6 +7,7 @@ class Transaction::SqlNormalizer
   NUMERIC_LITERAL = /(?<![A-Za-z_\d])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/
   IN_LIST         = /\bIN\s*\(\s*\?(?:\s*,\s*\?)+\s*\)/i
   WHITESPACE      = /\s+/
+  BLOCK_COMMENT   = %r{/\*.*?\*/}m
 
   # Normalize a span description (typically SQL or URL) for storage.
   #
@@ -21,12 +22,23 @@ class Transaction::SqlNormalizer
     return nil if text.nil?
     s = text.to_s.dup
 
+    # /* ... */ comments carry Rails query log tags (controller, action,
+    # source_location, ...) which are essential for tracing N+1s back to a
+    # call site. Hide them from the literal-stripping passes, then restore.
+    comments = []
+    s = s.gsub(BLOCK_COMMENT) do |m|
+      comments << m
+      "__SPLATCOMMENT#{comments.size - 1}__"
+    end
+
     # PostgreSQL-style double-quoted identifiers ("users") are NOT literals;
     # leave them. Only collapse single-quoted strings.
     s = s.gsub(STRING_LITERAL, "?")
     s = s.gsub(NUMERIC_LITERAL, "?")
     s = s.gsub(IN_LIST, "IN (?)")
     s = s.gsub(WHITESPACE, " ").strip
+
+    s = s.gsub(/__SPLATCOMMENT(\d+)__/) { comments[$1.to_i] }
 
     s.byteslice(0, MAX_LEN)
   end
