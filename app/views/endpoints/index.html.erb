@@ -12,7 +12,7 @@
 
   <!-- Filters -->
   <div class="mb-6 bg-white dark:bg-gray-900 rounded-lg shadow p-4 border border-gray-200 dark:border-gray-800">
-    <%= form_with url: project_endpoints_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
+    <%= form_with url: project_endpoints_path(@project.slug), method: :get, id: "endpoints-filter", data: { turbo_permanent: true }, class: "flex flex-wrap gap-4" do |f| %>
       <div class="flex-1 min-w-[150px]">
         <%= f.label :time_range, "Time Range", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" %>
         <%= f.select :time_range,
