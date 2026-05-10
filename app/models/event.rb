@@ -4,7 +4,9 @@ class Event < ApplicationRecord
   belongs_to :project
   belongs_to :issue, optional: true, counter_cache: :count
 
-  validates :event_id, presence: true, uniqueness: true
+  # Scope to project_id so the validator's lookup uses the
+  # index_events_on_project_id_and_event_id unique index instead of full-scanning.
+  validates :event_id, presence: true, uniqueness: { scope: :project_id }
   validates :timestamp, presence: true
 
   # Per-event broadcasts are throttled to avoid swamping Solid Queue / Cable during error bursts.

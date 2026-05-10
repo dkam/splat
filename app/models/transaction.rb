@@ -82,7 +82,11 @@ class Transaction < ApplicationRecord
       has_n_plus_one: has_n_plus_one
     }
 
-    transaction = find_or_initialize_by(transaction_id: transaction_id)
+    # Scope the lookup by project_id so it can use the
+    # index_transactions_on_project_id_and_transaction_id unique index.
+    # transaction_id alone has no single-column index → full scan that
+    # grows linearly with the table.
+    transaction = find_or_initialize_by(project_id: project.id, transaction_id: transaction_id)
     if transaction.new_record?
       transaction.assign_attributes(attributes)
       transaction.save!
