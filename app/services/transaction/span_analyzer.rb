@@ -75,40 +75,36 @@ class Transaction
       total_time > 0 ? total_time.round : nil
     end
 
+    # /* ... */ query log tag comments carry per-request data (request_id,
+    # source_location) — they'd fragment patterns into one-per-request and
+    # break N+1 detection.
+    BLOCK_COMMENT = SqlNormalizer::BLOCK_COMMENT
+
+    # Single union covers everything we collapse to "?" — UUID first so it
+    # doesn't get pre-eaten by the bare \d+ rule, then IN-lists, IPs, emails,
+    # URLs, single-quoted strings, and finally bare numbers. Double-quoted
+    # tokens are deliberately omitted — they're Postgres identifiers
+    # (table/column names) and must survive so different tables yield
+    # different patterns.
+    VALUES = Regexp.union(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
+      /\bIN\s*\([^)]+\)/i,
+      /\b\d{1,3}(?:\.\d{1,3}){3}\b/,
+      /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
+      %r{https?://\S+},
+      /'[^']*'/,
+      /\b\d+\b/
+    )
+
     # Normalize SQL into a pattern key for grouping (N+1 detection).
-    #
-    # Strategy: strip *values*, keep *identifiers*. Two queries against the
-    # same table with different ids should map to the same pattern; queries
-    # against different tables should not.
+    # Strips values, keeps identifiers. Two queries against the same table
+    # with different ids map to the same pattern; queries against different
+    # tables do not.
     def self.normalize_sql_pattern(sql)
-      # /* ... */ query log tag comments carry per-request data (request_id,
-      # source_location) — they'd fragment patterns into one-per-request and
-      # break N+1 detection. Drop them entirely from the fingerprint.
-      pattern = sql.gsub(%r{/\*.*?\*/}m, "")
-
-      # Single-quoted string literals are values; replace. Double-quoted
-      # tokens are PostgreSQL identifiers (table/column names) and must be
-      # preserved so different tables yield different patterns.
-      pattern = pattern.gsub(/'[^']*'/, "?")
-
-      # Remove numbers
-      pattern = pattern.gsub(/\b\d+\b/, "?")
-
-      # Remove IN lists with multiple values
-      pattern = pattern.gsub(/\(IN\s*\([^)]+\)\)/i, "(IN (?))")
-
-      # Normalize UUIDs
-      pattern = pattern.gsub(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i, "?")
-
-      # Normalize IPs, emails, URLs
-      pattern = pattern.gsub(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/, "?")
-      pattern = pattern.gsub(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/, "?")
-      pattern = pattern.gsub(/https?:\/\/[^\s]+/, "?")
-
-      # Remove excessive whitespace
-      pattern = pattern.gsub(/\s+/, " ").strip
-
-      pattern
+      sql.gsub(BLOCK_COMMENT, "")
+         .gsub(VALUES) { |m| m.match?(/\AIN/i) ? "IN (?)" : "?" }
+         .gsub(SqlNormalizer::WHITESPACE, " ")
+         .strip
     end
   end
 end

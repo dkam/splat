@@ -38,7 +38,7 @@ class Transaction::SqlNormalizer
     s = s.gsub(IN_LIST, "IN (?)")
     s = s.gsub(WHITESPACE, " ").strip
 
-    s = s.gsub(/__SPLATCOMMENT(\d+)__/) { comments[$1.to_i] }
+    s = s.gsub(/__SPLATCOMMENT(\d+)__/) { comments[$1.to_i] } unless comments.empty?
 
     s.byteslice(0, MAX_LEN)
   end

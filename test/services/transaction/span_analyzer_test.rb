@@ -48,6 +48,21 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     assert_equal 1, result[:potential_n_plus_one].size
   end
 
+  test "collapses IN-lists regardless of arity" do
+    a = normalize("SELECT 1 FROM users WHERE id IN (1, 2, 3)")
+    b = normalize("SELECT 1 FROM users WHERE id IN (1, 2, 3, 4, 5, 6)")
+    assert_equal a, b
+    assert_includes a, "IN (?)"
+  end
+
+  test "collapses UUIDs, IPs, emails, URLs to ?" do
+    out = normalize(
+      "SELECT 1 FROM logs WHERE uuid = '11111111-2222-3333-4444-555555555555' " \
+      "AND ip = '127.0.0.1' AND email = 'a@b.co' AND url = 'https://x.test/y'"
+    )
+    refute_match(/11111111|127\.0\.0\.1|a@b\.co|https:/, out)
+  end
+
   test "different tables with same shape do not collapse into one pattern" do
     breadcrumbs = [
       { "category" => "sql.active_record", "data" => { "sql" => 'SELECT "regions".* FROM "regions" WHERE "regions"."id" = 1' } },
