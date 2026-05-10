@@ -162,6 +162,8 @@ module Mcp
         search_slow_transactions(arguments)
       when "get_transaction"
         get_transaction(arguments)
+      when "get_transaction_spans"
+        get_transaction_spans(arguments)
       when "get_endpoint_summary"
         get_endpoint_summary(arguments)
       when "get_endpoint_timeseries"
@@ -413,6 +415,29 @@ module Mcp
               transaction_id: {
                 type: "string",
                 description: "Either the internal numeric ID (e.g. '12345') or the Sentry transaction UUID (32 hex chars, e.g. 'abc123...'). UUIDs match the event_id used by get_event."
+              }
+            },
+            required: ["transaction_id"]
+          }
+        },
+        {
+          name: "get_transaction_spans",
+          description: "Get the per-span waterfall for a single transaction. Each span is one timed operation inside the request — a SQL query, an outbound HTTP call, a view render, a cache hit. Span descriptions retain table and column names (e.g. `SELECT \"covers\".* FROM \"covers\" WHERE \"covers\".\"id\" = ?`), unlike the aggregated query_patterns on get_transaction where identifiers are also stripped. Use this when get_transaction shows N+1 patterns but you can't tell which association is firing — span descriptions disambiguate. Returns: op summary (count + total time per op type), repeated descriptions (the classic N+1 fingerprint), and a depth-indented span list.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              transaction_id: {
+                type: "string",
+                description: "Either the internal numeric ID or the Sentry transaction UUID — same value accepted by get_transaction."
+              },
+              op_filter: {
+                type: "string",
+                description: "Filter spans by op prefix (e.g. 'db' for all db.* spans, 'db.sql' for SQL only, 'http' for outbound HTTP, 'view' for renders). Default: no filter."
+              },
+              limit: {
+                type: "integer",
+                description: "Max spans to render in the list (default: 100, max: 1000). Op summary and repeated-description sections always cover all spans.",
+                default: 100
               }
             },
             required: ["transaction_id"]
@@ -739,6 +764,36 @@ module Mcp
       end
 
       text = format_transaction_detail(transaction)
+
+      render json: {
+        jsonrpc: "2.0",
+        id: @rpc_id,
+        result: {
+          content: [{ type: "text", text: text }]
+        }
+      }
+    end
+
+    def get_transaction_spans(args)
+      id_str = args["transaction_id"].to_s
+      transaction = if id_str.match?(/\A\d+\z/)
+        Transaction.includes(:project).find(id_str)
+      else
+        Transaction.includes(:project).find_by!(transaction_id: id_str)
+      end
+
+      op_filter = args["op_filter"].to_s.strip
+      limit = [[args["limit"]&.to_i || 100, 1].max, 1000].min
+
+      all_spans = DuckLake::Span.for_transaction(
+        transaction.transaction_id,
+        project_id: transaction.project_id,
+        near_timestamp: transaction.timestamp
+      )
+
+      filtered = op_filter.present? ? all_spans.select { |s| s["op"].to_s.start_with?(op_filter) } : all_spans
+
+      text = format_transaction_spans(transaction, all_spans, filtered, op_filter, limit)
 
       render json: {
         jsonrpc: "2.0",
@@ -1322,6 +1377,85 @@ module Mcp
       if txn.tags.is_a?(Hash) && txn.tags.any?
         result += "\n### Tags\n"
         txn.tags.each { |k, v| result += "- **#{k}:** #{v}\n" }
+      end
+
+      result
+    end
+
+    def format_transaction_spans(txn, all_spans, filtered_spans, op_filter, limit)
+      result = "## Spans for Transaction ##{txn.id}: #{txn.transaction_name}\n\n"
+      result += "**Transaction UUID:** #{txn.transaction_id}\n"
+      result += "**Duration:** #{txn.duration.round}ms\n"
+      result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      result += "**Total Spans:** #{all_spans.size}"
+      result += " (truncated at ingest — cap is 1000 per transaction)" if txn.spans_truncated
+      result += "\n"
+      result += "**Op Filter:** `#{op_filter}*`\n" if op_filter.present?
+      result += "\n"
+
+      if all_spans.empty?
+        result += "No spans recorded for this transaction. Either the SDK didn't capture child spans, or the transaction is older than the span retention window.\n"
+        return result
+      end
+
+      # Op summary across ALL spans (not filtered) — gives a holistic view
+      by_op = all_spans.group_by { |s| s["op"].to_s }
+      result += "### Op Summary\n\n"
+      result += "| Op | Count | Total Time | Avg |\n"
+      result += "|---|---:|---:|---:|\n"
+      by_op.sort_by { |_, ss| -ss.sum { |s| s["duration_ms"].to_f } }.each do |op, ss|
+        total = ss.sum { |s| s["duration_ms"].to_f }
+        avg = total / ss.size
+        op_label = op.presence || "(none)"
+        result += "| `#{op_label}` | #{ss.size} | #{format_ms(total)} | #{format_ms(avg)} |\n"
+      end
+      result += "\n"
+
+      # Repeated descriptions within the filtered set — N+1 fingerprint
+      repeated = filtered_spans
+        .select { |s| s["description"].to_s.strip.present? }
+        .group_by { |s| s["description"].to_s }
+        .select { |_, ss| ss.size > 3 }
+        .sort_by { |_, ss| -ss.size }
+
+      if repeated.any?
+        result += "### Repeated Descriptions (potential N+1)\n\n"
+        result += "Descriptions executed >3 times in this request:\n\n"
+        repeated.first(15).each do |desc, ss|
+          total = ss.sum { |s| s["duration_ms"].to_f }
+          op = ss.first["op"]
+          truncated = desc.size > 400 ? "#{desc[0, 400]}…" : desc
+          result += "- **×#{ss.size}** (#{format_ms(total)} total) `#{op}`\n"
+          result += "  ```sql\n  #{truncated}\n  ```\n"
+        end
+        result += "\n"
+      end
+
+      # Span list
+      shown = filtered_spans.first(limit)
+      list_label = if op_filter.present?
+        "Span List (filtered by op `#{op_filter}*`: #{shown.size} of #{filtered_spans.size}; #{all_spans.size} total)"
+      else
+        "Span List (#{shown.size} of #{all_spans.size})"
+      end
+      result += "### #{list_label}\n\n"
+
+      shown.each do |s|
+        depth = s["depth"].to_i
+        indent = "  " * depth
+        op = s["op"].to_s.presence || "(none)"
+        desc = s["description"].to_s
+        dur = s["duration_ms"].to_f
+        line = "#{indent}- [#{format_ms(dur)}] `#{op}`"
+        if desc.present?
+          desc_truncated = desc.size > 250 ? "#{desc[0, 250]}…" : desc
+          line += " — #{desc_truncated}"
+        end
+        result += "#{line}\n"
+      end
+
+      if filtered_spans.size > limit
+        result += "\n_#{filtered_spans.size - limit} more spans not shown — increase `limit` or narrow `op_filter`._\n"
       end
 
       result
