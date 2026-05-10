@@ -3,5 +3,5 @@ ingest: bin/ingest_worker
 ducklake: bin/ducklake_worker
 scheduler: bin/scheduler
 css: bin/rails tailwindcss:watch
-tuber: tuber server -p 11330 --name "Splat Tuber"
+tuber: tuber server -p 11331 --name "Splat Tuber"
 

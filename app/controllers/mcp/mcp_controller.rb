@@ -3,7 +3,7 @@
 module Mcp
   class McpController < ApplicationController
     skip_before_action :verify_authenticity_token
-    skip_before_action :require_authentication  # Skip OIDC auth - MCP uses token-based auth
+    skip_before_action :require_authentication
     before_action :authenticate_mcp_token
 
     # Exception handling
