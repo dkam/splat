@@ -3,43 +3,43 @@
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-8">
-    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
   </div>
 
   <div class="flex justify-between items-center mb-6">
-    <h1 class="text-3xl font-bold text-gray-900">Performance</h1>
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Performance</h1>
   </div>
 
   <!-- Filters -->
-  <div class="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
+  <div class="mb-6 bg-white dark:bg-gray-900 rounded-lg shadow p-4 border border-gray-200 dark:border-gray-800">
     <%= form_with url: project_endpoints_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
       <div class="flex-1 min-w-[150px]">
-        <%= f.label :time_range, "Time Range", class: "block text-sm font-medium text-gray-700 mb-1" %>
+        <%= f.label :time_range, "Time Range", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" %>
         <%= f.select :time_range,
             options_for_select([["Last Hour", "1h"], ["Last 6 Hours", "6h"], ["Last 24 Hours", "24h"], ["Last 7 Days", "7d"]], @time_range),
             {},
-            class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+            class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
       </div>
 
       <div class="flex-1 min-w-[150px]">
-        <%= f.label :environment, "Environment", class: "block text-sm font-medium text-gray-700 mb-1" %>
+        <%= f.label :environment, "Environment", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" %>
         <%= f.select :environment,
             options_for_select([["All", ""]] + @environments.map { |e| [e, e] }, params[:environment]),
             {},
-            class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+            class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
       </div>
 
       <div class="flex-1 min-w-[200px]">
-        <%= f.label :name, "Endpoint name", class: "block text-sm font-medium text-gray-700 mb-1" %>
+        <%= f.label :name, "Endpoint name", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" %>
         <%= f.text_field :name, value: @name_query, placeholder: "e.g. UsersController",
-            class: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+            class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
       </div>
 
       <div class="flex items-end gap-2">
-        <%= f.submit "Filter", class: "bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg" %>
+        <%= f.submit "Filter", class: "bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg" %>
         <% if @name_query || params[:environment].present? %>
           <%= link_to "Clear", project_endpoints_path(@project.slug, time_range: @time_range),
-              class: "text-gray-600 hover:text-gray-900 font-medium py-2 px-3" %>
+              class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 font-medium py-2 px-3" %>
         <% end %>
       </div>
     <% end %>
@@ -47,22 +47,22 @@
 
   <!-- Stats Cards -->
   <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200" title="Median request duration — half of all requests are faster than this, half slower.">
-      <div class="text-sm font-medium text-gray-600 mb-1">P50 Duration</div>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800" title="Median request duration — half of all requests are faster than this, half slower.">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">P50 Duration</div>
       <div class="text-3xl font-bold <%= duration_color_class(@p50_duration) %>">
         <%= format_duration(@p50_duration) %>
       </div>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm font-medium text-gray-600 mb-1">P95 Duration</div>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">P95 Duration</div>
       <div class="text-3xl font-bold <%= duration_color_class(@p95_duration) %>">
         <%= format_duration(@p95_duration) %>
       </div>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm font-medium text-gray-600 mb-1">P99 Duration</div>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">P99 Duration</div>
       <div class="text-3xl font-bold <%= duration_color_class(@p99_duration) %>">
         <%= format_duration(@p99_duration) %>
       </div>
@@ -72,38 +72,38 @@
   <!-- Quick Links -->
   <div class="mb-6 flex gap-4 flex-wrap">
     <%= link_to project_endpoints_path(@project.slug, time_range: @time_range),
-        class: "bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-lg border border-red-200 transition-colors" do %>
+        class: "bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 font-medium py-2 px-4 rounded-lg border border-red-200 dark:border-red-800 transition-colors" do %>
       🐌 View Slow Transactions (>1s)
     <% end %>
     <%= link_to n_plus_one_project_endpoints_path(@project.slug, time_range: @time_range),
-        class: "bg-orange-50 hover:bg-orange-100 text-orange-700 font-medium py-2 px-4 rounded-lg border border-orange-200 transition-colors" do %>
+        class: "bg-orange-50 hover:bg-orange-100 dark:bg-orange-900/30 dark:hover:bg-orange-900/50 text-orange-700 dark:text-orange-300 font-medium py-2 px-4 rounded-lg border border-orange-200 dark:border-orange-800 transition-colors" do %>
       ⚠ View N+1 Issues
     <% end %>
   </div>
 
   <!-- Top Endpoints by Impact -->
   <div class="mb-8">
-    <h2 class="text-xl font-bold text-gray-900 mb-4">Top Endpoints by Impact</h2>
+    <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Top Endpoints by Impact</h2>
     <% if @endpoints.any? %>
-      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+          <thead class="bg-gray-50 dark:bg-gray-800/60">
             <tr>
-              <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-full">Endpoint</th>
-              <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
-              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Time</th>
-              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Latency</th>
-              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Count</th>
-              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Queries</th>
-              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">N+1</th>
+              <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-full">Endpoint</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Trend</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Time</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Latency</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Count</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">Queries</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">N+1</th>
             </tr>
           </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
+          <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-800">
             <% @endpoints.each do |endpoint| %>
-              <tr class="hover:bg-gray-50">
+              <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60">
                 <td class="px-3 py-4 max-w-0">
                   <%= link_to detail_project_endpoints_path(@project.slug, name: endpoint["transaction_name"], time_range: @time_range),
-                      class: "text-blue-600 hover:text-blue-800 font-medium block truncate",
+                      class: "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium block truncate",
                       title: endpoint["transaction_name"] do %>
                     <%= endpoint["transaction_name"] %>
                   <% end %>
@@ -111,29 +111,29 @@
                 <td class="px-3 py-4 whitespace-nowrap text-center">
                   <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
-                    <span class="text-blue-500">
+                    <span class="text-blue-500 dark:text-blue-400">
                       <%= sparkline(spark, width: 80, height: 24, title: "#{spark.sum} requests in window") %>
                     </span>
                   <% else %>
-                    <span class="text-gray-300 text-sm">—</span>
+                    <span class="text-gray-300 dark:text-gray-600 text-sm">—</span>
                   <% end %>
                 </td>
                 <td class="px-3 py-4 whitespace-nowrap text-right">
-                  <span class="font-semibold text-gray-900">
+                  <span class="font-semibold text-gray-900 dark:text-gray-100">
                     <%= format_duration(endpoint["time_spent"]) %>
                   </span>
                 </td>
                 <td class="px-3 py-3 whitespace-nowrap text-right">
                   <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-0 text-sm leading-tight">
-                    <span class="text-gray-400 text-right">p50</span>
+                    <span class="text-gray-400 dark:text-gray-500 text-right">p50</span>
                     <span class="font-semibold <%= duration_color_class(endpoint["p50_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p50_duration"]) %></span>
-                    <span class="text-gray-400 text-right">p95</span>
+                    <span class="text-gray-400 dark:text-gray-500 text-right">p95</span>
                     <span class="font-semibold <%= duration_color_class(endpoint["p95_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p95_duration"]) %></span>
-                    <span class="text-gray-400 text-right">p99</span>
+                    <span class="text-gray-400 dark:text-gray-500 text-right">p99</span>
                     <span class="font-semibold <%= duration_color_class(endpoint["p99_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p99_duration"]) %></span>
                   </div>
                 </td>
-                <td class="px-3 py-4 whitespace-nowrap text-right text-gray-600">
+                <td class="px-3 py-4 whitespace-nowrap text-right text-gray-600 dark:text-gray-400">
                   <span class="<%= 'text-sm' if endpoint["count"] >= 100_000 %>">
                     <%= number_with_delimiter(endpoint["count"]) %>
                   </span>
@@ -143,13 +143,13 @@
                   <% max_q = endpoint["max_queries"].to_i %>
                   <% if max_q > 0 %>
                     <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-0 text-sm leading-tight">
-                      <span class="text-gray-400 text-right">avg</span>
-                      <span class="text-gray-700 text-right tabular-nums"><%= avg_q %></span>
-                      <span class="text-gray-400 text-right">max</span>
-                      <span class="<%= max_q > 20 ? 'text-red-700 font-semibold' : 'text-gray-700' %> text-right tabular-nums"><%= max_q %></span>
+                      <span class="text-gray-400 dark:text-gray-500 text-right">avg</span>
+                      <span class="text-gray-700 dark:text-gray-300 text-right tabular-nums"><%= avg_q %></span>
+                      <span class="text-gray-400 dark:text-gray-500 text-right">max</span>
+                      <span class="<%= max_q > 20 ? 'text-red-700 dark:text-red-400 font-semibold' : 'text-gray-700 dark:text-gray-300' %> text-right tabular-nums"><%= max_q %></span>
                     </div>
                   <% else %>
-                    <span class="text-gray-400 text-sm">—</span>
+                    <span class="text-gray-400 dark:text-gray-500 text-sm">—</span>
                   <% end %>
                 </td>
                 <td class="px-3 py-4 whitespace-nowrap text-right">
@@ -159,12 +159,12 @@
                     <% pct = (n.to_f / total * 100) %>
                     <% pct_label = pct >= 99.95 ? "100%" : "#{pct.round(1)}%" %>
                     <% tooltip = "#{number_with_delimiter(n)} of #{number_with_delimiter(total)} transactions tripped the N+1 detector (#{pct.round(2)}%)" %>
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800"
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
                           title="<%= tooltip %>">
                       ⚠ <%= pct_label %>
                     </span>
                   <% else %>
-                    <span class="text-gray-400 text-sm">—</span>
+                    <span class="text-gray-400 dark:text-gray-500 text-sm">—</span>
                   <% end %>
                 </td>
               </tr>
@@ -173,59 +173,59 @@
         </table>
       </div>
     <% else %>
-      <div class="bg-white rounded-lg shadow p-8 text-center border border-gray-200">
-        <p class="text-gray-600">No transaction data available</p>
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-8 text-center border border-gray-200 dark:border-gray-800">
+        <p class="text-gray-600 dark:text-gray-400">No transaction data available</p>
       </div>
     <% end %>
   </div>
 
   <!-- Recent Transactions -->
   <div>
-    <h2 class="text-xl font-bold text-gray-900 mb-4">Recent Transactions</h2>
+    <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Recent Transactions</h2>
     <% if @transactions.any? %>
-      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+          <thead class="bg-gray-50 dark:bg-gray-800/60">
             <tr>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Transaction</th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">ID</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Transaction</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Method</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
             </tr>
           </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
+          <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-800">
             <% @transactions.each do |transaction| %>
-              <tr class="hover:bg-gray-50">
+              <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60">
                 <td class="px-6 py-4">
-                  <span class="font-mono text-sm text-gray-500">#<%= transaction.id %></span>
+                  <span class="font-mono text-sm text-gray-500 dark:text-gray-400">#<%= transaction.id %></span>
                 </td>
                 <td class="px-6 py-4">
                   <%= link_to project_transaction_path(@project.slug, transaction),
-                      class: "text-blue-600 hover:text-blue-800 font-medium" do %>
+                      class: "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium" do %>
                     <%= transaction.transaction_name %>
                   <% end %>
                   <% if transaction.environment.present? %>
-                    <span class="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
+                    <span class="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded">
                       <%= transaction.environment %>
                     </span>
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
                   <% if transaction.http_method.present? %>
-                    <span class="font-mono text-sm text-gray-600"><%= transaction.http_method %></span>
+                    <span class="font-mono text-sm text-gray-600 dark:text-gray-400"><%= transaction.http_method %></span>
                   <% else %>
-                    <span class="text-gray-400">-</span>
+                    <span class="text-gray-400 dark:text-gray-500">-</span>
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
                   <% if transaction.http_status.present? %>
-                    <span class="px-2 py-1 text-xs font-medium rounded <%= transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800' : transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
+                    <span class="px-2 py-1 text-xs font-medium rounded <%= transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' %>">
                       <%= transaction.http_status %>
                     </span>
                   <% else %>
-                    <span class="text-gray-400">-</span>
+                    <span class="text-gray-400 dark:text-gray-500">-</span>
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
@@ -233,7 +233,7 @@
                     <%= format_duration(transaction.duration) %>
                   </span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
                   <%= transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S") %>
                 </td>
               </tr>
@@ -248,8 +248,8 @@
         </div>
       <% end %>
     <% else %>
-      <div class="bg-white rounded-lg shadow p-8 text-center border border-gray-200">
-        <p class="text-gray-600">No recent transactions found</p>
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-8 text-center border border-gray-200 dark:border-gray-800">
+        <p class="text-gray-600 dark:text-gray-400">No recent transactions found</p>
       </div>
     <% end %>
   </div>

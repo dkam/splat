@@ -1,15 +1,15 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-8">
-    <%= link_to "← Performance", project_endpoints_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+    <%= link_to "← Performance", project_endpoints_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
   </div>
 
   <div class="mb-6">
     <div class="flex items-center gap-3 mb-2">
-      <span class="text-3xl font-mono text-gray-500 font-medium">#<%= @transaction.id %></span>
-      <h1 class="text-3xl font-bold text-gray-900"><%= @transaction.transaction_name %></h1>
+      <span class="text-3xl font-mono text-gray-500 dark:text-gray-400 font-medium">#<%= @transaction.id %></span>
+      <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= @transaction.transaction_name %></h1>
     </div>
-    <div class="flex items-center gap-3 text-sm text-gray-600">
-      <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= @transaction.transaction_id %></span>
+    <div class="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
+      <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 px-2 py-1 rounded"><%= @transaction.transaction_id %></span>
       <span>•</span>
       <span><%= @transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S.%L") %></span>
     </div>
@@ -17,44 +17,44 @@
 
   <!-- Duration Overview -->
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm font-medium text-gray-600 mb-1">Total Duration</div>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Total Duration</div>
       <div class="text-3xl font-bold <%= duration_color_class(@transaction.duration) %>">
         <%= format_duration(@transaction.duration) %>
       </div>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm font-medium text-gray-600 mb-1">Database Time</div>
-      <div class="text-2xl font-bold text-gray-900">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Database Time</div>
+      <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
         <% if @transaction.db_time.present? %>
           <%= format_duration(@transaction.db_time) %>
-          <div class="text-xs text-gray-500 mt-1">
+          <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             <%= (@transaction.db_time.to_f / @transaction.duration * 100).round(1) %>% of total
           </div>
         <% else %>
-          <span class="text-gray-400">N/A</span>
+          <span class="text-gray-400 dark:text-gray-500">N/A</span>
         <% end %>
       </div>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm font-medium text-gray-600 mb-1">View Time</div>
-      <div class="text-2xl font-bold text-gray-900">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">View Time</div>
+      <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
         <% if @transaction.view_time.present? %>
           <%= format_duration(@transaction.view_time) %>
-          <div class="text-xs text-gray-500 mt-1">
+          <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             <%= (@transaction.view_time.to_f / @transaction.duration * 100).round(1) %>% of total
           </div>
         <% else %>
-          <span class="text-gray-400">N/A</span>
+          <span class="text-gray-400 dark:text-gray-500">N/A</span>
         <% end %>
       </div>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-      <div class="text-sm font-medium text-gray-600 mb-1">Operation</div>
-      <div class="text-lg font-bold text-gray-900">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Operation</div>
+      <div class="text-lg font-bold text-gray-900 dark:text-gray-100">
         <%= @transaction.op || "N/A" %>
       </div>
     </div>
@@ -62,21 +62,21 @@
 
   <!-- HTTP Context -->
   <% if @transaction.http_method.present? || @transaction.http_status.present? || @transaction.http_url.present? %>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
-      <h2 class="text-lg font-bold text-gray-900 mb-4">HTTP Request</h2>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">HTTP Request</h2>
       <dl class="grid grid-cols-1 gap-4">
         <% if @transaction.http_method.present? %>
           <div>
-            <dt class="text-sm font-medium text-gray-600">Method</dt>
-            <dd class="mt-1 font-mono text-sm text-gray-900"><%= @transaction.http_method %></dd>
+            <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Method</dt>
+            <dd class="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100"><%= @transaction.http_method %></dd>
           </div>
         <% end %>
 
         <% if @transaction.http_status.present? %>
           <div>
-            <dt class="text-sm font-medium text-gray-600">Status</dt>
+            <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Status</dt>
             <dd class="mt-1">
-              <span class="px-2 py-1 text-sm font-medium rounded <%= @transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800' : @transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
+              <span class="px-2 py-1 text-sm font-medium rounded <%= @transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : @transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' %>">
                 <%= @transaction.http_status %>
               </span>
             </dd>
@@ -85,8 +85,8 @@
 
         <% if @transaction.http_url.present? %>
           <div>
-            <dt class="text-sm font-medium text-gray-600">URL</dt>
-            <dd class="mt-1 font-mono text-sm text-gray-900 break-all"><%= @transaction.http_url %></dd>
+            <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">URL</dt>
+            <dd class="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100 break-all"><%= @transaction.http_url %></dd>
           </div>
         <% end %>
       </dl>
@@ -94,14 +94,14 @@
   <% end %>
 
   <!-- Context -->
-  <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
-    <h2 class="text-lg font-bold text-gray-900 mb-4">Context</h2>
+  <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+    <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Context</h2>
     <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <% if @transaction.environment.present? %>
         <div>
-          <dt class="text-sm font-medium text-gray-600">Environment</dt>
+          <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Environment</dt>
           <dd class="mt-1">
-            <span class="px-2 py-1 text-sm bg-blue-100 text-blue-800 rounded">
+            <span class="px-2 py-1 text-sm bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded">
               <%= @transaction.environment %>
             </span>
           </dd>
@@ -110,28 +110,28 @@
 
       <% if @transaction.release.present? %>
         <div>
-          <dt class="text-sm font-medium text-gray-600">Release</dt>
-          <dd class="mt-1 font-mono text-sm text-gray-900"><%= @transaction.release %></dd>
+          <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Release</dt>
+          <dd class="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100"><%= @transaction.release %></dd>
         </div>
       <% end %>
 
       <% if @transaction.server_name.present? %>
         <div>
-          <dt class="text-sm font-medium text-gray-600">Server</dt>
-          <dd class="mt-1 text-sm text-gray-900"><%= @transaction.server_name %></dd>
+          <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Server</dt>
+          <dd class="mt-1 text-sm text-gray-900 dark:text-gray-100"><%= @transaction.server_name %></dd>
         </div>
       <% end %>
 
       <div>
-        <dt class="text-sm font-medium text-gray-600">Transaction ID</dt>
+        <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Transaction ID</dt>
         <dd class="mt-1">
           <button
             data-controller="clipboard"
             data-clipboard-text-value="<%= @transaction.transaction_id %>"
             data-action="click->clipboard#copy"
-            class="font-mono text-sm text-gray-900 hover:text-blue-600 cursor-pointer">
+            class="font-mono text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer">
             <%= @transaction.transaction_id %>
-            <span data-clipboard-target="feedback" class="text-xs text-green-600 ml-2 hidden">Copied!</span>
+            <span data-clipboard-target="feedback" class="text-xs text-green-600 dark:text-green-400 ml-2 hidden">Copied!</span>
           </button>
         </dd>
       </div>
@@ -140,13 +140,13 @@
 
   <!-- Tags -->
   <% if @transaction.tags.present? && @transaction.tags.any? %>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
-      <h2 class="text-lg font-bold text-gray-900 mb-4">Tags</h2>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Tags</h2>
       <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <% @transaction.tags.each do |key, value| %>
           <div>
-            <dt class="text-sm font-medium text-gray-600"><%= key %></dt>
-            <dd class="mt-1 font-mono text-sm text-gray-900"><%= value %></dd>
+            <dt class="text-sm font-medium text-gray-600 dark:text-gray-400"><%= key %></dt>
+            <dd class="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100"><%= value %></dd>
           </div>
         <% end %>
       </dl>
@@ -155,24 +155,24 @@
 
   <!-- Query Analysis -->
   <% if @transaction.query_count > 0 %>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
-      <h2 class="text-lg font-bold text-gray-900 mb-4">Query Analysis</h2>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Query Analysis</h2>
 
       <!-- Query Summary -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <div class="text-center p-4 bg-blue-50 rounded-lg">
-          <div class="text-2xl font-bold text-blue-600"><%= @transaction.query_count %></div>
-          <div class="text-sm text-blue-800">Total Queries</div>
+        <div class="text-center p-4 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+          <div class="text-2xl font-bold text-blue-600 dark:text-blue-300"><%= @transaction.query_count %></div>
+          <div class="text-sm text-blue-800 dark:text-blue-300">Total Queries</div>
         </div>
-        <div class="text-center p-4 bg-green-50 rounded-lg">
-          <div class="text-2xl font-bold text-green-600"><%= @transaction.unique_query_patterns %></div>
-          <div class="text-sm text-green-800">Unique Patterns</div>
+        <div class="text-center p-4 bg-green-50 dark:bg-green-900/30 rounded-lg">
+          <div class="text-2xl font-bold text-green-600 dark:text-green-300"><%= @transaction.unique_query_patterns %></div>
+          <div class="text-sm text-green-800 dark:text-green-300">Unique Patterns</div>
         </div>
-        <div class="text-center p-4 <%= @transaction.has_n_plus_one_queries? ? 'bg-red-50' : 'bg-gray-50' %> rounded-lg">
-          <div class="text-2xl font-bold <%= @transaction.has_n_plus_one_queries? ? 'text-red-600' : 'text-gray-600' %>">
+        <div class="text-center p-4 <%= @transaction.has_n_plus_one_queries? ? 'bg-red-50 dark:bg-red-900/30' : 'bg-gray-50 dark:bg-gray-800' %> rounded-lg">
+          <div class="text-2xl font-bold <%= @transaction.has_n_plus_one_queries? ? 'text-red-600 dark:text-red-300' : 'text-gray-600 dark:text-gray-300' %>">
             <%= @transaction.potential_n_plus_one_queries.size %>
           </div>
-          <div class="text-sm <%= @transaction.has_n_plus_one_queries? ? 'text-red-800' : 'text-gray-800' %>">
+          <div class="text-sm <%= @transaction.has_n_plus_one_queries? ? 'text-red-800 dark:text-red-300' : 'text-gray-800 dark:text-gray-300' %>">
             N+1 Patterns
           </div>
         </div>
@@ -180,17 +180,17 @@
 
       <!-- N+1 Query Detection -->
       <% if @transaction.has_n_plus_one_queries? %>
-        <div class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <h3 class="text-sm font-bold text-red-800 mb-2">
+        <div class="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
+          <h3 class="text-sm font-bold text-red-800 dark:text-red-300 mb-2">
             ⚠️ Potential N+1 Query Issues Detected
           </h3>
-          <p class="text-sm text-red-700 mb-3">
+          <p class="text-sm text-red-700 dark:text-red-300 mb-3">
             The following query patterns were executed multiple times, which may indicate N+1 query problems:
           </p>
           <div class="space-y-2">
             <% @transaction.potential_n_plus_one_queries.each do |pattern| %>
-              <div class="p-2 bg-red-100 rounded">
-                <code class="text-xs text-red-900 break-all"><%= pattern %></code>
+              <div class="p-2 bg-red-100 dark:bg-red-900/50 rounded">
+                <code class="text-xs text-red-900 dark:text-red-200 break-all"><%= pattern %></code>
               </div>
             <% end %>
           </div>
@@ -200,20 +200,20 @@
       <!-- Query Patterns Breakdown -->
       <% if @transaction.query_patterns.any? %>
         <div>
-          <h3 class="text-sm font-bold text-gray-700 mb-2">Query Patterns</h3>
+          <h3 class="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Query Patterns</h3>
           <div class="space-y-2">
             <% @transaction.query_patterns.each do |pattern, data| %>
-              <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                 <div class="flex-1 mr-4">
-                  <code class="text-xs text-gray-800 break-all"><%= pattern %></code>
+                  <code class="text-xs text-gray-800 dark:text-gray-200 break-all"><%= pattern %></code>
                   <% if data["examples"]&.any? %>
-                    <div class="mt-1 text-xs text-gray-500">
+                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       Example: <code class="text-xs"><%= data["examples"].first || 'N/A' %></code>
                     </div>
                   <% end %>
                 </div>
                 <div class="text-right">
-                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= (data["count"] || 0) > 3 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800' %>">
+                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= (data["count"] || 0) > 3 ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' %>">
                     <%= data["count"] || 0 %>×
                   </span>
                 </div>
@@ -227,13 +227,13 @@
 
   <!-- Span Waterfall -->
   <% if @spans&.any? %>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold text-gray-900">Span Waterfall</h2>
-        <span class="text-xs text-gray-500"><%= @spans.size %> span<%= "s" unless @spans.size == 1 %></span>
+        <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">Span Waterfall</h2>
+        <span class="text-xs text-gray-500 dark:text-gray-400"><%= @spans.size %> span<%= "s" unless @spans.size == 1 %></span>
       </div>
       <% if @transaction.spans_truncated %>
-        <div class="mb-3 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded">
+        <div class="mb-3 text-sm text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 px-3 py-2 rounded">
           Showing first <%= @spans.size - 1 %> child spans; the rest were dropped at ingest (cap is 1000 per transaction).
         </div>
       <% end %>
@@ -243,13 +243,13 @@
 
   <!-- Measurements -->
   <% if @transaction.measurements.present? && @transaction.measurements.any? %>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
-      <h2 class="text-lg font-bold text-gray-900 mb-4">Measurements</h2>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Measurements</h2>
       <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <% @transaction.measurements.each do |key, data| %>
           <div>
-            <dt class="text-sm font-medium text-gray-600"><%= key.gsub('_', ' ').titleize %></dt>
-            <dd class="mt-1 text-sm text-gray-900">
+            <dt class="text-sm font-medium text-gray-600 dark:text-gray-400"><%= key.gsub('_', ' ').titleize %></dt>
+            <dd class="mt-1 text-sm text-gray-900 dark:text-gray-100">
               <% if data.is_a?(Hash) %>
                 <%= data['value'] || 'N/A' %> <%= data['unit'] || '' %>
               <% else %>
@@ -263,11 +263,11 @@
   <% end %>
 
   <!-- Export Options -->
-  <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
-    <h2 class="text-lg font-bold text-gray-900 mb-4">Export Data</h2>
+  <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+    <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Export Data</h2>
     <div class="flex flex-wrap gap-3">
       <%= link_to project_transaction_path(@project.slug, @transaction, format: :json),
-          class: "inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50" do %>
+          class: "inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700" do %>
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
         </svg>
@@ -275,7 +275,7 @@
       <% end %>
 
       <%= link_to project_transaction_path(@project.slug, @transaction, format: :csv),
-          class: "inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50" do %>
+          class: "inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700" do %>
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
         </svg>

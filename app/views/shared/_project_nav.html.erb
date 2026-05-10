@@ -2,17 +2,17 @@
     project context is available. Active section gets a coloured pill;
     inactive sections are quiet text-only links. %>
 <nav class="hidden md:flex items-center gap-1 text-sm" aria-label="Project sections">
-  <span class="text-gray-400 mr-2 truncate max-w-[12rem]" title="<%= project.name %>"><%= project.name %></span>
+  <span class="text-gray-400 dark:text-gray-500 mr-2 truncate max-w-[12rem]" title="<%= project.name %>"><%= project.name %></span>
   <%= link_to project_path(project.slug),
-      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:overview) ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}" do %>
+      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:overview) ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800'}" do %>
     Overview
   <% end %>
   <%= link_to project_issues_path(project.slug),
-      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:errors) ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}" do %>
+      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:errors) ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800'}" do %>
     🐛 Errors
   <% end %>
   <%= link_to project_endpoints_path(project.slug),
-      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:performance) ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}" do %>
+      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:performance) ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800'}" do %>
     🚀 Performance
   <% end %>
 </nav>

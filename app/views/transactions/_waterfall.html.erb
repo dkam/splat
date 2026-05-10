@@ -9,16 +9,16 @@
   max_depth = spans.map { |s| s["depth"].to_i }.max || 0
 %>
 
-<div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
+<div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
   <table class="min-w-full text-sm">
-    <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+    <thead class="bg-gray-50 dark:bg-gray-800/60 text-xs uppercase text-gray-500 dark:text-gray-400">
       <tr>
         <th class="px-4 py-2 text-left font-medium" style="width: 38%">Span</th>
         <th class="px-4 py-2 text-right font-medium" style="width: 12%">Duration</th>
         <th class="px-4 py-2 text-left font-medium">Timing</th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
       <% spans.each do |s|
            depth   = s["depth"].to_i
            dur_ms  = s["duration_ms"].to_f
@@ -29,19 +29,19 @@
            label = s["description"].presence || op.presence || "(span)"
            tooltip = [op, s["description"], "#{dur_ms.round(2)}ms"].compact.reject(&:empty?).join(" · ")
       %>
-        <tr class="hover:bg-gray-50">
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60">
           <td class="px-4 py-1.5 align-middle">
             <div class="flex items-center gap-2 min-w-0" style="padding-left: <%= depth * 0.75 %>rem">
               <span class="inline-block w-2 h-2 rounded-full <%= span_op_color(op) %> shrink-0"></span>
-              <span class="font-mono text-xs text-gray-500 shrink-0"><%= op.presence || "—" %></span>
-              <span class="truncate text-gray-800" title="<%= tooltip %>"><%= label %></span>
+              <span class="font-mono text-xs text-gray-500 dark:text-gray-400 shrink-0"><%= op.presence || "—" %></span>
+              <span class="truncate text-gray-800 dark:text-gray-200" title="<%= tooltip %>"><%= label %></span>
             </div>
           </td>
           <td class="px-4 py-1.5 text-right align-middle font-mono text-xs <%= duration_color_class(dur_ms) %>">
             <%= format_duration(dur_ms) %>
           </td>
           <td class="px-4 py-1.5 align-middle">
-            <div class="relative h-4 bg-gray-100 rounded-sm">
+            <div class="relative h-4 bg-gray-100 dark:bg-gray-800 rounded-sm">
               <div class="absolute top-0 bottom-0 <%= span_op_color(op) %> rounded-sm"
                    style="left: <%= offset_pct.round(2) %>%; width: <%= width_pct.round(2) %>%"
                    title="<%= tooltip %>"></div>
@@ -53,15 +53,15 @@
   </table>
 </div>
 
-<div class="mt-2 flex flex-wrap gap-3 text-xs text-gray-500">
+<div class="mt-2 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
   <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span> db</span>
   <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-orange-500"></span> http</span>
   <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-500"></span> view / template</span>
   <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-500"></span> cache</span>
   <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-pink-500"></span> queue</span>
   <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-500"></span> other</span>
-  <span class="ml-auto text-gray-400">Tree depth: <%= max_depth %></span>
+  <span class="ml-auto text-gray-400 dark:text-gray-500">Tree depth: <%= max_depth %></span>
 </div>
 <% if spans.size == 1 %>
-  <p class="mt-2 text-xs text-gray-500">Only the root transaction span is recorded — no child spans were captured for this request.</p>
+  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Only the root transaction span is recorded — no child spans were captured for this request.</p>
 <% end %>

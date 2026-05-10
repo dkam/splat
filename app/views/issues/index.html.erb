@@ -3,36 +3,36 @@
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-8">
-    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 hover:text-gray-900" %>
+    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
   </div>
 
   <div class="flex justify-between items-center mb-6">
-    <h1 class="text-3xl font-bold text-gray-900">Issues</h1>
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Issues</h1>
   </div>
 
   <!-- Status Tabs -->
-  <div class="mb-6 border-b border-gray-200">
+  <div class="mb-6 border-b border-gray-200 dark:border-gray-800">
     <nav class="flex gap-8">
       <%= link_to project_issues_path(@project.slug, status: "open"),
-          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'open' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}" do %>
+          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'open' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700'}" do %>
         Open
-        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100">
+        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-300">
           <%= @open_count %>
         </span>
       <% end %>
 
       <%= link_to project_issues_path(@project.slug, status: "resolved"),
-          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'resolved' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}" do %>
+          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'resolved' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700'}" do %>
         Resolved
-        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100">
+        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-300">
           <%= @resolved_count %>
         </span>
       <% end %>
 
       <%= link_to project_issues_path(@project.slug, status: "ignored"),
-          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'ignored' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}" do %>
+          class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'ignored' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700'}" do %>
         Ignored
-        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100">
+        <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-300">
           <%= @ignored_count %>
         </span>
       <% end %>
@@ -41,29 +41,29 @@
 
   <!-- Issues List -->
   <% if @issues.any? %>
-    <div class="bg-white rounded-lg shadow border border-gray-200 divide-y divide-gray-200">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 divide-y divide-gray-200 dark:divide-gray-800">
       <% @issues.each do |issue| %>
-        <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 p-6 transition-colors" do %>
+        <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 dark:hover:bg-gray-800/60 p-6 transition-colors" do %>
           <div class="flex justify-between items-start">
             <div class="flex-1">
               <div class="flex items-center gap-3 mb-2">
-                <span class="text-lg font-mono text-gray-500 font-medium">#<%= issue.id %></span>
-                <h2 class="text-lg font-semibold text-gray-900"><%= issue.title %></h2>
+                <span class="text-lg font-mono text-gray-500 dark:text-gray-400 font-medium">#<%= issue.id %></span>
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><%= issue.title %></h2>
                 <% if issue.resolved? %>
-                  <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">Resolved</span>
+                  <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 rounded">Resolved</span>
                 <% elsif issue.ignored? %>
-                  <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">Ignored</span>
+                  <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 rounded">Ignored</span>
                 <% end %>
               </div>
 
-              <div class="flex items-center gap-4 text-sm text-gray-600 mb-3">
-                <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded"><%= issue.exception_type %></span>
+              <div class="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 mb-3">
+                <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 px-2 py-1 rounded"><%= issue.exception_type %></span>
                 <span>•</span>
-                <span class="font-semibold text-gray-900"><%= issue.count %></span>
+                <span class="font-semibold text-gray-900 dark:text-gray-100"><%= issue.count %></span>
                 <span>events</span>
               </div>
 
-              <div class="flex items-center gap-4 text-sm text-gray-500">
+              <div class="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                 <span>First seen: <%= issue.first_seen.strftime("%Y-%m-%d %H:%M") %></span>
                 <span>•</span>
                 <span>Last seen: <%= time_ago_in_words(issue.last_seen) %> ago</span>
@@ -73,7 +73,7 @@
             <div class="flex items-center gap-4">
               <% spark = @sparklines[issue.id] %>
               <% if spark&.any? { |v| v.to_i.positive? } %>
-                <div class="text-blue-500" title="Events per hour, last 24h. Dashed lines = deploys.">
+                <div class="text-blue-500 dark:text-blue-400" title="Events per hour, last 24h. Dashed lines = deploys.">
                   <%= sparkline(spark, width: 120, height: 28,
                       title: "#{spark.sum} events in last 24h, #{@deploy_markers.size} deploy#{'s' if @deploy_markers.size != 1}",
                       markers: @deploy_markers, time_range: @sparkline_range) %>
@@ -82,8 +82,8 @@
                 <div class="w-[120px] h-[28px]"></div>
               <% end %>
               <div class="text-right">
-                <div class="text-2xl font-bold text-gray-900"><%= issue.count %></div>
-                <div class="text-xs text-gray-500">events</div>
+                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100"><%= issue.count %></div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">events</div>
               </div>
             </div>
           </div>
@@ -97,17 +97,17 @@
       </div>
     <% end %>
   <% else %>
-    <div class="bg-white rounded-lg shadow p-12 text-center border border-gray-200">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-12 text-center border border-gray-200 dark:border-gray-800">
       <% if @status == "open" %>
         <div class="text-6xl mb-4">🎉</div>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">No open issues</h3>
-        <p class="text-gray-600">Great job! Everything is looking good.</p>
+        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No open issues</h3>
+        <p class="text-gray-600 dark:text-gray-400">Great job! Everything is looking good.</p>
       <% elsif @status == "resolved" %>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">No resolved issues</h3>
-        <p class="text-gray-600">Resolved issues will appear here.</p>
+        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No resolved issues</h3>
+        <p class="text-gray-600 dark:text-gray-400">Resolved issues will appear here.</p>
       <% else %>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">No ignored issues</h3>
-        <p class="text-gray-600">Ignored issues will appear here.</p>
+        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No ignored issues</h3>
+        <p class="text-gray-600 dark:text-gray-400">Ignored issues will appear here.</p>
       <% end %>
     </div>
   <% end %>

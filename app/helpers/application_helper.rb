@@ -98,17 +98,17 @@ module ApplicationHelper
 
   # Return CSS class based on duration performance
   def duration_color_class(ms)
-    return "text-gray-400" if ms.nil?
+    return "text-gray-400 dark:text-gray-500" if ms.nil?
 
     ms = ms.to_f
     if ms >= 2000 # 2+ seconds - very slow
-      "text-red-600"
+      "text-red-600 dark:text-red-400"
     elsif ms >= 1000 # 1-2 seconds - slow
-      "text-orange-600"
+      "text-orange-600 dark:text-orange-400"
     elsif ms >= 500 # 500ms-1s - moderate
-      "text-yellow-600"
+      "text-yellow-600 dark:text-yellow-400"
     else # < 500ms - fast
-      "text-green-600"
+      "text-green-600 dark:text-green-400"
     end
   end
 end
