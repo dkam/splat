@@ -754,7 +754,7 @@ module Mcp
         endpoint, time_range, environment: environment, release: release
       )
       total_count = stats["count"].to_i
-      return render_no_data("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count.zero?
+      return render_text("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count.zero?
 
       percentiles = {
         avg: stats["avg_duration"]&.to_f || 0,
@@ -903,40 +903,19 @@ module Mcp
     def resolve_issue(args)
       issue = Issue.find(args["issue_id"])
       issue.resolved!
-
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: "✅ Issue ##{issue.id} marked as resolved" }]
-        }
-      }
+      render_text("✅ Issue ##{issue.id} marked as resolved")
     end
 
     def ignore_issue(args)
       issue = Issue.find(args["issue_id"])
       issue.ignored!
-
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: "🔕 Issue ##{issue.id} marked as ignored" }]
-        }
-      }
+      render_text("🔕 Issue ##{issue.id} marked as ignored")
     end
 
     def reopen_issue(args)
       issue = Issue.find(args["issue_id"])
       issue.open!
-
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: "🔓 Issue ##{issue.id} reopened" }]
-        }
-      }
+      render_text("🔓 Issue ##{issue.id} reopened")
     end
 
     # Helper methods for new tools
@@ -990,8 +969,6 @@ module Mcp
         }
       }
     end
-    alias_method :render_no_data, :render_text
-
     def render_error(message)
       render json: {
         jsonrpc: "2.0",
@@ -1298,7 +1275,7 @@ module Mcp
       result += "**Duration:** #{txn.duration.round}ms\n"
       result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
       result += "**Total Spans:** #{all_spans.size}"
-      result += " (truncated at ingest — cap is 1000 per transaction)" if txn.spans_truncated
+      result += " (truncated at ingest — cap is #{Transaction::SPAN_CAP} per transaction)" if txn.spans_truncated
       result += "\n"
       result += "**Op Filter:** `#{op_filter}*`\n" if op_filter.present?
       result += "\n"
