@@ -1,6 +1,12 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# Force unbuffered stdout — without this, Ruby fully-buffers when stdout is a
+# pipe (e.g. docker log capture) and Rails.logger.info messages sit in the
+# buffer until 4KB accumulates or the process exits.
+STDOUT.sync = true
+STDERR.sync = true
+
 require_relative "../config/environment"
 
 consumers = [

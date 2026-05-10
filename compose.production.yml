@@ -1,0 +1,142 @@
+# Production docker-compose for splat — web + tuber + three worker sidecars
+# (ingest, ducklake, scheduler), replacing the old single Solid Queue `jobs`
+# service. Run with:
+#
+#   docker compose -f compose.production.yml up -d
+#
+# Required .env vars: HOST, HOST_IP, SECRET_KEY_BASE, SPLAT_HOST,
+# SPLAT_INTERNAL_HOST, SPLAT_ADMIN_EMAILS, SPLAT_EMAIL_FROM, SMTP_*,
+# MCP_AUTH_TOKEN, SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, OIDC_*,
+# SPLAT_ALLOWED_USERS.
+
+x-common-variables: &common-variables
+  RAILS_ENV: production
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  SPLAT_HOST: ${SPLAT_HOST}
+  SPLAT_INTERNAL_HOST: ${SPLAT_INTERNAL_HOST}
+  SPLAT_ADMIN_EMAILS: ${SPLAT_ADMIN_EMAILS}
+  SPLAT_EMAIL_FROM: ${SPLAT_EMAIL_FROM}
+
+  SMTP_ADDRESS: ${SMTP_ADDRESS}
+  SMTP_PORT: ${SMTP_PORT}
+  SMTP_USER_NAME: ${SMTP_USER_NAME}
+  SMTP_PASSWORD: ${SMTP_PASSWORD}
+
+  MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
+  SENTRY_DSN: ${SENTRY_DSN}
+  SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
+  DUCKLAKE_DISABLED: false
+
+  # Send Rails logs to stdout so `docker compose logs <service>` shows
+  # them. Without this, Rails writes to log/production.log and the bind-
+  # mounted host dir needs UID 1000 perms — easy to get wrong on a fresh
+  # deploy and silent when it's wrong.
+  RAILS_LOG_TO_STDOUT: "true"
+
+  # Container-to-container DNS uses the service name on the container port.
+  # 11330 is only the host-side port mapping — irrelevant inside the network.
+  TUBER_URL: tuber:11300
+
+x-splat-worker: &splat-worker
+  image: reg.tbdb.info/splat:latest
+  restart: unless-stopped
+  depends_on:
+    - tuber
+  volumes:
+    - /storage/splat/storage:/rails/storage
+  environment:
+    <<: *common-variables
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "3"
+
+services:
+  web:
+    image: reg.tbdb.info/splat:latest
+    environment:
+      <<: *common-variables
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME}
+      OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
+      SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/web:/rails/log
+    ports:
+      - "${HOST_IP}:3030:3000"
+    depends_on:
+      - tuber
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  ingest:
+    <<: *splat-worker
+    container_name: splat-ingest
+    command: bin/ingest_worker
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/ingest:/rails/log
+    mem_limit: 512M
+
+  ducklake:
+    <<: *splat-worker
+    container_name: splat-ducklake
+    command: bin/ducklake_worker
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/ducklake:/rails/log
+    mem_limit: 1024M
+    # CRITICAL: never scale beyond 1. The DuckLake catalog is single-writer
+    # SQLite — the entire two-stage pipeline exists so this is the ONLY
+    # process touching the catalog. A second replica would just contend
+    # on the lock and produce "database is locked" errors.
+    deploy:
+      replicas: 1
+
+  scheduler:
+    <<: *splat-worker
+    container_name: splat-scheduler
+    command: bin/scheduler
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/scheduler:/rails/log
+    mem_limit: 128M
+
+  tuber:
+    image: ghcr.io/tuberq/tuber:latest
+    # The image's entrypoint is the bare `tuber` binary — without a subcommand
+    # it prints help and exits. Env vars only populate flag values.
+    command: server
+    ports:
+      - "${HOST}:11330:11300"           # protocol — distinct host port from any other tuber instance
+      - "${HOST}:9130:9100"             # metrics — Prometheus / Uptime Kuma reachable here
+    volumes:
+      - /storage/splat/storage/tuber:/var/lib/tuber/binlog
+    restart: unless-stopped
+    mem_limit: 1500M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      - TUBER_NAME=splat                # distinct from the other tuber's name; shows in metrics + tuber-tui
+      - TUBER_LISTEN=0.0.0.0
+      - TUBER_PORT=11300
+      - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
+      - TUBER_MAX_STORAGE_BYTES=10gb
+      - TUBER_MAX_JOBS_SIZE=1gb
+      - TUBER_MAX_JOB_SIZE=20mb         # must accommodate packed batches (~5MB at 100/batch)
+      - TUBER_METRICS_PORT=9100
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

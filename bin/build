@@ -49,7 +49,6 @@ docker buildx build \
   --platform "$PLATFORMS" \
   -t reg.tbdb.info/splat:latest \
   -t reg.tbdb.info/splat:$(git rev-parse HEAD) \
-  --no-cache \
   --push .
 
 

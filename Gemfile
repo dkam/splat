@@ -96,6 +96,4 @@ end
 
 gem "sentry-rails"
 
-gem "image_processing", "~> 1.14"
-
 gem "duckdb", "~> 1.4"
