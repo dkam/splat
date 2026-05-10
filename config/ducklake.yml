@@ -11,10 +11,12 @@ default: &default
   catalog: storage/<%= Rails.env %>_ducklake_catalog.sqlite3
   data_path: storage/<%= Rails.env %>_ducklake_data/
   storage: local
-  # data_inlining_row_limit applies per ATTACH; 1000 rows is a reasonable
-  # default — small enough to flush quickly under load, large enough to avoid
-  # parquet files for low-traffic environments.
-  data_inlining_row_limit: 1000
+  # data_inlining_row_limit applies per ATTACH. Bigger = fewer parquet flushes,
+  # smaller catalog write amplification. With stage-2 coalesce-wait in place
+  # most batches stay inline; flushing happens when scheduled or when this
+  # threshold trips. 5000 keeps inline footprint small (~MB-scale) while
+  # cutting flush frequency vs the old 1000.
+  data_inlining_row_limit: 5000
 
 development:
   <<: *default

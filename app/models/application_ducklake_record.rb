@@ -200,6 +200,12 @@ class ApplicationDucklakeRecord
       # absorbs a backlog catch-up without losing writes.
       conn.execute("SET ducklake_max_retry_count = 100")
 
+      # zstd compresses Sentry-shaped data (repeated keys, file paths, SQL)
+      # 2-3× better than snappy. zstd-ruby is already a dependency for
+      # decoding inbound envelopes, so the format is already supported in
+      # the runtime. parquet_compression_level=3 is the zstd default.
+      conn.execute("SET parquet_compression = 'zstd'")
+
       return unless config[:storage].to_s == "s3"
 
       conn.execute("INSTALL httpfs")
