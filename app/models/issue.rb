@@ -21,16 +21,13 @@ class Issue < ApplicationRecord
     broadcast_refresh_to(project)
   end
 
-  after_update_commit do
-    broadcast_refresh  # Refreshes the issue show page
-    broadcast_refresh_to(project, "issues")  # Refreshes the project's issues index
-  end
-
-  # Broadcast to both project and issue when status changes
-  # after_update_commit -> {
-  #  broadcast_refresh_later               # For issue show pages
-  #  broadcast_refresh_later_to(project)  # For project pages
-  # } #, if: :status_changed?
+  # Only refresh on meaningful changes. Without this guard, every Event#create
+  # increments the counter_cache, which triggers an UPDATE here and would fire
+  # both broadcasts unthrottled — bypassing Event's BROADCAST_THROTTLE.
+  after_update_commit -> {
+    broadcast_refresh
+    broadcast_refresh_to(project, "issues")
+  }, if: :saved_change_to_status?
 
   def self.group_event(event_payload, project)
     fingerprint = generate_fingerprint(event_payload)
