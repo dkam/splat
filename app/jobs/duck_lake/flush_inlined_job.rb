@@ -5,9 +5,7 @@ module DuckLake
   # all small (single-row event/transaction inserts, ≤SPAN_CAP span batches),
   # so they always stay inline under DATA_INLINING_ROW_LIMIT. Without a
   # periodic flush the catalog SQLite grows unbounded and writes get slow.
-  class FlushInlinedJob < ApplicationJob
-    queue_as :low_priority
-
+  class FlushInlinedJob
     LAKE = "splat_lake"
 
     def perform

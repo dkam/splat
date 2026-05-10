@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+scheduler = Ingest::Scheduler.new
+
+shutdown = lambda do |signal|
+  Rails.logger.info "[Scheduler] received #{signal}, exiting"
+  scheduler.stop!
+end
+
+trap("INT")  { shutdown.call("SIGINT") }
+trap("TERM") { shutdown.call("SIGTERM") }
+
+scheduler.run

@@ -1,0 +1,24 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+consumers = [
+  DuckLakeMirror::EventConsumer.new,
+  DuckLakeMirror::IssueConsumer.new,
+  DuckLakeMirror::TransactionConsumer.new,
+  DuckLakeMirror::SpanConsumer.new,
+  Ingest::DispatchConsumer.new(tube: Ingest::Tuber::DUCKLAKE_MAINTENANCE_TUBE)
+]
+
+shutdown = lambda do |signal|
+  Rails.logger.info "[DuckLake] received #{signal}, draining and exiting"
+  consumers.each(&:stop!)
+end
+
+trap("INT")  { shutdown.call("SIGINT") }
+trap("TERM") { shutdown.call("SIGTERM") }
+
+Rails.logger.info "[DuckLake] starting #{consumers.size} consumer(s)"
+threads = consumers.map { |c| Thread.new { c.run } }
+threads.each(&:join)

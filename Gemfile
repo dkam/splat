@@ -25,10 +25,17 @@ gem "jbuilder"
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[ windows jruby ]
 
-# Use the database-backed adapters for Rails.cache, Active Job, and Action Cable
+# Use the database-backed adapters for Rails.cache and Action Cable.
+# Active Job runs on tuber via the custom adapter — see lib/active_job/queue_adapters/tuber_adapter.rb
 gem "solid_cache"
-gem "solid_queue"
 gem "solid_cable"
+
+# Tuber/beanstalkd client for batched ingest. Fork adds reserve_batch on top of
+# upstream beaneater 1.1.4, so we pin to the branch rather than rubygems.
+gem "beaneater", git: "https://github.com/dkam/beaneater.git", branch: "tuber"
+
+# Drives the recurring scheduler (config/schedule.yml → tuber).
+gem "rufus-scheduler", "~> 3.9"
 
 # Load environment variables from .env file
 gem "dotenv-rails", groups: [:development, :test]
@@ -88,9 +95,6 @@ group :test do
 end
 
 gem "sentry-rails"
-
-gem "mission_control-jobs", "~> 1.1"
-
 
 gem "image_processing", "~> 1.14"
 

@@ -53,11 +53,6 @@ module Splat
       openssl_verify_mode: OpenSSL::SSL::VERIFY_PEER
     }
 
-    if ENV['MISSION_CONTROL_USERNAME'].present? && ENV['MISSION_CONTROL_PASSWORD'].present?
-      MissionControl::Jobs.http_basic_auth_user = ENV['MISSION_CONTROL_USERNAME']
-      MissionControl::Jobs.http_basic_auth_password = ENV['MISSION_CONTROL_PASSWORD']
-    end
-
     # Token refresh middleware will be loaded via initializer
   end
 end

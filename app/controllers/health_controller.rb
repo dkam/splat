@@ -9,7 +9,7 @@ class HealthController < ApplicationController
   QUEUE_CRITICAL_THRESHOLD = ENV.fetch("QUEUE_CRITICAL_THRESHOLD", 100).to_i
 
   def show
-    queue_depth = SolidQueue::ReadyExecution.count
+    queue_depth = Ingest::Tuber.queue_depth
     counts = Rails.cache.fetch("health_counts", expires_in: 30.seconds) do
       {
         transactions_last_minute: Transaction.where("timestamp > ?", 1.minute.ago).count,

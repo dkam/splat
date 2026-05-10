@@ -2,9 +2,7 @@
 
 # Data retention cleanup job
 # Removes old payloads/measurements and deletes records according to retention settings
-class DataRetentionJob < ApplicationJob
-  queue_as :low_priority
-
+class DataRetentionJob
   BATCH_SIZE = 500
   SLEEP_BETWEEN_BATCHES = 0.1
 

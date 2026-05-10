@@ -8,9 +8,7 @@ module DuckLake
   # Note: DuckLake DELETEs are recorded in the catalog and filtered at read
   # time; reclaiming parquet bytes requires a separate compaction step which
   # we can run later if storage growth bites.
-  class RetentionJob < ApplicationJob
-    queue_as :low_priority
-
+  class RetentionJob
     def perform
       Rails.logger.info "[DuckLake] retention starting"
       start = Time.current

@@ -192,10 +192,13 @@ module SentryProtocol
 
       case item_type
       when "event"
-        ProcessEventJob.perform_later(
-          event_id: event_id,
-          payload: item[:payload],
-          project: project
+        Ingest::Tuber.put(
+          Ingest::Tuber::EVENTS_TUBE,
+          {
+            event_id: event_id,
+            payload: item[:payload],
+            project_id: project.id
+          }
         )
         Rails.logger.debug "Queued event processing: #{event_id}"
       when "transaction"
@@ -205,10 +208,13 @@ module SentryProtocol
           return
         end
 
-        ProcessTransactionJob.perform_later(
-          transaction_id: event_id,
-          payload: item[:payload],
-          project: project
+        Ingest::Tuber.put(
+          Ingest::Tuber::TRANSACTIONS_TUBE,
+          {
+            transaction_id: event_id,
+            payload: item[:payload],
+            project_id: project.id
+          }
         )
         Rails.logger.debug "Queued transaction processing: #{event_id}"
       when "attachment"

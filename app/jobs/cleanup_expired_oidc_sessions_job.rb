@@ -1,6 +1,4 @@
-class CleanupExpiredOidcSessionsJob < ApplicationJob
-  queue_as :default
-
+class CleanupExpiredOidcSessionsJob
   def perform
     expired_count = OidcSession.cleanup_expired
 

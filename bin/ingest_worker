@@ -1,0 +1,23 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../config/environment"
+
+consumers = [
+  Ingest::EventConsumer.new,
+  Ingest::TransactionConsumer.new,
+  Ingest::DispatchConsumer.new(tube: Ingest::Tuber::MAINTENANCE_TUBE),
+  Ingest::ActiveJobConsumer.new
+]
+
+shutdown = lambda do |signal|
+  Rails.logger.info "[Ingest] received #{signal}, draining and exiting"
+  consumers.each(&:stop!)
+end
+
+trap("INT")  { shutdown.call("SIGINT") }
+trap("TERM") { shutdown.call("SIGTERM") }
+
+Rails.logger.info "[Ingest] starting #{consumers.size} consumer(s)"
+threads = consumers.map { |c| Thread.new { c.run } }
+threads.each(&:join)

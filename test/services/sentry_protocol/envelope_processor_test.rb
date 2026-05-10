@@ -218,10 +218,15 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
         ]
       )
 
-      assert_no_enqueued_jobs(only: ProcessTransactionJob) do
+      put_calls = []
+      Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
+      begin
         processor = SentryProtocol::EnvelopeProcessor.new(envelope_body, @project)
         assert processor.process
+      ensure
+        Ingest::Tuber.singleton_class.remove_method(:put)
       end
+      assert_equal [], put_calls.select { |args, _| args.first == Ingest::Tuber::TRANSACTIONS_TUBE }
     end
   end
 
