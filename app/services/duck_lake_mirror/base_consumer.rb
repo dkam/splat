@@ -7,10 +7,10 @@ module DuckLakeMirror
   class BaseConsumer < ::Ingest::TubeConsumer
     # Reserved bodies stay in RAM until the multi_insert finishes. With
     # packed bodies (spans especially can be multi-MB each), 500 reserved
-    # bodies × multi-MB each is enough to OOM a 2GB container. 100 is
-    # conservative and still 100× better than per-row puts; raise via
-    # ENV["DUCKLAKE_MIRROR_BATCH_SIZE"] if memory headroom allows.
-    DEFAULT_BATCH_SIZE = ENV.fetch("DUCKLAKE_MIRROR_BATCH_SIZE", 100).to_i
+    # bodies × multi-MB each is significant — but works fine in a ~4GB
+    # container. Reduce via ENV["DUCKLAKE_MIRROR_BATCH_SIZE"] if memory-
+    # constrained.
+    DEFAULT_BATCH_SIZE = ENV.fetch("DUCKLAKE_MIRROR_BATCH_SIZE", 500).to_i
 
     def initialize(tube:, target_model:, batch_size: DEFAULT_BATCH_SIZE)
       @target_model = target_model

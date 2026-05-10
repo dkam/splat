@@ -93,10 +93,13 @@ services:
     volumes:
       - /storage/splat/storage:/rails/storage
       - /storage/splat/logs/ducklake:/rails/log
-    # 5 consumer threads each potentially building up ~5MB packed-batch rows
-    # plus DuckDB working memory for multi_insert + flush passes. 1GB OOM'd
-    # under burst load on first deploy.
-    mem_limit: 2048M
+    # DuckDB's default memory_limit is ~80% of physical RAM PER CONNECTION;
+    # 5 consumer threads × that × parquet flush working memory wants room.
+    # Empirically peaks ~3GB during catch-up bursts then settles to ~400MB
+    # idle. If you're memory-constrained on the host, set DUCKDB_MEMORY_LIMIT
+    # (e.g. "256MB") + DUCKDB_THREADS=1 + DUCKLAKE_MIRROR_BATCH_SIZE=100 in
+    # x-common-variables and you can drop this back to ~1GB.
+    mem_limit: 4096M
     # CRITICAL: never scale beyond 1. The DuckLake catalog is single-writer
     # SQLite — the entire two-stage pipeline exists so this is the ONLY
     # process touching the catalog. A second replica would just contend
