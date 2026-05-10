@@ -27,6 +27,17 @@ x-common-variables: &common-variables
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
   DUCKLAKE_DISABLED: false
 
+  # DuckDB defaults memory_limit to ~80% of physical RAM PER CONNECTION
+  # and threads to all physical cores. Splat's workload is small INSERTs,
+  # not analytical scans, so per-connection budgets are appropriate.
+  # 5 consumer threads × 256MB = 1.28GB ceiling instead of 5 × 80% × host_RAM.
+  DUCKDB_MEMORY_LIMIT: 256MB
+  DUCKDB_THREADS: "1"
+
+  # Bodies stay in RAM until multi_insert finishes. 100 reserved × ~few-MB
+  # packed body fits comfortably under 1GB Ruby-side per consumer.
+  DUCKLAKE_MIRROR_BATCH_SIZE: "100"
+
   # Send Rails logs to stdout so `docker compose logs <service>` shows
   # them. Without this, Rails writes to log/production.log and the bind-
   # mounted host dir needs UID 1000 perms — easy to get wrong on a fresh
@@ -93,13 +104,10 @@ services:
     volumes:
       - /storage/splat/storage:/rails/storage
       - /storage/splat/logs/ducklake:/rails/log
-    # DuckDB's default memory_limit is ~80% of physical RAM PER CONNECTION;
-    # 5 consumer threads × that × parquet flush working memory wants room.
-    # Empirically peaks ~3GB during catch-up bursts then settles to ~400MB
-    # idle. If you're memory-constrained on the host, set DUCKDB_MEMORY_LIMIT
-    # (e.g. "256MB") + DUCKDB_THREADS=1 + DUCKLAKE_MIRROR_BATCH_SIZE=100 in
-    # x-common-variables and you can drop this back to ~1GB.
-    mem_limit: 4096M
+    # With DUCKDB_MEMORY_LIMIT=256MB × 5 connections = 1.28GB DuckDB
+    # ceiling, plus Ruby + reserved tube bodies (DUCKLAKE_MIRROR_BATCH_SIZE=100)
+    # ≈ 500MB-1GB more, this fits well under 2GB.
+    mem_limit: 2048M
     # CRITICAL: never scale beyond 1. The DuckLake catalog is single-writer
     # SQLite — the entire two-stage pipeline exists so this is the ONLY
     # process touching the catalog. A second replica would just contend

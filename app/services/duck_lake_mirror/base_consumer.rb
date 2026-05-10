@@ -12,12 +12,38 @@ module DuckLakeMirror
     # constrained.
     DEFAULT_BATCH_SIZE = ENV.fetch("DUCKLAKE_MIRROR_BATCH_SIZE", 500).to_i
 
+    # When a reserve returns fewer than @batch_size jobs (low traffic),
+    # wait this long and reserve again to coalesce more rows into a single
+    # multi_insert. Without this, low-traffic deploys hit the catalog
+    # ~1 commit/row — defeating the whole point of stage-2 batching.
+    COALESCE_WAIT_S = ENV.fetch("DUCKLAKE_MIRROR_COALESCE_WAIT", "1.0").to_f
+
     def initialize(tube:, target_model:, batch_size: DEFAULT_BATCH_SIZE)
       @target_model = target_model
       super(tube: tube, batch_size: batch_size)
     end
 
     private
+
+    # Override TubeConsumer#reserve_batch with a two-phase reserve. Phase 1
+    # is the normal non-blocking grab. If it returned the full batch, ship
+    # immediately. Otherwise sleep briefly so more bodies accumulate, then
+    # top up. Stage 1 producers will deposit during the sleep.
+    def reserve_batch
+      jobs = @client.tubes.reserve_batch(@batch_size)
+      return jobs if jobs.empty? || jobs.size >= @batch_size || COALESCE_WAIT_S <= 0
+
+      sleep COALESCE_WAIT_S
+      begin
+        extra = @client.tubes.reserve_batch(@batch_size - jobs.size)
+        jobs.concat(extra)
+      rescue Beaneater::TimedOutError
+        # Nothing arrived during the wait — ship what we have.
+      end
+      jobs
+    rescue Beaneater::TimedOutError
+      []
+    end
 
     def process_batch(jobs)
       rows = []
