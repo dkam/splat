@@ -18,7 +18,7 @@ consumers = [
 ]
 
 shutdown = lambda do |signal|
-  Rails.logger.info "[DuckLake] received #{signal}, draining and exiting"
+  STDERR.puts "[DuckLake] received #{signal}, draining and exiting"
   consumers.each(&:stop!)
 end
 

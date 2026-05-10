@@ -6,6 +6,11 @@ Rails.application.configure do
   # Code is not reloaded between requests.
   config.enable_reloading = false
 
+  # Splat doesn't process image variants (no user uploads of images that need
+  # resizing). Disabling silences the ActiveStorage "image_processing gem
+  # required" warning that fires on every Rails boot otherwise.
+  config.active_storage.variant_processor = :disabled
+
   # Eager load code on boot for better performance and memory savings (ignored by Rake tasks).
   config.eager_load = true
 

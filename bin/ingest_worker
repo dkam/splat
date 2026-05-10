@@ -18,7 +18,9 @@ consumers = [
 ]
 
 shutdown = lambda do |signal|
-  Rails.logger.info "[Ingest] received #{signal}, draining and exiting"
+  # STDERR.puts (not Rails.logger) — Logger uses a mutex which can't be
+  # acquired from a Ruby signal-trap context.
+  STDERR.puts "[Ingest] received #{signal}, draining and exiting"
   consumers.each(&:stop!)
 end
 
