@@ -75,10 +75,21 @@ class Transaction
       total_time > 0 ? total_time.round : nil
     end
 
-    # Normalize SQL pattern by removing literal values
+    # Normalize SQL into a pattern key for grouping (N+1 detection).
+    #
+    # Strategy: strip *values*, keep *identifiers*. Two queries against the
+    # same table with different ids should map to the same pattern; queries
+    # against different tables should not.
     def self.normalize_sql_pattern(sql)
-      # Remove string literals (single and double quotes)
-      pattern = sql.gsub(/'[^']*'/, "?").gsub(/"[^"]*"/, "?")
+      # /* ... */ query log tag comments carry per-request data (request_id,
+      # source_location) — they'd fragment patterns into one-per-request and
+      # break N+1 detection. Drop them entirely from the fingerprint.
+      pattern = sql.gsub(%r{/\*.*?\*/}m, "")
+
+      # Single-quoted string literals are values; replace. Double-quoted
+      # tokens are PostgreSQL identifiers (table/column names) and must be
+      # preserved so different tables yield different patterns.
+      pattern = pattern.gsub(/'[^']*'/, "?")
 
       # Remove numbers
       pattern = pattern.gsub(/\b\d+\b/, "?")
