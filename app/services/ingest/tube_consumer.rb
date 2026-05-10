@@ -8,6 +8,10 @@ module Ingest
     DEFAULT_BATCH_SIZE = 100
     RETRY_DELAY = 5
 
+    # Bury rather than release once a job has been re-tried this many times,
+    # so a poison-pill body doesn't cycle on the tube forever.
+    MAX_RETRIES = 5
+
     attr_reader :tube, :batch_size
 
     def initialize(tube:, batch_size: DEFAULT_BATCH_SIZE)
@@ -57,11 +61,31 @@ module Ingest
 
     def safe_finalize(job, outcome)
       case outcome
-      when :ok    then job.delete
-      when :retry then job.release(delay: RETRY_DELAY)
+      when :ok then job.delete
+      when :retry then bury_or_release(job)
       end
     rescue Beaneater::NotFoundError
       # Already gone server-side — nothing to do.
+    end
+
+    def bury_or_release(job)
+      releases = job.stats.releases.to_i rescue 0
+      if releases >= MAX_RETRIES
+        Rails.logger.error "[#{self.class.name}] burying job after #{releases} retries"
+        job.bury
+      else
+        job.release(delay: RETRY_DELAY)
+      end
+    end
+
+    def log_exception(prefix, e)
+      Rails.logger.error "#{prefix}: #{e.class}: #{e.message}"
+      Rails.logger.error e.backtrace.first(10).join("\n")
+    end
+
+    def project_for(id)
+      @project_cache ||= {}
+      @project_cache[id] ||= Project.find_by(id: id)
     end
   end
 end

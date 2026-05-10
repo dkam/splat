@@ -21,7 +21,7 @@ module Ingest
         args = JSON.parse(job.body)
         project = project_for(args["project_id"])
         unless project
-          Rails.logger.warn "[Ingest::EventConsumer] dropping job for missing project_id=#{args["project_id"]}"
+          Rails.logger.warn "[#{self.class.name}] dropping job for missing project_id=#{args["project_id"]}"
           outcomes << [job, :ok]
           next
         end
@@ -33,8 +33,7 @@ module Ingest
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
       rescue => e
-        Rails.logger.error "[Ingest::EventConsumer] job failed: #{e.class}: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
+        log_exception("[#{self.class.name}] job failed", e)
         outcomes << [job, :retry]
       end
 
@@ -42,57 +41,13 @@ module Ingest
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
     end
 
+    # One body per tube per batch — beanstalkd has no batch put, so packing
+    # collapses N RTTs to 1. Stage 2 unpacks via the {rows: [...]} convention.
     def forward_to_mirror(events, issues)
-      events.each { |e| Tuber.put(Tuber::DUCKLAKE_EVENTS_TUBE, event_row(e)) }
-      issues.each { |i| Tuber.put(Tuber::DUCKLAKE_ISSUES_TUBE, issue_row(i)) }
+      Tuber.put(Tuber::DUCKLAKE_EVENTS_TUBE, { rows: events.map(&:to_ducklake_row) }) if events.any?
+      Tuber.put(Tuber::DUCKLAKE_ISSUES_TUBE, { rows: issues.map(&:to_ducklake_row) }) if issues.any?
     rescue => e
-      Rails.logger.error "[Ingest::EventConsumer] mirror forward failed: #{e.class}: #{e.message}"
-    end
-
-    def project_for(id)
-      @project_cache ||= {}
-      @project_cache[id] ||= Project.find_by(id: id)
-    end
-
-    def event_row(event)
-      {
-        id: event.id,
-        event_id: event.event_id,
-        project_id: event.project_id,
-        issue_id: event.issue_id,
-        timestamp: event.timestamp,
-        duration: event.duration,
-        environment: event.environment,
-        exception_type: event.exception_type,
-        exception_value: event.exception_value,
-        fingerprint: event.fingerprint.is_a?(Array) ? event.fingerprint.join("::") : event.fingerprint,
-        message: event.message,
-        platform: event.platform,
-        release: event.release,
-        sdk_name: event.sdk_name,
-        sdk_version: event.sdk_version,
-        server_name: event.server_name,
-        transaction_name: event.transaction_name,
-        payload: event.payload,
-        created_at: event.created_at,
-        updated_at: event.updated_at
-      }
-    end
-
-    def issue_row(issue)
-      {
-        id: issue.id,
-        project_id: issue.project_id,
-        fingerprint: issue.fingerprint,
-        title: issue.title,
-        exception_type: issue.exception_type,
-        status: Issue.statuses[issue.status],
-        count: issue.count,
-        first_seen: issue.first_seen,
-        last_seen: issue.last_seen,
-        created_at: issue.created_at,
-        updated_at: issue.updated_at
-      }
+      log_exception("[#{self.class.name}] mirror forward failed", e)
     end
   end
 end

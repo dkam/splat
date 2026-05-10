@@ -2,8 +2,8 @@
 
 module DuckLakeMirror
   # Stage 2: drains one DuckLake mirror tube and collapses the whole batch
-  # into a single multi_insert. Subclasses set tube + target_model and
-  # optionally override #extract_rows for tubes whose bodies carry arrays.
+  # into a single multi_insert. Bodies always carry { rows: [...] } so stage 1
+  # can pack a whole batch into a single tube put.
   class BaseConsumer < ::Ingest::TubeConsumer
     DEFAULT_BATCH_SIZE = 500
 
@@ -23,7 +23,7 @@ module DuckLakeMirror
         rows.concat(extract_rows(job.body))
         ok_jobs << job
       rescue => e
-        Rails.logger.error "[#{self.class.name}] parse failed: #{e.class}: #{e.message}"
+        log_exception("[#{self.class.name}] parse failed", e)
         parse_failures << job
       end
 
@@ -37,15 +37,12 @@ module DuckLakeMirror
       @target_model.multi_insert(rows)
       true
     rescue => e
-      Rails.logger.error "[#{self.class.name}] multi_insert failed: #{e.class}: #{e.message}"
-      Rails.logger.error e.backtrace.first(10).join("\n")
+      log_exception("[#{self.class.name}] multi_insert failed", e)
       false
     end
 
-    # Default: one row per body. Override for tubes whose body carries an
-    # array (spans).
     def extract_rows(body)
-      [JSON.parse(body, symbolize_names: true)]
+      Array(JSON.parse(body, symbolize_names: true)[:rows])
     end
   end
 end

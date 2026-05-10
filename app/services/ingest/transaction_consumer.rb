@@ -3,9 +3,7 @@
 module Ingest
   # Stage 1 transactions: drain splat.transactions, run AR
   # create_from_sentry_payload! per row, then push hydrated transaction +
-  # span rows downstream. Span rows for one transaction travel as a single
-  # tube body (a JSON array) so stage 2 can flatten and multi_insert across
-  # transactions.
+  # span rows downstream as one packed body per tube per batch.
   class TransactionConsumer < TubeConsumer
     SPAN_CAP = 1000
 
@@ -17,14 +15,14 @@ module Ingest
 
     def process_batch(jobs)
       transactions = []
-      span_groups = []
+      span_rows = []
       outcomes = []
 
       jobs.each do |job|
         args = JSON.parse(job.body)
         project = project_for(args["project_id"])
         unless project
-          Rails.logger.warn "[Ingest::TransactionConsumer] dropping job for missing project_id=#{args["project_id"]}"
+          Rails.logger.warn "[#{self.class.name}] dropping job for missing project_id=#{args["project_id"]}"
           outcomes << [job, :ok]
           next
         end
@@ -36,62 +34,27 @@ module Ingest
         end
 
         transactions << transaction
-        span_rows = build_span_rows(transaction, args["payload"])
-        span_groups << span_rows if span_rows.any?
+        span_rows.concat(build_span_rows(transaction, args["payload"]))
         outcomes << [job, :ok]
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
       rescue => e
-        Rails.logger.error "[Ingest::TransactionConsumer] job failed: #{e.class}: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
+        log_exception("[#{self.class.name}] job failed", e)
         outcomes << [job, :retry]
       end
 
-      forward_to_mirror(transactions, span_groups)
+      forward_to_mirror(transactions, span_rows)
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
     end
 
-    def forward_to_mirror(transactions, span_groups)
-      transactions.each { |t| Tuber.put(Tuber::DUCKLAKE_TRANSACTIONS_TUBE, transaction_row(t)) }
-      span_groups.each  { |rows| Tuber.put(Tuber::DUCKLAKE_SPANS_TUBE, { rows: rows }) }
+    def forward_to_mirror(transactions, span_rows)
+      Tuber.put(Tuber::DUCKLAKE_TRANSACTIONS_TUBE,
+                { rows: transactions.map(&:to_ducklake_row) }) if transactions.any?
+      Tuber.put(Tuber::DUCKLAKE_SPANS_TUBE, { rows: span_rows }) if span_rows.any?
     rescue => e
-      Rails.logger.error "[Ingest::TransactionConsumer] mirror forward failed: #{e.class}: #{e.message}"
+      log_exception("[#{self.class.name}] mirror forward failed", e)
     end
 
-    def project_for(id)
-      @project_cache ||= {}
-      @project_cache[id] ||= Project.find_by(id: id)
-    end
-
-    def transaction_row(transaction)
-      {
-        id: transaction.id,
-        transaction_id: transaction.transaction_id,
-        project_id: transaction.project_id,
-        timestamp: transaction.timestamp,
-        transaction_name: transaction.transaction_name,
-        op: transaction.op,
-        duration: transaction.duration,
-        db_time: transaction.db_time,
-        view_time: transaction.view_time,
-        environment: transaction.environment,
-        release: transaction.release,
-        server_name: transaction.server_name,
-        http_method: transaction.http_method,
-        http_status: transaction.http_status,
-        http_url: transaction.http_url,
-        tags: transaction.tags,
-        measurements: transaction.measurements,
-        spans_truncated: transaction.spans_truncated,
-        query_count: transaction.query_count,
-        has_n_plus_one: transaction.has_n_plus_one,
-        created_at: transaction.created_at,
-        updated_at: transaction.updated_at
-      }
-    end
-
-    # Lifted verbatim from ProcessTransactionJob#mirror_spans_to_ducklake but
-    # stops at row-building — the multi_insert now happens downstream.
     def build_span_rows(transaction, payload)
       raw_spans = Array(payload["spans"])
       trace_ctx = payload.dig("contexts", "trace") || {}
@@ -104,7 +67,7 @@ module Ingest
       children = raw_spans.sort_by { |s| s["start_timestamp"].to_f }
       if children.size > SPAN_CAP
         children = children.first(SPAN_CAP)
-        transaction.update!(spans_truncated: true) if transaction.respond_to?(:spans_truncated=)
+        transaction.update!(spans_truncated: true)
       end
 
       parent_depth = { root_id => 0 }
@@ -166,7 +129,7 @@ module Ingest
       }
     end
 
-    # Always return UTC. JSON serializing a non-UTC Time produces a string
+    # Always return UTC. JSON-serializing a non-UTC Time produces a string
     # with offset, which DuckDB's TIMESTAMP type rejects.
     def parse_ts(value)
       t = case value

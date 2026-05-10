@@ -191,6 +191,33 @@ class Transaction < ApplicationRecord
     controller_action&.split("#")&.last
   end
 
+  def to_ducklake_row
+    {
+      id: id,
+      transaction_id: transaction_id,
+      project_id: project_id,
+      timestamp: timestamp,
+      transaction_name: transaction_name,
+      op: op,
+      duration: duration,
+      db_time: db_time,
+      view_time: view_time,
+      environment: environment,
+      release: release,
+      server_name: server_name,
+      http_method: http_method,
+      http_status: http_status,
+      http_url: http_url,
+      tags: tags,
+      measurements: measurements,
+      spans_truncated: spans_truncated,
+      query_count: query_count,
+      has_n_plus_one: has_n_plus_one,
+      created_at: created_at,
+      updated_at: updated_at
+    }
+  end
+
   private
 
   def broadcast_transaction_update

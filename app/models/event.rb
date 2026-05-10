@@ -117,6 +117,31 @@ class Event < ApplicationRecord
     payload&.dig("fingerprint") || []
   end
 
+  def to_ducklake_row
+    {
+      id: id,
+      event_id: event_id,
+      project_id: project_id,
+      issue_id: issue_id,
+      timestamp: timestamp,
+      duration: duration,
+      environment: environment,
+      exception_type: exception_type,
+      exception_value: exception_value,
+      fingerprint: Array.wrap(fingerprint).join("::"),
+      message: message,
+      platform: platform,
+      release: release,
+      sdk_name: sdk_name,
+      sdk_version: sdk_version,
+      server_name: server_name,
+      transaction_name: transaction_name,
+      payload: payload,
+      created_at: created_at,
+      updated_at: updated_at
+    }
+  end
+
   private
 
   def throttled_broadcast_refresh

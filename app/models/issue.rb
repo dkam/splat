@@ -90,6 +90,22 @@ class Issue < ApplicationRecord
     )
   end
 
+  def to_ducklake_row
+    {
+      id: id,
+      project_id: project_id,
+      fingerprint: fingerprint,
+      title: title,
+      exception_type: exception_type,
+      status: Issue.statuses[status],
+      count: count,
+      first_seen: first_seen,
+      last_seen: last_seen,
+      created_at: created_at,
+      updated_at: updated_at
+    }
+  end
+
   private
 
   def notify_new_issue

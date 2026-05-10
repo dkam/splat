@@ -48,19 +48,14 @@ module Ingest
       }
 
       case method
-      when "every"
-        @rufus.every(expr, &handler)
-      when "cron"
-        @rufus.cron(expr, &handler)
-      when "in", "at"
-        @rufus.send(method, expr, &handler)
-      else
-        raise "unknown schedule method '#{method}' for #{name}"
+      when "every" then @rufus.every(expr, &handler)
+      when "cron"  then @rufus.cron(expr, &handler)
+      else raise "unknown schedule method '#{method}' for #{name}"
       end
     end
 
     def schedule
-      YAML.load_file(SCHEDULE_PATH) || {}
+      @schedule ||= YAML.load_file(SCHEDULE_PATH) || {}
     end
   end
 end

@@ -19,8 +19,7 @@ module Ingest
       rescue Beaneater::NotFoundError
         nil
       rescue => e
-        Rails.logger.error "[Ingest::ActiveJobConsumer] failed: #{e.class}: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
+        log_exception("[#{self.class.name}] job failed", e)
         safe_finalize(job, :retry)
       end
     end

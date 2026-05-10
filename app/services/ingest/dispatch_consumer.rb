@@ -15,6 +15,7 @@ module Ingest
 
     def process_batch(jobs)
       jobs.each do |job|
+        klass_name = nil
         body = JSON.parse(job.body)
         klass_name = body["class"]
         args = body["args"] || []
@@ -23,8 +24,7 @@ module Ingest
       rescue Beaneater::NotFoundError
         nil
       rescue => e
-        Rails.logger.error "[Ingest::DispatchConsumer] #{klass_name || '?'} failed: #{e.class}: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
+        log_exception("[#{self.class.name}] #{klass_name || '?'} failed", e)
         safe_finalize(job, :retry)
       end
     end
