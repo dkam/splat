@@ -16,6 +16,9 @@ module DuckLake
 
     # Fetch all spans for a transaction, ordered by sequence.
     # near_timestamp drives partition pruning (year/month of timestamp).
+    # ±1 day is wider than needed for partition pruning alone, but spans are
+    # stored timezone-naive while near_timestamp is UTC; the wide window
+    # absorbs the offset. Tighten only after the storage tz is normalized.
     def self.for_transaction(transaction_id, project_id:, near_timestamp:)
       sql = <<~SQL
         SELECT
