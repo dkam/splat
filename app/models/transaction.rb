@@ -163,8 +163,8 @@ class Transaction < ApplicationRecord
     measurements&.dig("query_analysis") || {}
   end
 
-  # Promoted to a real column at ingest (see #create_from_sentry_payload!).
-  # The column is the source of truth; the JSON stays for the patterns/examples.
+  # Column is set at ingest; JSON fallback is for legacy rows written before
+  # the column existed. Drop the fallback once those rows have aged out.
   def query_count
     super || query_analysis["total_queries"] || 0
   end
