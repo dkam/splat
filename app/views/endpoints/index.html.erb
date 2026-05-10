@@ -89,40 +89,41 @@
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endpoint</th>
-              <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Trend</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Time Spent</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Latency</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Queries</th>
-              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">N+1</th>
+              <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-full">Endpoint</th>
+              <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Time</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Latency</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Count</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Queries</th>
+              <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">N+1</th>
             </tr>
           </thead>
           <tbody class="bg-white divide-y divide-gray-200">
             <% @endpoints.each do |endpoint| %>
               <tr class="hover:bg-gray-50">
-                <td class="px-6 py-4 whitespace-nowrap">
+                <td class="px-3 py-4 max-w-0">
                   <%= link_to detail_project_endpoints_path(@project.slug, name: endpoint["transaction_name"], time_range: @time_range),
-                      class: "text-blue-600 hover:text-blue-800 font-medium" do %>
+                      class: "text-blue-600 hover:text-blue-800 font-medium block truncate",
+                      title: endpoint["transaction_name"] do %>
                     <%= endpoint["transaction_name"] %>
                   <% end %>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-center">
+                <td class="px-3 py-4 whitespace-nowrap text-center">
                   <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
                     <span class="text-blue-500">
-                      <%= sparkline(spark, width: 100, height: 24, title: "#{spark.sum} requests in window") %>
+                      <%= sparkline(spark, width: 80, height: 24, title: "#{spark.sum} requests in window") %>
                     </span>
                   <% else %>
                     <span class="text-gray-300 text-sm">—</span>
                   <% end %>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-right">
+                <td class="px-3 py-4 whitespace-nowrap text-right">
                   <span class="font-semibold text-gray-900">
                     <%= format_duration(endpoint["time_spent"]) %>
                   </span>
                 </td>
-                <td class="px-6 py-3 whitespace-nowrap text-right">
+                <td class="px-3 py-3 whitespace-nowrap text-right">
                   <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-0 text-sm leading-tight">
                     <span class="text-gray-400 text-right">p50</span>
                     <span class="font-semibold <%= duration_color_class(endpoint["p50_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p50_duration"]) %></span>
@@ -132,12 +133,12 @@
                     <span class="font-semibold <%= duration_color_class(endpoint["p99_duration"]) %> text-right tabular-nums"><%= format_duration(endpoint["p99_duration"]) %></span>
                   </div>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
+                <td class="px-3 py-4 whitespace-nowrap text-right text-gray-600">
                   <span class="<%= 'text-sm' if endpoint["count"] >= 100_000 %>">
                     <%= number_with_delimiter(endpoint["count"]) %>
                   </span>
                 </td>
-                <td class="px-6 py-3 whitespace-nowrap text-right">
+                <td class="px-3 py-3 whitespace-nowrap text-right">
                   <% avg_q = endpoint["avg_queries"].to_f.round(1) %>
                   <% max_q = endpoint["max_queries"].to_i %>
                   <% if max_q > 0 %>
@@ -151,7 +152,7 @@
                     <span class="text-gray-400 text-sm">—</span>
                   <% end %>
                 </td>
-                <td class="px-6 py-4 text-right">
+                <td class="px-3 py-4 whitespace-nowrap text-right">
                   <% n = endpoint["n_plus_one_count"].to_i %>
                   <% total = endpoint["count"].to_i %>
                   <% if n > 0 && total > 0 %>
