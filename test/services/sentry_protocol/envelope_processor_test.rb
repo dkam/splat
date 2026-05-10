@@ -202,8 +202,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     assert processor.process
   end
 
-  test "skips housekeeping transactions (SolidCable, SolidQueue, ActiveStorage)" do
-    %w[SolidCable::TrimJob SolidQueue::ClaimJob ActiveStorage::AnalyzeJob].each do |name|
+  test "skips housekeeping transactions (SolidCable, ActiveStorage)" do
+    %w[SolidCable::TrimJob ActiveStorage::AnalyzeJob].each do |name|
       envelope_body = build_envelope(
         event_id: "txn-#{name}",
         items: [

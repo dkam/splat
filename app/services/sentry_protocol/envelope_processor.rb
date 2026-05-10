@@ -4,12 +4,10 @@ module SentryProtocol
   class EnvelopeProcessor
     class InvalidEnvelope < StandardError; end
 
-    # Housekeeping job transactions carry no actionable perf data and tend
-    # to ship oversized SQL breadcrumbs (e.g. SolidCable INSERTs of broadcast
-    # HTML) that bloat the SolidQueue DB when persisted as job arguments.
+    # Housekeeping jobs carry no actionable perf data and tend to ship
+    # oversized SQL breadcrumbs (e.g. SolidCable INSERTs of broadcast HTML).
     HOUSEKEEPING_TRANSACTION_PREFIXES = %w[
       SolidCable::
-      SolidQueue::
       ActiveStorage::
     ].freeze
 
