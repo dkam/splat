@@ -602,13 +602,7 @@ module Mcp
 
       text = format_issues_list(issues, status)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def search_issues(args)
@@ -625,13 +619,7 @@ module Mcp
 
       text = format_issues_list(issues)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def get_issue(args)
@@ -640,13 +628,7 @@ module Mcp
 
       text = format_issue_detail(issue, recent_event)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def get_issue_events(args)
@@ -656,13 +638,7 @@ module Mcp
 
       text = format_issue_events(issue, events)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def get_event(args)
@@ -670,13 +646,7 @@ module Mcp
 
       text = format_event_detail(event)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def get_transaction_stats(args)
@@ -713,13 +683,7 @@ module Mcp
 
       text = format_transaction_stats(percentiles, top_endpoints, total_count, time_range_hours, endpoint)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def search_slow_transactions(args)
@@ -746,42 +710,16 @@ module Mcp
 
       text = format_slow_transactions(rows, min_duration_ms, time_range_hours)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def get_transaction(args)
-      id_str = args["transaction_id"].to_s
-      transaction = if id_str.match?(/\A\d+\z/)
-        Transaction.includes(:project).find(id_str)
-      else
-        Transaction.includes(:project).find_by!(transaction_id: id_str)
-      end
-
-      text = format_transaction_detail(transaction)
-
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      transaction = find_transaction(args["transaction_id"])
+      render_text(format_transaction_detail(transaction))
     end
 
     def get_transaction_spans(args)
-      id_str = args["transaction_id"].to_s
-      transaction = if id_str.match?(/\A\d+\z/)
-        Transaction.includes(:project).find(id_str)
-      else
-        Transaction.includes(:project).find_by!(transaction_id: id_str)
-      end
-
+      transaction = find_transaction(args["transaction_id"])
       op_filter = args["op_filter"].to_s.strip
       limit = [[args["limit"]&.to_i || 100, 1].max, 1000].min
 
@@ -793,15 +731,16 @@ module Mcp
 
       filtered = op_filter.present? ? all_spans.select { |s| s["op"].to_s.start_with?(op_filter) } : all_spans
 
-      text = format_transaction_spans(transaction, all_spans, filtered, op_filter, limit)
+      render_text(format_transaction_spans(transaction, all_spans, filtered, op_filter, limit))
+    end
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+    def find_transaction(id)
+      id_str = id.to_s
+      if id_str.match?(/\A\d+\z/)
+        Transaction.includes(:project).find(id_str)
+      else
+        Transaction.includes(:project).find_by!(transaction_id: id_str)
+      end
     end
 
     def get_endpoint_summary(args)
@@ -843,13 +782,7 @@ module Mcp
         slowest_request, fastest_request
       )
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def find_n_plus_one_endpoints(args)
@@ -864,13 +797,7 @@ module Mcp
 
       text = format_n_plus_one_endpoints(rows, time_range_hours, environment)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def get_endpoint_timeseries(args)
@@ -888,13 +815,7 @@ module Mcp
 
       text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def endpoint_extreme_row(endpoint, time_range, environment, release, direction)
@@ -934,13 +855,7 @@ module Mcp
 
       text = format_transactions_by_endpoint(transactions, endpoint, hours, environment, release)
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     end
 
     def compare_endpoint_performance(args)
@@ -980,13 +895,7 @@ module Mcp
         before_transactions, after_transactions
       )
 
-      render json: {
-        jsonrpc: "2.0",
-        id: @rpc_id,
-        result: {
-          content: [{ type: "text", text: text }]
-        }
-      }
+      render_text(text)
     rescue ArgumentError => e
       render_error("Invalid timestamp format. Please use ISO format (e.g., '2025-10-21T03:00:00Z')")
     end
@@ -1072,15 +981,16 @@ module Mcp
       DuckLake::Transaction.query(sql, *binds).map { |r| r["duration"] }.sort
     end
 
-    def render_no_data(message)
+    def render_text(text)
       render json: {
         jsonrpc: "2.0",
         id: @rpc_id,
         result: {
-          content: [{ type: "text", text: message }]
+          content: [{ type: "text", text: text }]
         }
       }
     end
+    alias_method :render_no_data, :render_text
 
     def render_error(message)
       render json: {
@@ -1670,15 +1580,14 @@ module Mcp
         end
       end
 
-      # Sample requests
+      # before_transactions/after_transactions are sorted ascending arrays of
+      # raw durations (see durations_for) — last element is the slowest.
       if before_transactions.any?
-        slowest_before = before_transactions.order(duration: :desc).first
-        result += "**Slowest request (before):** #{slowest_before.duration.round}ms at #{slowest_before.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "**Slowest request (before):** #{before_transactions.last.round}ms\n"
       end
 
       if after_transactions.any?
-        slowest_after = after_transactions.order(duration: :desc).first
-        result += "**Slowest request (after):** #{slowest_after.duration.round}ms at #{slowest_after.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "**Slowest request (after):** #{after_transactions.last.round}ms\n"
       end
 
       result
