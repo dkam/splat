@@ -56,73 +56,59 @@
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">DB Time</th>
-            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">View Time</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Environment</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Request</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Timing</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">When</th>
+            <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
           <% @transactions.each do |transaction| %>
             <tr class="hover:bg-gray-50">
-              <td class="px-6 py-4">
-                <span class="font-mono text-sm text-gray-500">#<%= transaction.id %></span>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap">
-                <% if transaction.http_method.present? %>
-                  <span class="font-mono text-sm text-gray-600"><%= transaction.http_method %></span>
-                <% else %>
-                  <span class="text-gray-400">-</span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap">
-                <% if transaction.http_status.present? %>
-                  <span class="px-2 py-1 text-xs font-medium rounded <%= transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800' : transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
-                    <%= transaction.http_status %>
-                  </span>
-                <% else %>
-                  <span class="text-gray-400">-</span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right">
-                <span class="font-semibold <%= duration_color_class(transaction.duration) %>">
-                  <%= format_duration(transaction.duration) %>
-                </span>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
-                <% if transaction.db_time.present? %>
-                  <%= format_duration(transaction.db_time) %>
-                <% else %>
-                  <span class="text-gray-400">-</span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-gray-600">
-                <% if transaction.view_time.present? %>
-                  <%= format_duration(transaction.view_time) %>
-                <% else %>
-                  <span class="text-gray-400">-</span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap">
+              <td class="px-4 py-3 whitespace-nowrap">
+                <div class="font-mono text-sm text-gray-500">#<%= transaction.id %></div>
                 <% if transaction.environment.present? %>
-                  <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
-                    <%= transaction.environment %>
-                  </span>
-                <% else %>
-                  <span class="text-gray-400">-</span>
+                  <div class="mt-1">
+                    <span class="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded"><%= transaction.environment %></span>
+                  </div>
                 <% end %>
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                <%= transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S") %>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <% if transaction.http_method.present? %>
+                  <div class="font-mono text-sm text-gray-600"><%= transaction.http_method %></div>
+                <% else %>
+                  <div class="text-gray-400">-</div>
+                <% end %>
+                <% if transaction.http_status.present? %>
+                  <div class="mt-1">
+                    <span class="px-2 py-0.5 text-xs font-medium rounded <%= transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800' : transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800' %>">
+                      <%= transaction.http_status %>
+                    </span>
+                  </div>
+                <% end %>
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+              <td class="px-4 py-3 whitespace-nowrap text-right">
+                <div class="font-semibold <%= duration_color_class(transaction.duration) %>">
+                  <%= format_duration(transaction.duration) %>
+                </div>
+                <div class="text-xs text-gray-500 mt-1">
+                  <% if transaction.db_time.present? %>
+                    <span title="Database time">DB <%= format_duration(transaction.db_time) %></span>
+                  <% end %>
+                  <% if transaction.view_time.present? %>
+                    <span title="View rendering time" class="ml-2">View <%= format_duration(transaction.view_time) %></span>
+                  <% end %>
+                </div>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap text-sm">
+                <div class="text-gray-900"><%= time_ago_in_words(transaction.timestamp) %> ago</div>
+                <div class="text-xs text-gray-500 mt-1 font-mono"><%= transaction.timestamp.strftime("%H:%M:%S") %></div>
+                <div class="text-xs text-gray-400 font-mono"><%= transaction.timestamp.strftime("%Y-%m-%d") %></div>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap text-right text-sm">
                 <%= link_to "View", project_transaction_path(@project.slug, transaction),
-                    class: "text-blue-600 hover:text-blue-800 font-medium" %>
+                    class: "inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50" %>
               </td>
             </tr>
           <% end %>
