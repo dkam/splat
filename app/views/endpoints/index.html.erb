@@ -220,13 +220,7 @@
                   <% end %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                  <% if transaction.http_status.present? %>
-                    <span class="px-2 py-1 text-xs font-medium rounded <%= transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' %>">
-                      <%= transaction.http_status %>
-                    </span>
-                  <% else %>
-                    <span class="text-gray-400 dark:text-gray-500">-</span>
-                  <% end %>
+                  <%= render "projects/http_status_badge", status: transaction.http_status %>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
                   <span class="font-semibold <%= duration_color_class(transaction.duration) %>">

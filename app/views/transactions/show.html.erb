@@ -76,9 +76,7 @@
           <div>
             <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Status</dt>
             <dd class="mt-1">
-              <span class="px-2 py-1 text-sm font-medium rounded <%= @transaction.http_status.to_i >= 500 ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : @transaction.http_status.to_i >= 400 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' %>">
-                <%= @transaction.http_status %>
-              </span>
+              <%= render "projects/http_status_badge", status: @transaction.http_status, size: "px-2 py-1 text-sm" %>
             </dd>
           </div>
         <% end %>
