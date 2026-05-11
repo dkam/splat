@@ -1,0 +1,56 @@
+# Development docker-compose for Splat — just the dependencies (Postgres +
+# tuber). The Rails app + workers run locally via `bin/dev`, connecting to
+# these services on localhost.
+#
+# Usage:
+#   docker compose -f compose.dev.yml up -d
+#   bin/rails db:create db:migrate
+#   psql -h localhost -U splat -c "CREATE DATABASE splat_catalog_development OWNER splat;"
+#   bin/dev
+#
+# Data lives under tmp/ (gitignored) so a fresh checkout starts clean and
+# `docker compose -f compose.dev.yml down -v` is a quick reset button.
+#
+# Postgres uses trust auth — no password needed locally. DO NOT expose the
+# port beyond 127.0.0.1; trust mode means anyone who reaches the port owns
+# the DB.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: splat-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: splat
+      POSTGRES_DB: splat_development
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ./tmp/dev-postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-dev.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U splat -d splat_development"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tuber:
+    image: ghcr.io/tuberq/tuber:latest
+    container_name: splat-dev-tuber
+    command: server
+    ports:
+      - "127.0.0.1:11300:11300"           # protocol
+      - "127.0.0.1:9100:9100"              # metrics
+    volumes:
+      - ./tmp/dev-tuber-data:/var/lib/tuber/binlog
+    environment:
+      - TUBER_NAME=splat-dev
+      - TUBER_LISTEN=0.0.0.0
+      - TUBER_PORT=11300
+      - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
+      - TUBER_MAX_STORAGE_BYTES=1gb
+      - TUBER_MAX_JOBS_SIZE=256mb
+      - TUBER_MAX_JOB_SIZE=20mb
+      - TUBER_METRICS_PORT=9100
+    restart: unless-stopped

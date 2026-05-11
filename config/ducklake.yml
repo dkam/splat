@@ -11,7 +11,7 @@
 
 default: &default
   catalog:
-    host: <%= ENV.fetch("DUCKLAKE_CATALOG_HOST", "postgres") %>
+    host: <%= ENV.fetch("DUCKLAKE_CATALOG_HOST", "localhost") %>
     port: <%= ENV.fetch("DUCKLAKE_CATALOG_PORT", 5432) %>
     database: <%= ENV.fetch("DUCKLAKE_CATALOG_DB", "splat_catalog_#{Rails.env}") %>
     user: <%= ENV.fetch("DUCKLAKE_CATALOG_USER", "splat") %>
