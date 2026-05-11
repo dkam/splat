@@ -42,10 +42,12 @@ module Ingest
     end
 
     # One body per tube per batch — beanstalkd has no batch put, so packing
-    # collapses N RTTs to 1. Stage 2 unpacks via the {rows: [...]} convention.
+    # collapses N RTTs to 1. Stage 2 (DuckLakeMirror::UnifiedConsumer) dispatches
+    # on the `table:` discriminator so a single consumer can drain all four
+    # mirror tubes without a STATS-JOB lookup per job.
     def forward_to_mirror(events, issues)
-      Tuber.put(Tuber::DUCKLAKE_EVENTS_TUBE, { rows: events.map(&:to_ducklake_row) }) if events.any?
-      Tuber.put(Tuber::DUCKLAKE_ISSUES_TUBE, { rows: issues.map(&:to_ducklake_row) }) if issues.any?
+      Tuber.put(Tuber::DUCKLAKE_EVENTS_TUBE, { table: "events", rows: events.map(&:to_ducklake_row) }) if events.any?
+      Tuber.put(Tuber::DUCKLAKE_ISSUES_TUBE, { table: "issues", rows: issues.map(&:to_ducklake_row) }) if issues.any?
     rescue => e
       log_exception("[#{self.class.name}] mirror forward failed", e)
     end

@@ -10,10 +10,7 @@ STDERR.sync = true
 require_relative "../config/environment"
 
 consumers = [
-  DuckLakeMirror::EventConsumer.new,
-  DuckLakeMirror::IssueConsumer.new,
-  DuckLakeMirror::TransactionConsumer.new,
-  DuckLakeMirror::SpanConsumer.new,
+  DuckLakeMirror::UnifiedConsumer.new,
   Ingest::DispatchConsumer.new(tube: Ingest::Tuber::DUCKLAKE_MAINTENANCE_TUBE)
 ]
 
@@ -25,6 +22,8 @@ end
 trap("INT")  { shutdown.call("SIGINT") }
 trap("TERM") { shutdown.call("SIGTERM") }
 
-Rails.logger.info "[DuckLake] starting #{consumers.size} consumer(s)"
-threads = consumers.map { |c| Thread.new { c.run } }
+Rails.logger.info "[DuckLake] starting #{consumers.size} consumer(s): #{consumers.map { |c| c.class.name.split('::').last }.join(', ')}"
+threads = consumers.map do |c|
+  Thread.new { c.run }.tap { |t| t.name = "ducklake-#{c.class.name.split('::').last}" }
+end
 threads.each(&:join)
