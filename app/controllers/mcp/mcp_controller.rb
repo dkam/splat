@@ -402,6 +402,12 @@ module Mcp
                 type: "integer",
                 description: "Maximum results (default: 20, max: 100)",
                 default: 20
+              },
+              tags: {
+                type: "object",
+                description: "Filter by Sentry tags. Keys are AND'd; string equality. " \
+                             "Example: {\"user_id\":\"123\",\"environment\":\"production\"}",
+                additionalProperties: { type: "string" }
               }
             }
           }
@@ -695,6 +701,14 @@ module Mcp
       time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
       limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
 
+      tags = args["tags"]
+      tags = nil unless tags.is_a?(Hash) && tags.any?
+      if tags
+        bad_key = tags.keys.find { |k| !k.is_a?(String) || k !~ /\A[a-zA-Z0-9_.\-]+\z/ }
+        return render_text("Invalid tag key: #{bad_key.inspect}") if bad_key
+        tags = tags.transform_values(&:to_s)
+      end
+
       rows = DuckLake::Transaction.slow(
         min_duration_ms: min_duration_ms,
         time_range: time_range_hours.hours.ago..Time.current,
@@ -702,6 +716,7 @@ module Mcp
         http_status: http_status,
         http_method: http_method,
         environment: environment,
+        tags: tags,
         limit: limit
       )
 
