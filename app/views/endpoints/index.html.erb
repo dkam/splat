@@ -112,7 +112,8 @@
                   <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
                     <span class="text-blue-500 dark:text-blue-400">
-                      <%= sparkline(spark, width: 80, height: 24, title: "#{spark.sum} requests in window") %>
+                      <%= sparkline(spark, width: 80, height: 24,
+                          title: "p95 latency in window — peak #{format_duration(spark.max)}") %>
                     </span>
                   <% else %>
                     <span class="text-gray-300 dark:text-gray-600 text-sm">—</span>

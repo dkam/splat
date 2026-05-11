@@ -350,8 +350,53 @@ module DuckLake
         result
       end
 
+      # Bucketed p95 latency (ms) keyed by transaction_name, for sparklines that
+      # show "is this endpoint getting faster/slower?" rather than traffic shape.
+      # Buckets with no traffic come back as 0 so the sparkline helper skips them.
+      def p95_by_bucket(transaction_names:, time_range: 24.hours.ago..Time.current,
+                        buckets: 24, project_id: nil, environment: nil)
+        result = transaction_names.to_h { |n| [n, Array.new(buckets, 0)] }
+        return result if transaction_names.blank?
+
+        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
+        return result if bucket_seconds <= 0
+
+        placeholders = Array.new(transaction_names.size, "?").join(",")
+
+        sql = +<<~SQL
+          SELECT
+            transaction_name,
+            CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
+            quantile_cont(duration, 0.95) AS p95
+          FROM transactions
+          WHERE timestamp BETWEEN ? AND ?
+            AND transaction_name IN (#{placeholders})
+        SQL
+        binds = [time_range.begin, bucket_seconds, time_range.begin, time_range.end, *transaction_names]
+
+        if project_id.present?
+          sql << " AND project_id = ?\n"
+          binds << project_id.to_i
+        end
+        if environment.present?
+          sql << " AND environment = ?\n"
+          binds << environment
+        end
+
+        sql << "GROUP BY transaction_name, bucket_idx"
+
+        query(sql, *binds).each do |row|
+          name = row["transaction_name"]
+          idx = row["bucket_idx"].to_i.clamp(0, buckets - 1)
+          next unless result.key?(name)
+          result[name][idx] = row["p95"].to_f.round
+        end
+
+        result
+      end
+
       def slow(min_duration_ms:, time_range: 24.hours.ago..Time.current, project_id: nil,
-               endpoint: nil, http_status: nil, http_method: nil, environment: nil, limit: 50)
+               endpoint: nil, http_status: nil, http_method: nil, environment: nil, tags: nil, limit: 50)
         sql = +<<~SQL
           SELECT *
           FROM transactions
@@ -379,6 +424,12 @@ module DuckLake
         if environment.present?
           sql << " AND environment = ?"
           binds << environment.to_s
+        end
+        if tags.is_a?(Hash) && tags.any?
+          tags.each do |k, v|
+            sql << " AND json_extract_string(tags, '$.#{k}') = ?"
+            binds << v.to_s
+          end
         end
 
         sql << " ORDER BY duration DESC LIMIT #{limit.to_i}"

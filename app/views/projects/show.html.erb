@@ -166,7 +166,7 @@
                   <% if spark&.any? { |v| v.to_i.positive? } %>
                     <span class="text-blue-500 dark:text-blue-400" title="Dashed lines = deploys">
                       <%= sparkline(spark, width: 100, height: 24,
-                          title: "#{spark.sum} requests in last 24h",
+                          title: "p95 latency, last 24h — peak #{format_duration(spark.max)}",
                           markers: @deploy_markers, time_range: @sparkline_range) %>
                     </span>
                   <% end %>

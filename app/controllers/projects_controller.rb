@@ -40,7 +40,7 @@ class ProjectsController < ApplicationController
     @sparkline_range = 24.hours.ago..Time.current
 
     metrics = Rails.cache.fetch(
-      "project_#{@project.id}_show_metrics/v1",
+      "project_#{@project.id}_show_metrics/v2",
       expires_in: SHOW_METRICS_TTL,
       race_condition_ttl: 10.seconds
     ) do
@@ -50,7 +50,7 @@ class ProjectsController < ApplicationController
         event_count_24h: @project.event_count(24.hours.ago..Time.current),
         transaction_count_24h: @project.transaction_count(24.hours.ago..Time.current),
         p50_response_time: @project.p50_response_time,
-        endpoint_sparklines: DuckLake::Transaction.counts_by_bucket(
+        endpoint_sparklines: DuckLake::Transaction.p95_by_bucket(
           transaction_names: top_endpoints.map { |e| e["transaction_name"] },
           time_range: @sparkline_range, buckets: @sparkline_buckets,
           project_id: @project.id

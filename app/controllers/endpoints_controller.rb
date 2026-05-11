@@ -41,13 +41,20 @@ class EndpointsController < ApplicationController
       limit: @name_query ? nil : 20
     )
 
-    @endpoint_sparklines = DuckLake::Transaction.counts_by_bucket(
-      transaction_names: @endpoints.map { |e| e["transaction_name"] },
-      time_range: time_range,
-      buckets: 24,
-      project_id: @project.id,
-      environment: params[:environment]
-    )
+    sparkline_names = @endpoints.map { |e| e["transaction_name"] }
+    sparkline_key = [
+      "endpoints_p95_sparklines/v1", @project.id, @time_range,
+      params[:environment].presence, @name_query, Digest::MD5.hexdigest(sparkline_names.join("\n"))
+    ].join("/")
+    @endpoint_sparklines = Rails.cache.fetch(sparkline_key, expires_in: 30.seconds) do
+      DuckLake::Transaction.p95_by_bucket(
+        transaction_names: sparkline_names,
+        time_range: time_range,
+        buckets: 24,
+        project_id: @project.id,
+        environment: params[:environment]
+      )
+    end
 
     @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
 
