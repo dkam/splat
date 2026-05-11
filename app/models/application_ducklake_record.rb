@@ -75,6 +75,16 @@ class ApplicationDucklakeRecord
       end
     end
 
+    # DuckLake's per-query attach pattern doesn't reliably preserve
+    # `USE splat_lake` across calls — successive queries can land back
+    # in DuckDB's default catalog and bare table names then fail with
+    # "Table with name <foo> does not exist". Re-issuing USE before
+    # each call is a cheap, branch-friendly defense; the alternative
+    # is rewriting every SELECT/INSERT to use splat_lake.main.<table>.
+    def use_lake!
+      connection.execute("USE splat_lake")
+    end
+
     def insert(attrs)
       return false if disabled?
       raise Error, "table_name not set on #{name}" unless table_name
@@ -84,6 +94,7 @@ class ApplicationDucklakeRecord
       sql = "INSERT INTO #{table_name} (#{cols.join(", ")}) VALUES (#{placeholders})"
       values = attrs.values.map { |v| serialize(v) }
 
+      use_lake!
       connection.execute(sql, *values)
       true
     end
@@ -104,6 +115,7 @@ class ApplicationDucklakeRecord
             Array.new(rows.size, placeholders).join(", ")
       binds = rows.flat_map { |r| key_order.map { |k| serialize(r[k]) } }
 
+      use_lake!
       connection.execute(sql, *binds)
       true
     end
@@ -111,6 +123,7 @@ class ApplicationDucklakeRecord
     def query(sql, *binds)
       return [] if disabled?
 
+      use_lake!
       result = binds.empty? ? connection.query(sql) : connection.query(sql, *binds)
       columns = result.columns.map(&:name)
       result.each.map { |row| columns.zip(row).to_h }
@@ -118,6 +131,7 @@ class ApplicationDucklakeRecord
 
     def execute(sql, *binds)
       return nil if disabled?
+      use_lake!
       binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
     end
 
