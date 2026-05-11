@@ -259,17 +259,28 @@ class ApplicationDucklakeRecord
       # DB `__ducklake_metadata_splat_lake` is created at database-instance
       # level, not per-connection. After the primer attaches, sibling
       # connections see the alias as missing but the metadata DB as already
-      # present and ATTACH errors with "already exists". The lake is still
-      # usable — `USE splat_lake` works because the alias propagates from
-      # the primer's attach. Swallow the benign error.
+      # present and ATTACH errors with "already exists". Normally
+      # `USE splat_lake` works because the alias propagates from the
+      # primer. Under concurrent per-thread setup that propagation races,
+      # and USE can fail with "No catalog + schema named splat_lake". Treat
+      # that as "alias not yet visible to this connection" and retry briefly.
+      attach_attempts = 0
       begin
-        conn.execute(
-          "ATTACH IF NOT EXISTS 'ducklake:sqlite:#{quote(catalog)}' AS splat_lake (#{options.join(", ")})"
-        )
+        begin
+          conn.execute(
+            "ATTACH IF NOT EXISTS 'ducklake:sqlite:#{quote(catalog)}' AS splat_lake (#{options.join(", ")})"
+          )
+        rescue DuckDB::Error => e
+          raise unless e.message.include?("already exists")
+        end
+        conn.execute("USE splat_lake")
       rescue DuckDB::Error => e
-        raise unless e.message.include?("already exists")
+        raise unless e.message.include?('No catalog + schema named "splat_lake"')
+        attach_attempts += 1
+        raise if attach_attempts > 10
+        sleep 0.05 * attach_attempts
+        retry
       end
-      conn.execute("USE splat_lake")
     end
 
     def load_schema!(conn)
