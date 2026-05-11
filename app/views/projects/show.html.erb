@@ -41,13 +41,35 @@
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Open Issues</div>
       <div class="text-3xl font-bold text-red-600 dark:text-red-400"><%= @open_issue_count %></div>
     </div>
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800" title="Total events in the last 24h, hourly distribution">
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Events (24h)</div>
-      <div class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= @event_count_24h %></div>
+      <div class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= number_with_delimiter(@event_count_24h) %></div>
+      <% if @events_by_hour.any? { |v| v.positive? } %>
+        <div class="text-blue-500 dark:text-blue-400 mt-2">
+          <%= sparkline(@events_by_hour, width: 100, height: 24,
+              title: "events / hour, last 24h") %>
+        </div>
+        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          peak <%= number_with_delimiter(@events_by_hour.max) %> · low <%= number_with_delimiter(@events_by_hour.min) %> / hr
+        </div>
+      <% else %>
+        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">no events in last 24h</div>
+      <% end %>
     </div>
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800" title="Total transactions in the last 24h, hourly distribution">
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Transactions (24h)</div>
-      <div class="<%= @transaction_count_24h > 99_999 ? 'text-2xl' : 'text-3xl' %> font-bold text-gray-900 dark:text-gray-100"><%= @transaction_count_24h %></div>
+      <div class="<%= @transaction_count_24h > 99_999 ? 'text-2xl' : 'text-3xl' %> font-bold text-gray-900 dark:text-gray-100"><%= number_with_delimiter(@transaction_count_24h) %></div>
+      <% if @transactions_by_hour.any? { |v| v.positive? } %>
+        <div class="text-blue-500 dark:text-blue-400 mt-2">
+          <%= sparkline(@transactions_by_hour, width: 100, height: 24,
+              title: "transactions / hour, last 24h") %>
+        </div>
+        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          peak <%= number_with_delimiter(@transactions_by_hour.max) %> · low <%= number_with_delimiter(@transactions_by_hour.min) %> / hr
+        </div>
+      <% else %>
+        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">no traffic in last 24h</div>
+      <% end %>
     </div>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800" title="Median request duration — half of all requests are faster, half slower.">
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">P50 Response</div>

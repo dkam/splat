@@ -23,6 +23,36 @@ module DuckLake
         (query(sql, *binds).first || {})["c"].to_i
       end
 
+      # Project-wide bucketed event counts for the project dashboard sparkline.
+      # Returns a flat zero-filled array of length `buckets`.
+      def volume_by_bucket(time_range: 24.hours.ago..Time.current, buckets: 24, project_id: nil)
+        result = Array.new(buckets, 0)
+        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
+        return result if bucket_seconds <= 0
+
+        sql = +<<~SQL
+          SELECT
+            CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
+            COUNT(*) AS c
+          FROM events
+          WHERE timestamp BETWEEN ? AND ?
+        SQL
+        binds = [time_range.begin, bucket_seconds, time_range.begin, time_range.end]
+
+        if project_id.present?
+          sql << " AND project_id = ?"
+          binds << project_id.to_i
+        end
+
+        sql << " GROUP BY bucket_idx"
+
+        query(sql, *binds).each do |row|
+          idx = row["bucket_idx"].to_i.clamp(0, buckets - 1)
+          result[idx] = row["c"].to_i
+        end
+        result
+      end
+
       # Bucketed event counts keyed by issue_id, for sparklines.
       # Returns { issue_id => [count_in_bucket_0, count_in_bucket_1, ...] }
       # with a zero-filled array of length `buckets` for every issue_id passed in,

@@ -40,7 +40,7 @@ class ProjectsController < ApplicationController
     @sparkline_range = 24.hours.ago..Time.current
 
     metrics = Rails.cache.fetch(
-      "project_#{@project.id}_show_metrics/v2",
+      "project_#{@project.id}_show_metrics/v3",
       expires_in: SHOW_METRICS_TTL,
       race_condition_ttl: 10.seconds
     ) do
@@ -54,6 +54,14 @@ class ProjectsController < ApplicationController
           transaction_names: top_endpoints.map { |e| e["transaction_name"] },
           time_range: @sparkline_range, buckets: @sparkline_buckets,
           project_id: @project.id
+        ),
+        events_by_hour: DuckLake::Event.volume_by_bucket(
+          time_range: @sparkline_range, buckets: @sparkline_buckets,
+          project_id: @project.id
+        ),
+        transactions_by_hour: DuckLake::Transaction.volume_by_bucket(
+          time_range: @sparkline_range, buckets: @sparkline_buckets,
+          project_id: @project.id
         )
       }
     end
@@ -63,6 +71,8 @@ class ProjectsController < ApplicationController
     @transaction_count_24h = metrics[:transaction_count_24h]
     @p50_response_time = metrics[:p50_response_time]
     @endpoint_sparklines = metrics[:endpoint_sparklines]
+    @events_by_hour = metrics[:events_by_hour]
+    @transactions_by_hour = metrics[:transactions_by_hour]
 
     # Issue sparklines depend on the live @recent_issues ids, so they're
     # cached separately keyed off the visible issue set. Cheap when warm.
