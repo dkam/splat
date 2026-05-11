@@ -81,6 +81,13 @@ class ApplicationDucklakeRecord
       end
     end
 
+    # Transient catalog-lock errors from DuckLake's per-query attach pattern.
+    # Bursty concurrent commits can hit "database is locked" mid-transaction;
+    # DuckLake retries some, propagates others. Absorb up to BUSY_RETRIES with
+    # exponential backoff before letting the consumer release the batch.
+    BUSY_RETRIES = 8
+    BUSY_BASE_SLEEP_S = 0.05
+
     def insert(attrs)
       return false if disabled?
       raise Error, "table_name not set on #{name}" unless table_name
@@ -90,7 +97,7 @@ class ApplicationDucklakeRecord
       sql = "INSERT INTO #{table_name} (#{cols.join(", ")}) VALUES (#{placeholders})"
       values = attrs.values.map { |v| serialize(v) }
 
-      connection.execute(sql, *values)
+      with_busy_retry { connection.execute(sql, *values) }
       true
     end
 
@@ -110,7 +117,7 @@ class ApplicationDucklakeRecord
             Array.new(rows.size, placeholders).join(", ")
       binds = rows.flat_map { |r| key_order.map { |k| serialize(r[k]) } }
 
-      connection.execute(sql, *binds)
+      with_busy_retry { connection.execute(sql, *binds) }
       true
     end
 
@@ -145,6 +152,27 @@ class ApplicationDucklakeRecord
       case value
       when Hash, Array then value.to_json
       else value
+      end
+    end
+
+    # Retry a write on transient catalog-lock errors. DuckLake serializes
+    # catalog commits through SQLite; concurrent committers can see
+    # "database is locked" or "Failed to commit DuckLake transaction"
+    # depending on which layer surfaces the conflict first. Exponential
+    # backoff up to BUSY_RETRIES; after that the consumer's own retry
+    # path takes over (job goes back on the tube).
+    def with_busy_retry
+      attempt = 0
+      begin
+        yield
+      rescue DuckDB::Error => e
+        msg = e.message.to_s
+        raise unless msg.include?("database is locked") ||
+                     msg.include?("Failed to commit DuckLake transaction")
+        attempt += 1
+        raise if attempt > BUSY_RETRIES
+        sleep BUSY_BASE_SLEEP_S * (2**(attempt - 1))
+        retry
       end
     end
 
