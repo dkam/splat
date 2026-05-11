@@ -18,13 +18,14 @@ class EndpointsController < ApplicationController
     time_ago = time_range_lower_bound(@time_range)
     time_range = time_ago..Time.current
     @name_query = params[:name].to_s.strip.presence
+    environment = params[:environment].presence
 
     base_scope = @project.transactions.where("timestamp > ?", time_ago)
-    base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
-    base_scope = base_scope.where("transaction_name LIKE ?", "%#{@name_query}%") if @name_query
+    base_scope = base_scope.where(environment: environment) if environment
+    base_scope = base_scope.where("transaction_name ILIKE ?", "%#{@name_query}%") if @name_query
 
     duck_percentiles = ducklake_percentiles_for(
-      time_range, environment: params[:environment], name_query: @name_query
+      time_range, environment: environment, name_query: @name_query
     )
     @p50_duration = duck_percentiles[:p50] || 0
     @p95_duration = duck_percentiles[:p95] || 0
@@ -33,28 +34,21 @@ class EndpointsController < ApplicationController
     # When the user has filtered by name we want to see every match, not just
     # the top 20 by impact — they're searching for a specific thing, not
     # browsing the firehose.
-    @endpoints = DuckLake::Transaction.stats_by_endpoint_with_impact(
-      time_range,
-      project_id: @project.id,
-      environment: params[:environment],
-      name_query: @name_query,
-      limit: @name_query ? nil : 20
-    )
-
-    sparkline_names = @endpoints.map { |e| e["transaction_name"] }
-    sparkline_key = [
-      "endpoints_p95_sparklines/v1", @project.id, @time_range,
-      params[:environment].presence, @name_query, Digest::MD5.hexdigest(sparkline_names.join("\n"))
-    ].join("/")
-    @endpoint_sparklines = Rails.cache.fetch(sparkline_key, expires_in: 30.seconds) do
-      DuckLake::Transaction.p95_by_bucket(
-        transaction_names: sparkline_names,
-        time_range: time_range,
-        buckets: 24,
-        project_id: @project.id,
-        environment: params[:environment]
+    endpoints_key = ["endpoints_index/v1", @project.id, @time_range, environment, @name_query].join("/")
+    cached = Rails.cache.fetch(endpoints_key, expires_in: 30.seconds) do
+      endpoints = DuckLake::Transaction.stats_by_endpoint_with_impact(
+        time_range, project_id: @project.id, environment: environment,
+        name_query: @name_query, limit: @name_query ? nil : 20
       )
+      sparklines = DuckLake::Transaction.p95_by_bucket(
+        transaction_names: endpoints.map { |e| e["transaction_name"] },
+        time_range: time_range, buckets: 24,
+        project_id: @project.id, environment: environment
+      )
+      { endpoints: endpoints, sparklines: sparklines }
     end
+    @endpoints = cached[:endpoints]
+    @endpoint_sparklines = cached[:sparklines]
 
     @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
 
@@ -137,7 +131,7 @@ class EndpointsController < ApplicationController
       binds << environment
     end
     if name_query.present?
-      sql << " AND transaction_name LIKE ?"
+      sql << " AND transaction_name ILIKE ?"
       binds << "%#{name_query}%"
     end
 

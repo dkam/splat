@@ -95,7 +95,7 @@ module DuckLake
           binds << environment
         end
         if name_query.present?
-          sql << " AND transaction_name LIKE ?\n"
+          sql << " AND transaction_name ILIKE ?\n"
           binds << "%#{name_query}%"
         end
 
@@ -305,11 +305,9 @@ module DuckLake
         query(sql, *binds)
       end
 
-      # Project-wide bucketed transaction counts for the project dashboard
-      # sparkline. Returns a flat zero-filled array of length `buckets`.
       def volume_by_bucket(time_range: 24.hours.ago..Time.current, buckets: 24, project_id: nil)
         result = Array.new(buckets, 0)
-        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
+        bucket_seconds = (time_range.end - time_range.begin) / buckets.to_f
         return result if bucket_seconds <= 0
 
         sql = +<<~SQL
@@ -335,60 +333,34 @@ module DuckLake
         result
       end
 
-      # Bucketed transaction counts keyed by transaction_name, for sparklines.
-      # Returns { transaction_name => [count_in_bucket_0, count_in_bucket_1, ...] }
-      # with a zero-filled array of length `buckets` for every name passed in.
       def counts_by_bucket(transaction_names:, time_range: 24.hours.ago..Time.current,
                            buckets: 24, project_id: nil, environment: nil)
-        result = transaction_names.to_h { |n| [n, Array.new(buckets, 0)] }
-        return result if transaction_names.blank?
-
-        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
-        return result if bucket_seconds <= 0
-
-        placeholders = Array.new(transaction_names.size, "?").join(",")
-
-        sql = +<<~SQL
-          SELECT
-            transaction_name,
-            CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
-            COUNT(*) AS c
-          FROM transactions
-          WHERE timestamp BETWEEN ? AND ?
-            AND transaction_name IN (#{placeholders})
-        SQL
-        binds = [time_range.begin, bucket_seconds, time_range.begin, time_range.end, *transaction_names]
-
-        if project_id.present?
-          sql << " AND project_id = ?\n"
-          binds << project_id.to_i
-        end
-        if environment.present?
-          sql << " AND environment = ?\n"
-          binds << environment
-        end
-
-        sql << "GROUP BY transaction_name, bucket_idx"
-
-        query(sql, *binds).each do |row|
-          name = row["transaction_name"]
-          idx = row["bucket_idx"].to_i.clamp(0, buckets - 1)
-          next unless result.key?(name)
-          result[name][idx] = row["c"].to_i
-        end
-
-        result
+        aggregate_by_name_and_bucket(
+          transaction_names: transaction_names, time_range: time_range, buckets: buckets,
+          project_id: project_id, environment: environment, aggregate_sql: "COUNT(*)"
+        ) { |v| v.to_i }
       end
 
-      # Bucketed p95 latency (ms) keyed by transaction_name, for sparklines that
-      # show "is this endpoint getting faster/slower?" rather than traffic shape.
-      # Buckets with no traffic come back as 0 so the sparkline helper skips them.
       def p95_by_bucket(transaction_names:, time_range: 24.hours.ago..Time.current,
                         buckets: 24, project_id: nil, environment: nil)
+        aggregate_by_name_and_bucket(
+          transaction_names: transaction_names, time_range: time_range, buckets: buckets,
+          project_id: project_id, environment: environment,
+          aggregate_sql: "quantile_cont(duration, 0.95)"
+        ) { |v| v.to_f.round }
+      end
+
+      private
+
+      # Per-name per-bucket aggregate (counts, percentiles, …) for sparklines.
+      # `aggregate_sql` is internal — never user-supplied. Empty buckets stay 0
+      # so the sparkline helper renders no bar.
+      def aggregate_by_name_and_bucket(transaction_names:, time_range:, buckets:,
+                                       project_id:, environment:, aggregate_sql:)
         result = transaction_names.to_h { |n| [n, Array.new(buckets, 0)] }
         return result if transaction_names.blank?
 
-        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
+        bucket_seconds = (time_range.end - time_range.begin) / buckets.to_f
         return result if bucket_seconds <= 0
 
         placeholders = Array.new(transaction_names.size, "?").join(",")
@@ -397,7 +369,7 @@ module DuckLake
           SELECT
             transaction_name,
             CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
-            quantile_cont(duration, 0.95) AS p95
+            #{aggregate_sql} AS value
           FROM transactions
           WHERE timestamp BETWEEN ? AND ?
             AND transaction_name IN (#{placeholders})
@@ -419,11 +391,13 @@ module DuckLake
           name = row["transaction_name"]
           idx = row["bucket_idx"].to_i.clamp(0, buckets - 1)
           next unless result.key?(name)
-          result[name][idx] = row["p95"].to_f.round
+          result[name][idx] = yield row["value"]
         end
 
         result
       end
+
+      public
 
       def slow(min_duration_ms:, time_range: 24.hours.ago..Time.current, project_id: nil,
                endpoint: nil, http_status: nil, http_method: nil, environment: nil, tags: nil, limit: 50)
@@ -440,7 +414,7 @@ module DuckLake
           binds << project_id.to_i
         end
         if endpoint.present?
-          sql << " AND transaction_name LIKE ?"
+          sql << " AND transaction_name ILIKE ?"
           binds << "%#{endpoint}%"
         end
         if http_status.present?

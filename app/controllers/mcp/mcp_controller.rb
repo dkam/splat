@@ -618,7 +618,7 @@ module Mcp
       limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
 
       issues = Issue.includes(:project).recent
-      issues = issues.where("title LIKE ? OR exception_type LIKE ?", "%#{query}%", "%#{query}%") if query.present?
+      issues = issues.where("title ILIKE ? OR exception_type ILIKE ?", "%#{query}%", "%#{query}%") if query.present?
       issues = issues.where(status: status) if status.present?
       issues = issues.where(exception_type: exception_type) if exception_type.present?
       issues = issues.limit(limit)

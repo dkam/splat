@@ -21,7 +21,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_133653) do
     t.string "fingerprint", limit: 1000
     t.bigint "issue_id"
     t.text "message"
-    t.json "payload"
+    t.jsonb "payload"
     t.string "platform"
     t.integer "project_id", null: false
     t.string "release"
@@ -120,14 +120,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_133653) do
     t.string "http_method"
     t.string "http_status"
     t.string "http_url"
-    t.json "measurements"
+    t.jsonb "measurements"
     t.string "op"
     t.integer "project_id", null: false
     t.integer "query_count", default: 0, null: false
     t.string "release"
     t.string "server_name"
     t.boolean "spans_truncated", default: false, null: false
-    t.json "tags"
+    t.jsonb "tags"
     t.datetime "timestamp", null: false
     t.string "transaction_id", null: false
     t.string "transaction_name", null: false

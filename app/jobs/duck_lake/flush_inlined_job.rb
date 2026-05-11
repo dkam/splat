@@ -14,8 +14,7 @@ module DuckLake
       Rails.logger.info "[DuckLake] flush starting"
       start = Time.current
 
-      # Use execute_unlocked: a long flush must not block inserts on @write_mutex.
-      ApplicationDucklakeRecord.execute_unlocked("CALL ducklake_flush_inlined_data('#{LAKE}')")
+      ApplicationDucklakeRecord.execute("CALL ducklake_flush_inlined_data('#{LAKE}')")
 
       Rails.logger.info "[DuckLake] flush done in #{(Time.current - start).round(2)}s"
     rescue => e

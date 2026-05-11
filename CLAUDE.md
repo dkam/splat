@@ -8,8 +8,14 @@
 
 Need a fast, simple error tracker that:
 - Shows errors within seconds
-- Has minimal dependencies (Rails + SQLite3)
+- Has small, focused dependency set (Rails + Postgres + tuber + DuckLake)
 - Can be understood and modified easily
+
+> Historical note: Splat started life on SQLite. Booko's full-sampling
+> traffic (3 webservers + 2 price grabbers) outgrew SQLite's single-writer
+> model — both for the operational store and especially for the DuckLake
+> catalog (whose per-query attach/detach pattern defeats SQLite WAL).
+> The splat-booko cutover moved both onto a single Postgres cluster.
 
 ### Design Philosophy
 
@@ -24,11 +30,10 @@ Need a fast, simple error tracker that:
 ## Technology Stack
 
 - **Rails 8 (edge)** - Latest features
-- **SQLite** - Simple, fast, reliable storage
-- **Solid Queue** - Background job processing
-- **Solid Cache** - Counters and statistics
-- **Solid Cable** - Real-time UI updates (optional)
-- **Phlex** - Component-based UI
+- **Postgres** - Operational store (issues, events, transactions) + Solid Cache + Solid Cable + DuckLake catalog. One cluster, multiple logical DBs.
+- **tuber** - Custom beanstalkd-compatible queue (replaced Solid Queue); reserve-batch + idempotent puts power the two-stage ingest pipeline
+- **DuckLake + DuckDB** - Analytics surface; parquet on disk + Postgres catalog; partitioned by year/month for fast time-range scans
+- **Phlex / ERB + Hotwire** - Component-based UI
 
 ## Sentry Protocol Overview
 
@@ -223,7 +228,7 @@ when 'transaction'
 end
 ```
 
-### 3. Process Event (Solid Queue job)
+### 3. Process Event (ActiveJob via tuber adapter)
 ```ruby
 class ProcessEventJob < ApplicationJob
   def perform(event_id:, payload:)
@@ -567,7 +572,21 @@ end
 # .env
 SPLAT_DSN=http://ignored@splat.booko.info/1
 RAILS_ENV=production
-DATABASE_URL=sqlite3:storage/production.sqlite3
+
+# Postgres — single cluster, four logical databases (splat, splat_cache,
+# splat_cable, splat_catalog). See config/database.yml + config/ducklake.yml.
+DATABASE_HOST=postgres
+DATABASE_USER=splat
+DATABASE_PASSWORD=...
+DATABASE_NAME=splat
+DATABASE_CACHE_NAME=splat_cache
+DATABASE_CABLE_NAME=splat_cable
+
+# DuckLake catalog — same cluster, separate DB. Accessed by DuckDB, not Rails.
+DUCKLAKE_CATALOG_HOST=postgres
+DUCKLAKE_CATALOG_DB=splat_catalog
+DUCKLAKE_CATALOG_USER=splat
+DUCKLAKE_CATALOG_PASSWORD=...
 
 # MCP (Model Context Protocol) Authentication
 # Generate a secure token for Claude/AI assistants to query error data
@@ -631,37 +650,22 @@ config.recurring_tasks = [
 
 ### Setup
 ```bash
-# Generate Rails app
-rails new splat --edge --database=sqlite3
+# Dev: start a local Postgres (homebrew or Postgres.app), then
+bundle install
+bin/rails db:create db:migrate
 
-cd splat
-
-# Install Solid gems
-bundle add solid_queue solid_cache solid_cable
-
-# Setup
-bin/rails solid_queue:install
-bin/rails solid_cache:install
-bin/rails solid_cable:install
-
-# Generate scaffolds
-bin/rails generate model Event event_id:string timestamp:datetime ...
-bin/rails generate model Issue fingerprint:string title:string ...
-bin/rails generate controller Api::Envelopes
-bin/rails generate job ProcessEvent
-
-# Migrate
-bin/rails db:migrate
+# DuckLake catalog DB
+psql -U postgres -c "CREATE DATABASE splat_catalog_development OWNER splat;"
 ```
 
 ### Running
 ```bash
 # Development
-bin/dev  # Runs Rails + Solid Queue worker
+bin/dev   # Rails server + tailwind watcher + tuber if configured
 
-# Production
-bin/rails server
-bin/jobs  # Solid Queue worker
+# Production: compose.production.yml runs web, ingest, ducklake, scheduler,
+# tuber, and postgres as separate services.
+docker compose -f compose.production.yml -p splat-booko up -d
 ```
 
 ## Monitoring
@@ -669,8 +673,8 @@ bin/jobs  # Solid Queue worker
 ### Uptime Kuma Integration
 ```bash
 #!/bin/bash
-# Monitor Solid Queue depth
-QUEUE_DEPTH=$(bin/rails runner 'puts SolidQueue::Job.pending.count')
+# Monitor tuber queue depth (sum of ready jobs across all splat tubes).
+QUEUE_DEPTH=$(tuber-cli -a localhost:11331 stats --format text | awk '/^current_jobs_ready/{print $2}')
 curl "https://status.booko.info/api/push/MONITOR_ID?status=up&msg=Queue:+${QUEUE_DEPTH}&ping=${QUEUE_DEPTH}"
 ```
 
@@ -1046,26 +1050,14 @@ Once configured, you can ask Claude:
 5. ✅ Can handle Booko's production traffic
 6. ✅ Simple enough to understand and modify in one sitting
 
-## Getting Started
-
-```bash
-cd /Users/dkam/Development
-rails new splat --edge --database=sqlite3
-cd splat
-
-# Follow setup instructions above
-# Start building the envelope parser first
-# Then the event processor
-# Then the UI
-```
-
 ## Reference Links
 
 - Sentry Protocol: https://develop.sentry.dev/sdk/envelopes/
 - Sentry Event Schema: https://develop.sentry.dev/sdk/event-payloads/
 - Model Context Protocol: https://modelcontextprotocol.io/
 - Rails Guides: https://edgeguides.rubyonrails.org/
-- Solid Queue: https://github.com/basecamp/solid_queue
+- DuckLake: https://ducklake.select/docs/
+- tuber: https://github.com/tuberq/tuber
 - Phlex: https://www.phlex.fun/
 
 ---

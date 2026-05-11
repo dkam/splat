@@ -1,57 +1,64 @@
-# SQLite. Versions 3.8.0 and up are supported.
-#   gem install sqlite3
+# PostgreSQL configuration for Splat.
 #
-#   Ensure the SQLite 3 gem is defined in your Gemfile
-#   gem "sqlite3"
+# Multi-database setup: a single Postgres cluster hosts three logical DBs:
+#   - splat        — operational data (issues, events, transactions, etc.)
+#   - splat_cache  — Solid Cache backend
+#   - splat_cable  — Solid Cable backend
 #
+# The DuckLake catalog lives in its OWN database (`splat_catalog`) accessed
+# directly by DuckDB, NOT via Active Record. See config/ducklake.yml.
+#
+# Active Job uses tuber via the custom adapter; no SQL backend involved.
+
 default: &default
-  adapter: sqlite3
-  max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
-  timeout: 5000
-  # WAL with synchronous=NORMAL is the high-throughput SQLite config:
-  # readers don't block writers, single fsync per checkpoint instead of per
-  # commit. mmap_size + cache_size reduce IO under burst-write load.
-  pragmas:
-    journal_mode: wal
-    synchronous: normal
-    foreign_keys: "on"
-    busy_timeout: 5000
-    cache_size: -20000      # ~20 MB of page cache (negative = KB)
-    mmap_size: 134217728    # 128 MB memory-mapped IO
-    temp_store: memory
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("DATABASE_HOST", "postgres") %>
+  port: <%= ENV.fetch("DATABASE_PORT", 5432) %>
+  username: <%= ENV.fetch("DATABASE_USER", "splat") %>
+  password: <%= ENV.fetch("DATABASE_PASSWORD", nil) %>
+  # Pool sized for puma threads (RAILS_MAX_THREADS) plus headroom for any
+  # background workers sharing this process. Ducklake worker has its own
+  # consumer threads; bump RAILS_MAX_THREADS there if needed.
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  variables:
+    statement_timeout: <%= ENV.fetch("DATABASE_STATEMENT_TIMEOUT_MS", 30000) %>
 
 development:
   primary:
     <<: *default
-    database: storage/development.sqlite3
+    database: splat_development
   cache:
     <<: *default
-    database: storage/development_cache.sqlite3
+    database: splat_development_cache
     migrations_paths: db/cache_migrate
   cable:
     <<: *default
-    database: storage/development_cable.sqlite3
+    database: splat_development_cable
     migrations_paths: db/cable_migrate
 
-# Warning: The database defined as "test" will be erased and
-# re-generated from your development database when you run "rake".
-# Do not set this db to the same as development or production.
 test:
-  <<: *default
-  database: storage/test.sqlite3
+  primary:
+    <<: *default
+    database: splat_test
+  cache:
+    <<: *default
+    database: splat_test_cache
+    migrations_paths: db/cache_migrate
+  cable:
+    <<: *default
+    database: splat_test_cable
+    migrations_paths: db/cable_migrate
 
-
-# Store production database in the storage/ directory, which by default
-# is mounted as a persistent Docker volume in config/deploy.yml.
 production:
   primary:
     <<: *default
-    database: storage/production.sqlite3
+    database: <%= ENV.fetch("DATABASE_NAME", "splat") %>
   cache:
     <<: *default
-    database: storage/production_cache.sqlite3
+    database: <%= ENV.fetch("DATABASE_CACHE_NAME", "splat_cache") %>
     migrations_paths: db/cache_migrate
   cable:
     <<: *default
-    database: storage/production_cable.sqlite3
+    database: <%= ENV.fetch("DATABASE_CABLE_NAME", "splat_cable") %>
     migrations_paths: db/cable_migrate

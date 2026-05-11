@@ -1,6 +1,8 @@
 # DuckLake configuration — analytics surface (DuckDB lakehouse format).
 #
-# Catalog: SQLite file holding metadata + inlined recent rows.
+# Catalog: Postgres database (splat_catalog) holding metadata + inlined recent
+# rows. We moved off SQLite when concurrent writes outgrew its single-writer
+# model — the attach/detach-per-query pattern DuckLake uses defeats SQLite WAL.
 # Data path: where parquet files are written when inlined data is flushed.
 #   Set storage: s3 (with the s3 block) to write parquet to S3 instead of local FS.
 #
@@ -8,7 +10,12 @@
 # parquet when the row threshold is crossed — fast writes, no tiny-file problem.
 
 default: &default
-  catalog: storage/<%= Rails.env %>_ducklake_catalog.sqlite3
+  catalog:
+    host: <%= ENV.fetch("DUCKLAKE_CATALOG_HOST", "postgres") %>
+    port: <%= ENV.fetch("DUCKLAKE_CATALOG_PORT", 5432) %>
+    database: <%= ENV.fetch("DUCKLAKE_CATALOG_DB", "splat_catalog_#{Rails.env}") %>
+    user: <%= ENV.fetch("DUCKLAKE_CATALOG_USER", "splat") %>
+    password: <%= ENV["DUCKLAKE_CATALOG_PASSWORD"] %>
   data_path: storage/<%= Rails.env %>_ducklake_data/
   storage: local
   # data_inlining_row_limit applies per ATTACH. Bigger = fewer parquet flushes,
@@ -23,12 +30,16 @@ development:
 
 test:
   <<: *default
-  catalog: storage/test_ducklake_catalog.sqlite3
   data_path: tmp/test_ducklake_data/
 
 production:
   <<: *default
-  catalog: <%= ENV.fetch("DUCKLAKE_CATALOG", "storage/ducklake.sqlite3") %>
+  catalog:
+    host: <%= ENV.fetch("DUCKLAKE_CATALOG_HOST", "postgres") %>
+    port: <%= ENV.fetch("DUCKLAKE_CATALOG_PORT", 5432) %>
+    database: <%= ENV.fetch("DUCKLAKE_CATALOG_DB", "splat_catalog") %>
+    user: <%= ENV.fetch("DUCKLAKE_CATALOG_USER", "splat") %>
+    password: <%= ENV["DUCKLAKE_CATALOG_PASSWORD"] %>
   data_path: <%= ENV.fetch("DUCKLAKE_DATA_PATH", "storage/parquet/") %>
   storage: <%= ENV.fetch("DUCKLAKE_STORAGE", "local") %>
   s3:

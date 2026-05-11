@@ -23,8 +23,8 @@ class CreateTransactions < ActiveRecord::Migration[8.1]
       t.string :http_url
 
       # Lightweight payload for details
-      t.json :tags
-      t.json :measurements
+      t.jsonb :tags
+      t.jsonb :measurements
 
       t.timestamps
     end

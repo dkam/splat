@@ -20,11 +20,11 @@ class CreateEvents < ActiveRecord::Migration[8.1]
       t.string :transaction
 
       # Grouping
-      t.json :fingerprint
+      t.jsonb :fingerprint
       t.bigint :issue_id
 
       # Full payload for details view
-      t.json :payload
+      t.jsonb :payload
 
       t.timestamps
     end

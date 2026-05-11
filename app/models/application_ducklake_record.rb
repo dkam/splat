@@ -2,8 +2,9 @@
 
 # Base class for DuckLake-backed analytics models. Owns a single shared
 # DuckDB::Database; each thread gets its own DuckDB::Connection off it,
-# attached to the same lake. DuckLake handles concurrent reads/writes via
-# its catalog snapshot model — no Ruby-side mutex needed on the hot path.
+# attached to the same lake. Catalog backend is Postgres — DuckLake's
+# concurrent-write story is built on the catalog backend's own MVCC,
+# so no Ruby-side write mutex is needed.
 #
 # Subclasses set `self.table_name` and use the class-level API directly —
 # there are no instances. Analytics call sites pass raw SQL to `query` and
@@ -15,12 +16,6 @@ class ApplicationDucklakeRecord
   class_attribute :table_name, instance_accessor: false
 
   @bootstrap_mutex = Mutex.new
-  # A Ruby-side @write_mutex previously serialized writes to absorb
-  # SQLITE_BUSY errors. In practice it amplified flush-induced stalls: when
-  # a long catalog operation held the SQLite write lock, the consumer
-  # holding @write_mutex blocked on SQLite inside DuckDB, parking every
-  # other consumer on the futex. DuckLake's attach+retry-on-busy is the
-  # designed strategy; let it do its job and inserts proceed in parallel.
   @database        = nil
   @config          = nil
 
@@ -46,8 +41,7 @@ class ApplicationDucklakeRecord
         config = Rails.application.config.x.ducklake
         raise NotConfigured, "config/ducklake.yml not loaded" if config.blank?
 
-        ensure_paths!(config)
-        ensure_catalog_wal_mode!(config)
+        ensure_data_path!(config)
 
         require "duckdb"
         database = DuckDB::Database.open
@@ -81,13 +75,6 @@ class ApplicationDucklakeRecord
       end
     end
 
-    # Transient catalog-lock errors from DuckLake's per-query attach pattern.
-    # Bursty concurrent commits can hit "database is locked" mid-transaction;
-    # DuckLake retries some, propagates others. Absorb up to BUSY_RETRIES with
-    # exponential backoff before letting the consumer release the batch.
-    BUSY_RETRIES = 8
-    BUSY_BASE_SLEEP_S = 0.05
-
     def insert(attrs)
       return false if disabled?
       raise Error, "table_name not set on #{name}" unless table_name
@@ -97,7 +84,7 @@ class ApplicationDucklakeRecord
       sql = "INSERT INTO #{table_name} (#{cols.join(", ")}) VALUES (#{placeholders})"
       values = attrs.values.map { |v| serialize(v) }
 
-      with_busy_retry { connection.execute(sql, *values) }
+      connection.execute(sql, *values)
       true
     end
 
@@ -117,7 +104,7 @@ class ApplicationDucklakeRecord
             Array.new(rows.size, placeholders).join(", ")
       binds = rows.flat_map { |r| key_order.map { |k| serialize(r[k]) } }
 
-      with_busy_retry { connection.execute(sql, *binds) }
+      connection.execute(sql, *binds)
       true
     end
 
@@ -133,11 +120,6 @@ class ApplicationDucklakeRecord
       return nil if disabled?
       binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
     end
-
-    # Retained as an alias of execute; callers were updated when the Ruby-side
-    # @write_mutex was removed. DuckLake's per-query attach + retry-on-busy
-    # handles concurrent SQLite catalog access without app-level serialization.
-    alias_method :execute_unlocked, :execute
 
     private
 
@@ -155,56 +137,16 @@ class ApplicationDucklakeRecord
       end
     end
 
-    # Retry a write on transient catalog-lock errors. DuckLake serializes
-    # catalog commits through SQLite; concurrent committers can see
-    # "database is locked" or "Failed to commit DuckLake transaction"
-    # depending on which layer surfaces the conflict first. Exponential
-    # backoff up to BUSY_RETRIES; after that the consumer's own retry
-    # path takes over (job goes back on the tube).
-    def with_busy_retry
-      attempt = 0
-      begin
-        yield
-      rescue DuckDB::Error => e
-        msg = e.message.to_s
-        raise unless msg.include?("database is locked") ||
-                     msg.include?("Failed to commit DuckLake transaction")
-        attempt += 1
-        raise if attempt > BUSY_RETRIES
-        sleep BUSY_BASE_SLEEP_S * (2**(attempt - 1))
-        retry
-      end
-    end
-
-    def ensure_paths!(config)
-      catalog = Rails.root.join(config[:catalog])
-      FileUtils.mkdir_p(File.dirname(catalog))
-
-      if config[:storage].to_s != "s3"
-        FileUtils.mkdir_p(Rails.root.join(config[:data_path]))
-      end
-    end
-
-    # Set the catalog SQLite to WAL mode before DuckLake attaches it. Default
-    # rollback-journal mode is single-writer; under concurrent worker writes
-    # DuckLake's catalog commits hit "database is locked" constantly. WAL is
-    # persistent in the file header, so this is a no-op once set.
-    def ensure_catalog_wal_mode!(config)
-      catalog = Rails.root.join(config[:catalog]).to_s
-      return unless File.exist?(catalog) || File.writable?(File.dirname(catalog))
-
-      require "sqlite3"
-      db = SQLite3::Database.new(catalog)
-      db.execute("PRAGMA journal_mode=WAL")
-      db.execute("PRAGMA synchronous=NORMAL")
-      db.close
-    rescue => e
-      Rails.logger.warn "[DuckLake] could not set catalog WAL mode: #{e.class}: #{e.message}"
+    def ensure_data_path!(config)
+      return if config[:storage].to_s == "s3"
+      FileUtils.mkdir_p(Rails.root.join(config[:data_path]))
     end
 
     def configure_connection!(conn, config)
       conn.execute("INSTALL ducklake")
       conn.execute("LOAD ducklake")
+      conn.execute("INSTALL postgres")
+      conn.execute("LOAD postgres")
 
       # DuckDB defaults memory_limit to ~80% of physical RAM and threads to
       # physical cores PER CONNECTION. The ducklake worker has 5 consumer
@@ -239,7 +181,6 @@ class ApplicationDucklakeRecord
     end
 
     def attach_lake!(conn, config)
-      catalog = Rails.root.join(config[:catalog]).to_s
       data_path =
         if config[:storage].to_s == "s3"
           s3 = config[:s3] || {}
@@ -254,33 +195,35 @@ class ApplicationDucklakeRecord
         options << "DATA_INLINING_ROW_LIMIT #{limit.to_i}"
       end
 
-      # Per-thread connections each ATTACH the lake. `IF NOT EXISTS` only
-      # checks the user alias `splat_lake`, but DuckLake's internal metadata
-      # DB `__ducklake_metadata_splat_lake` is created at database-instance
-      # level, not per-connection. After the primer attaches, sibling
-      # connections see the alias as missing but the metadata DB as already
-      # present and ATTACH errors with "already exists". Normally
-      # `USE splat_lake` works because the alias propagates from the
-      # primer. Under concurrent per-thread setup that propagation races,
-      # and USE can fail with "No catalog + schema named splat_lake". Treat
-      # that as "alias not yet visible to this connection" and retry briefly.
-      attach_attempts = 0
+      # Per-thread connections each ATTACH the lake. The user alias
+      # `splat_lake` propagates at database-instance level, so sibling
+      # connections see it after the primer attaches. IF NOT EXISTS skips
+      # the redundant ATTACH; the swallow handles the occasional
+      # "already exists" raised when DuckLake's internal metadata DB is
+      # registered before the alias check runs.
       begin
-        begin
-          conn.execute(
-            "ATTACH IF NOT EXISTS 'ducklake:sqlite:#{quote(catalog)}' AS splat_lake (#{options.join(", ")})"
-          )
-        rescue DuckDB::Error => e
-          raise unless e.message.include?("already exists")
-        end
-        conn.execute("USE splat_lake")
+        conn.execute(
+          "ATTACH IF NOT EXISTS '#{catalog_uri(config)}' AS splat_lake (#{options.join(", ")})"
+        )
       rescue DuckDB::Error => e
-        raise unless e.message.include?('No catalog + schema named "splat_lake"')
-        attach_attempts += 1
-        raise if attach_attempts > 10
-        sleep 0.05 * attach_attempts
-        retry
+        raise unless e.message.include?("already exists")
       end
+      conn.execute("USE splat_lake")
+    end
+
+    # Build the DuckLake catalog ATTACH URI from the catalog config hash.
+    # libpq-style key=value pairs after `ducklake:postgres:` — order is
+    # insignificant. Password is included only if set so credential-less
+    # peer-auth setups still work.
+    def catalog_uri(config)
+      catalog = config[:catalog]
+      parts = []
+      parts << "host=#{catalog[:host]}"        if catalog[:host].present?
+      parts << "port=#{catalog[:port]}"        if catalog[:port].present?
+      parts << "dbname=#{catalog[:database]}"  if catalog[:database].present?
+      parts << "user=#{catalog[:user]}"        if catalog[:user].present?
+      parts << "password=#{catalog[:password]}" if catalog[:password].present?
+      "ducklake:postgres:#{parts.join(' ')}"
     end
 
     def load_schema!(conn)

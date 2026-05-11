@@ -4,8 +4,10 @@ source "https://rubygems.org"
 gem "rails", "~> 8.1.3"
 # The modern asset pipeline for Rails [https://github.com/rails/propshaft]
 gem "propshaft"
-# Use sqlite3 as the database for Active Record
-gem "sqlite3", ">= 2.1"
+# PostgreSQL is the operational + Solid Cache/Cable backend, and via DuckLake
+# the analytics-catalog backend. SQLite was retired in the splat-booko cutover
+# when concurrent catalog writes outgrew SQLite's single-writer model.
+gem "pg", "~> 1.5"
 # Use the Puma web server [https://github.com/puma/puma]
 gem "puma", ">= 5.0"
 # Use JavaScript with ESM import maps [https://github.com/rails/importmap-rails]

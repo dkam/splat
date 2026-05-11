@@ -1,13 +1,14 @@
-# Production docker-compose for splat — web + tuber + three worker sidecars
-# (ingest, ducklake, scheduler), replacing the old single Solid Queue `jobs`
-# service. Run with:
+# Production docker-compose for splat — web + tuber + Postgres + three worker
+# sidecars (ingest, ducklake, scheduler). Postgres is the operational store
+# (Rails primary + Solid Cache + Solid Cable) AND the DuckLake catalog.
 #
-#   docker compose -f compose.production.yml up -d
+# Run with:
+#   docker compose -f compose.production.yml -p splat-booko up -d
 #
 # Required .env vars: HOST, HOST_IP, SECRET_KEY_BASE, SPLAT_HOST,
 # SPLAT_INTERNAL_HOST, SPLAT_ADMIN_EMAILS, SPLAT_EMAIL_FROM, SMTP_*,
 # MCP_AUTH_TOKEN, SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, OIDC_*,
-# SPLAT_ALLOWED_USERS.
+# SPLAT_ALLOWED_USERS, POSTGRES_PASSWORD.
 
 x-common-variables: &common-variables
   RAILS_ENV: production
@@ -27,6 +28,24 @@ x-common-variables: &common-variables
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
   DUCKLAKE_DISABLED: false
 
+  # Rails database (operational + cache + cable). All three logical DBs live
+  # in the same Postgres cluster; database.yml selects them by role.
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_USER: splat
+  DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+  DATABASE_NAME: splat
+  DATABASE_CACHE_NAME: splat_cache
+  DATABASE_CABLE_NAME: splat_cable
+
+  # DuckLake catalog (Postgres) — separate logical DB in the same cluster.
+  # See config/ducklake.yml.
+  DUCKLAKE_CATALOG_HOST: postgres
+  DUCKLAKE_CATALOG_PORT: "5432"
+  DUCKLAKE_CATALOG_DB: splat_catalog
+  DUCKLAKE_CATALOG_USER: splat
+  DUCKLAKE_CATALOG_PASSWORD: ${POSTGRES_PASSWORD}
+
   # DuckDB defaults memory_limit to ~80% of physical RAM PER CONNECTION
   # and threads to all physical cores. Splat's workload is small INSERTs,
   # not analytical scans, so per-connection budgets are appropriate.
@@ -34,9 +53,10 @@ x-common-variables: &common-variables
   DUCKDB_MEMORY_LIMIT: 256MB
   DUCKDB_THREADS: "1"
 
-  # Bodies stay in RAM until multi_insert finishes. 100 reserved × ~few-MB
-  # packed body fits comfortably under 1GB Ruby-side per consumer.
-  DUCKLAKE_MIRROR_BATCH_SIZE: "100"
+  # Bodies stay in RAM until multi_insert finishes. With Postgres as the
+  # catalog (no single-writer bottleneck), we can run larger batches than
+  # the SQLite era allowed.
+  DUCKLAKE_MIRROR_BATCH_SIZE: "500"
 
   # Send Rails logs to stdout so `docker compose logs <service>` shows
   # them. Without this, Rails writes to log/production.log and the bind-
@@ -45,7 +65,7 @@ x-common-variables: &common-variables
   RAILS_LOG_TO_STDOUT: "true"
 
   # Container-to-container DNS uses the service name on the container port.
-  # 11330 is only the host-side port mapping — irrelevant inside the network.
+  # 11331 is only the host-side port mapping — irrelevant inside the network.
   TUBER_URL: tuber:11300
 
 x-splat-worker: &splat-worker
@@ -53,8 +73,9 @@ x-splat-worker: &splat-worker
   restart: unless-stopped
   depends_on:
     - tuber
+    - postgres
   volumes:
-    - /storage/splat/storage:/rails/storage
+    - /storage/splat-booko/storage:/rails/storage
   environment:
     <<: *common-variables
   logging:
@@ -64,8 +85,31 @@ x-splat-worker: &splat-worker
       max-file: "3"
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: splat-booko-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: splat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Initial DB created so the user has somewhere to connect for the
+      # init script. The init script then CREATE DATABASEs the rest.
+      POSTGRES_DB: splat
+    volumes:
+      - /storage/splat-booko/storage/postgres:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    # No exposed ports — internal-only. Access via splat-booko-postgres on
+    # the compose network, or via `docker compose exec postgres psql`.
+    mem_limit: 2048M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
   web:
     image: reg.tbdb.info/splat:latest
+    container_name: splat-booko-web
     environment:
       <<: *common-variables
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
@@ -75,12 +119,13 @@ services:
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/web:/rails/log
+      - /storage/splat-booko/storage:/rails/storage
+      - /storage/splat-booko/logs/web:/rails/log
     ports:
-      - "${HOST_IP}:3030:3000"
+      - "${HOST_IP}:3031:3000"
     depends_on:
       - tuber
+      - postgres
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -90,50 +135,46 @@ services:
 
   ingest:
     <<: *splat-worker
-    container_name: splat-ingest
+    container_name: splat-booko-ingest
     command: bin/ingest_worker
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/ingest:/rails/log
+      - /storage/splat-booko/storage:/rails/storage
+      - /storage/splat-booko/logs/ingest:/rails/log
     mem_limit: 512M
 
   ducklake:
     <<: *splat-worker
-    container_name: splat-ducklake
+    container_name: splat-booko-ducklake
     command: bin/ducklake_worker
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/ducklake:/rails/log
+      - /storage/splat-booko/storage:/rails/storage
+      - /storage/splat-booko/logs/ducklake:/rails/log
     # With DUCKDB_MEMORY_LIMIT=256MB × 5 connections = 1.28GB DuckDB
-    # ceiling, plus Ruby + reserved tube bodies (DUCKLAKE_MIRROR_BATCH_SIZE=100)
-    # ≈ 500MB-1GB more, this fits well under 2GB.
-    mem_limit: 2048M
-    # CRITICAL: never scale beyond 1. The DuckLake catalog is single-writer
-    # SQLite — the entire two-stage pipeline exists so this is the ONLY
-    # process touching the catalog. A second replica would just contend
-    # on the lock and produce "database is locked" errors.
-    deploy:
-      replicas: 1
+    # ceiling, plus Ruby + reserved tube bodies. Postgres-backed catalog
+    # eliminates the SQLite OOM-during-flush failure mode that forced the
+    # earlier 1GB→4GB bumps on the SQLite-era image.
+    mem_limit: 4096M
 
   scheduler:
     <<: *splat-worker
-    container_name: splat-scheduler
+    container_name: splat-booko-scheduler
     command: bin/scheduler
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/scheduler:/rails/log
+      - /storage/splat-booko/storage:/rails/storage
+      - /storage/splat-booko/logs/scheduler:/rails/log
     mem_limit: 128M
 
   tuber:
     image: ghcr.io/tuberq/tuber:latest
+    container_name: splat-booko-tuber
     # The image's entrypoint is the bare `tuber` binary — without a subcommand
     # it prints help and exits. Env vars only populate flag values.
     command: server
     ports:
-      - "${HOST}:11330:11300"           # protocol — distinct host port from any other tuber instance
-      - "${HOST}:9130:9100"             # metrics — Prometheus / Uptime Kuma reachable here
+      - "${HOST}:11331:11300"           # distinct host port from any other tuber instance (old splat is on 11330)
+      - "${HOST}:9131:9100"             # metrics — Prometheus / Uptime Kuma reachable here
     volumes:
-      - /storage/splat/storage/tuber:/var/lib/tuber/binlog
+      - /storage/splat-booko/storage/tuber:/var/lib/tuber/binlog
     restart: unless-stopped
     mem_limit: 1500M
     ulimits:
@@ -141,7 +182,7 @@ services:
         soft: 65536
         hard: 65536
     environment:
-      - TUBER_NAME=splat                # distinct from the other tuber's name; shows in metrics + tuber-tui
+      - TUBER_NAME=splat-booko
       - TUBER_LISTEN=0.0.0.0
       - TUBER_PORT=11300
       - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
