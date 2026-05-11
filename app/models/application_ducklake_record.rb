@@ -130,6 +130,15 @@ class ApplicationDucklakeRecord
       end
     end
 
+    # Long-running catalog maintenance (flush inlined data, compaction) must
+    # not hold @write_mutex — a slow flush would block every insert for the
+    # duration. DuckLake's catalog snapshot model lets these overlap with
+    # writes; inserts may transiently retry on SQLITE_BUSY but won't deadlock.
+    def execute_unlocked(sql, *binds)
+      return nil if disabled?
+      binds.empty? ? connection.execute(sql) : connection.execute(sql, *binds)
+    end
+
     private
 
     # Per-connection setup: LOAD extensions, S3 config, ATTACH the lake,

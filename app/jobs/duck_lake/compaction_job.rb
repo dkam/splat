@@ -23,7 +23,8 @@ module DuckLake
       Rails.logger.info "[DuckLake] compaction starting"
       start = Time.current
 
-      ApplicationDucklakeRecord.execute("CALL ducklake_merge_adjacent_files('#{LAKE}')")
+      # Use execute_unlocked: long compaction must not block inserts on @write_mutex.
+      ApplicationDucklakeRecord.execute_unlocked("CALL ducklake_merge_adjacent_files('#{LAKE}')")
 
       Rails.logger.info "[DuckLake] compaction done in #{(Time.current - start).round(2)}s"
     rescue => e

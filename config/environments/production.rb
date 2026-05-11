@@ -49,8 +49,18 @@ Rails.application.configure do
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
 
   # Log to STDOUT with the current request id as a default log tag.
+  # Prefix every line with an ISO8601 millisecond timestamp so docker log
+  # output is timestamped even without `docker logs --timestamps`. Built on
+  # SimpleFormatter so TaggedLogging.new can extend it with its tagging module.
   config.log_tags = [ :request_id ]
-  config.logger   = ActiveSupport::TaggedLogging.logger(STDOUT)
+  timestamped_formatter = Class.new(ActiveSupport::Logger::SimpleFormatter) do
+    def call(severity, time, _progname, msg)
+      "[#{time.utc.iso8601(3)}] #{severity.ljust(5)} #{msg}\n"
+    end
+  end
+  base_logger = Logger.new(STDOUT)
+  base_logger.formatter = timestamped_formatter.new
+  config.logger = ActiveSupport::TaggedLogging.new(base_logger)
 
   # Change to "debug" to log everything (including potentially personally-identifiable information!).
   config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
