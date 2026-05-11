@@ -86,7 +86,7 @@ x-splat-worker: &splat-worker
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: splat-booko-postgres
     restart: unless-stopped
     environment:
@@ -96,7 +96,10 @@ services:
       # init script. The init script then CREATE DATABASEs the rest.
       POSTGRES_DB: splat
     volumes:
-      - /storage/splat-booko/storage/postgres:/var/lib/postgresql/data
+      # PG18 docker images expect a volume at /var/lib/postgresql (parent),
+      # not /var/lib/postgresql/data. Data is then stored in a versioned
+      # subdirectory (e.g., 18/main) so future pg_upgrade --link works.
+      - /storage/splat-booko/storage/postgres:/var/lib/postgresql
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     # No exposed ports — internal-only. Access via splat-booko-postgres on
     # the compose network, or via `docker compose exec postgres psql`.

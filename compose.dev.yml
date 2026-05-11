@@ -17,7 +17,7 @@
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: splat-dev-postgres
     restart: unless-stopped
     environment:
@@ -27,7 +27,8 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - ./tmp/dev-postgres-data:/var/lib/postgresql/data
+      # PG18: mount at /var/lib/postgresql (parent), not /var/lib/postgresql/data.
+      - ./tmp/dev-postgres-data:/var/lib/postgresql
       - ./docker/postgres/init-dev.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U splat -d splat_development"]
