@@ -39,9 +39,19 @@ module Ingest
       @client.close rescue nil
     end
 
+    # Sleep this long after a reserve that came back empty. Without it the
+    # run loop hot-polls reserve_batch, generating tens of thousands of
+    # cmd_reserve per second on idle tubes and burning CPU for nothing.
+    # 100ms is small enough that genuine new work waits no longer than that
+    # to be picked up.
+    EMPTY_POLL_SLEEP_S = 0.1
+
     def process_one_batch
       jobs = reserve_batch
-      return if jobs.empty?
+      if jobs.empty?
+        sleep EMPTY_POLL_SLEEP_S
+        return
+      end
 
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       process_batch(jobs)
