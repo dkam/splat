@@ -18,12 +18,15 @@ default: &default
     password: <%= ENV["DUCKLAKE_CATALOG_PASSWORD"] %>
   data_path: storage/<%= Rails.env %>_ducklake_data/
   storage: local
-  # data_inlining_row_limit applies per ATTACH. Bigger = fewer parquet flushes,
-  # smaller catalog write amplification. With stage-2 coalesce-wait in place
-  # most batches stay inline; flushing happens when scheduled or when this
-  # threshold trips. 5000 keeps inline footprint small (~MB-scale) while
-  # cutting flush frequency vs the old 1000.
-  data_inlining_row_limit: 5000
+  # data_inlining_row_limit is the per-INSERT-statement row cap for taking the
+  # inline path: INSERTs with row count <= limit are inlined into the catalog,
+  # INSERTs above bypass it and write parquet directly. DuckLake default is 10.
+  # 50 keeps small ingest batches inline (cheap, no tiny-files problem) while
+  # forcing larger coalesced batches to skip the catalog — bounds inlined-table
+  # footprint so each FlushInlinedJob has less to chew through and stays
+  # inside memory budget. Raised from default 10 to absorb the typical
+  # DUCKLAKE_MIRROR_BATCH_SIZE=20 path without churning parquet.
+  data_inlining_row_limit: 50
 
 development:
   <<: *default

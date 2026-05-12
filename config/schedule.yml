@@ -13,7 +13,7 @@
 ducklake_flush_inlined:
   class: DuckLake::FlushInlinedJob
   tube: splat.ducklake.maintenance
-  schedule: every 5m
+  schedule: every 1m
   con: 1
 
 data_retention:
