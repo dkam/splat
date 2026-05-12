@@ -23,11 +23,9 @@ module DuckLake
         (query(sql, *binds).first || {})["c"].to_i
       end
 
-      # Project-wide bucketed event counts for the project dashboard sparkline.
-      # Returns a flat zero-filled array of length `buckets`.
       def volume_by_bucket(time_range: 24.hours.ago..Time.current, buckets: 24, project_id: nil)
         result = Array.new(buckets, 0)
-        bucket_seconds = ((time_range.end - time_range.begin) / buckets.to_f).to_f
+        bucket_seconds = (time_range.end - time_range.begin) / buckets.to_f
         return result if bucket_seconds <= 0
 
         sql = +<<~SQL
