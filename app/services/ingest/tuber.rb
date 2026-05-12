@@ -31,8 +31,10 @@ module Ingest
         Thread.current[:ingest_tuber_producer] ||= ::Beaneater.new(address)
       end
 
-      def put(tube_name, payload, ttr: DEFAULT_TTR, pri: DEFAULT_PRI, delay: 0)
-        producer.tubes[tube_name].put(JSON.generate(payload), ttr: ttr, pri: pri, delay: delay)
+      def put(tube_name, payload, ttr: DEFAULT_TTR, pri: DEFAULT_PRI, delay: 0, con: nil)
+        opts = { ttr: ttr, pri: pri, delay: delay }
+        opts[:con] = con unless con.nil?
+        producer.tubes[tube_name].put(JSON.generate(payload), **opts)
       end
 
       # Consumers WATCH tubes; producers USE them. Keeping the consumer on its

@@ -4,18 +4,26 @@
 # ingest_worker / ducklake_worker dispatch by class name.
 #
 # Schedules accept rufus syntax: "every Xs/m/h/d" or cron strings.
+#
+# `con:` adds a tuber concurrency tag so the server caps simultaneous reserves
+# for jobs sharing that key. Maintenance jobs use con:1 — only one heavy
+# flush/retention/cleanup can run at a time across the pool, regardless of how
+# many consumers are watching or how deep the maintenance tube has backed up.
 
 ducklake_flush_inlined:
   class: DuckLake::FlushInlinedJob
   tube: splat.ducklake.maintenance
   schedule: every 5m
+  con: 1
 
 data_retention:
   class: DataRetentionJob
   tube: splat.maintenance
   schedule: cron 0 2 * * *
+  con: 1
 
 cleanup_expired_oidc_sessions:
   class: CleanupExpiredOidcSessionsJob
   tube: splat.maintenance
   schedule: cron 17 * * * *
+  con: 1

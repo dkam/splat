@@ -33,18 +33,20 @@ module Ingest
         klass = entry.fetch("class")
         tube  = entry.fetch("tube")
         sched = entry.fetch("schedule")
+        con   = entry["con"]
 
-        register(name, klass, tube, sched)
+        register(name, klass, tube, sched, con)
       end
     end
 
-    def register(name, klass, tube, sched)
+    def register(name, klass, tube, sched, con)
       method, expr = sched.split(/\s+/, 2)
       payload = { class: klass, args: [] }
+      put_opts = con.nil? ? {} : { con: con }
 
       handler = -> {
-        Rails.logger.info "[Scheduler] firing #{name} → #{tube}"
-        Tuber.put(tube, payload)
+        Rails.logger.info "[Scheduler] firing #{name} → #{tube}#{con ? " (con:#{con})" : ""}"
+        Tuber.put(tube, payload, **put_opts)
       }
 
       case method

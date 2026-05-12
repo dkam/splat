@@ -175,6 +175,17 @@ class ApplicationDucklakeRecord
         conn.execute("SET threads = #{threads_per_conn.to_i}")
       end
 
+      # DuckDB spills to disk when a query's working set exceeds memory_limit.
+      # The default `temp_directory` is `.tmp` relative to the process working
+      # directory — in the container that's `/rails`, which is root-owned, so
+      # the rails-uid process can't create it. The first time a flush needs
+      # to spill, DuckDB fails to write the spill file and the OS OOM-killer
+      # takes the container. Point temp_directory at a writable path.
+      # `/rails/storage` is bind-mounted from the host and writable.
+      temp_dir = ENV.fetch("DUCKDB_TEMP_DIR", Rails.root.join("storage", "duckdb_tmp").to_s)
+      FileUtils.mkdir_p(temp_dir)
+      conn.execute("SET temp_directory = '#{quote(temp_dir)}'")
+
       # DuckLake commits a new catalog snapshot per write; under burst load
       # (event/transaction/span ingest from many workers concurrently) the
       # default 10-retry optimistic-concurrency loop exceeds. Bump to 100;
