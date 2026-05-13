@@ -2,15 +2,15 @@
 
 module Ingest
   module Tuber
-    EVENTS_TUBE = "splat.events"
-    TRANSACTIONS_TUBE = "splat.transactions"
-    DUCKLAKE_EVENTS_TUBE = "splat.ducklake.events"
-    DUCKLAKE_ISSUES_TUBE = "splat.ducklake.issues"
-    DUCKLAKE_TRANSACTIONS_TUBE = "splat.ducklake.transactions"
-    DUCKLAKE_SPANS_TUBE = "splat.ducklake.spans"
-    MAINTENANCE_TUBE = "splat.maintenance"
-    DUCKLAKE_MAINTENANCE_TUBE = "splat.ducklake.maintenance"
-    ACTIVEJOB_TUBE = "splat.activejob"
+    EVENTS_TUBE = "events"
+    TRANSACTIONS_TUBE = "transactions"
+    DUCKLAKE_EVENTS_TUBE = "ducklake.events"
+    DUCKLAKE_ISSUES_TUBE = "ducklake.issues"
+    DUCKLAKE_TRANSACTIONS_TUBE = "ducklake.transactions"
+    DUCKLAKE_SPANS_TUBE = "ducklake.spans"
+    MAINTENANCE_TUBE = "maintenance"
+    DUCKLAKE_MAINTENANCE_TUBE = "ducklake.maintenance"
+    ACTIVEJOB_TUBE = "activejob"
 
     # TTR has to cover one full batch round-trip (AR transaction + DuckLake
     # multi_insert + delete-all). 100-row batches finish in well under a

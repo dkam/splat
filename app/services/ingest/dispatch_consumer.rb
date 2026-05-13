@@ -3,8 +3,8 @@
 module Ingest
   # Drains a tube whose bodies look like `{ "class": "Foo::BarJob", "args": [...] }`,
   # instantiates the class, and calls `#perform(*args)`. Used for maintenance
-  # tubes — both the AR side (splat.maintenance) and the DuckLake side
-  # (splat.ducklake.maintenance), since dispatch is identical and only the
+  # tubes — both the AR side (maintenance) and the DuckLake side
+  # (ducklake.maintenance), since dispatch is identical and only the
   # tube + which worker watches it differs.
   class DispatchConsumer < TubeConsumer
     def initialize(tube:, batch_size: 10)

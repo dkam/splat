@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Ingest
-  # Drains splat.activejob and runs each payload through ActiveJob::Base.execute.
+  # Drains the activejob tube and runs each payload through ActiveJob::Base.execute.
   # Mailers (ActionMailer's MailDeliveryJob) and any other deliver_later /
   # perform_later flow through here.
   class ActiveJobConsumer < TubeConsumer

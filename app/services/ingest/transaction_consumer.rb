@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Ingest
-  # Stage 1 transactions: drain splat.transactions, run AR
+  # Stage 1 transactions: drain the transactions tube, run AR
   # create_from_sentry_payload! per row, then push hydrated transaction +
   # span rows downstream as one packed body per tube per batch.
   class TransactionConsumer < TubeConsumer

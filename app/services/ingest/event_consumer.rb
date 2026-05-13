@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Ingest
-  # Stage 1 events: drain splat.events, run AR create_from_sentry_payload!
+  # Stage 1 events: drain the events tube, run AR create_from_sentry_payload!
   # per row (preserving counter_cache, validations, after_create_commit
   # broadcasts), then push hydrated rows downstream to the DuckLake mirror
   # tubes. No DuckLake writes happen in this process.

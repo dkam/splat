@@ -17,19 +17,19 @@
 
 ducklake_flush_inlined:
   class: DuckLake::FlushInlinedJob
-  tube: splat.ducklake.maintenance
+  tube: ducklake.maintenance
   schedule: every 1m
   con: 1
   idp: ducklake_flush_inlined
 
 data_retention:
   class: DataRetentionJob
-  tube: splat.maintenance
+  tube: maintenance
   schedule: cron 0 2 * * *
   con: 1
 
 cleanup_expired_oidc_sessions:
   class: CleanupExpiredOidcSessionsJob
-  tube: splat.maintenance
+  tube: maintenance
   schedule: cron 17 * * * *
   con: 1

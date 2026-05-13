@@ -105,7 +105,7 @@ module DuckLakeMirror
       [grouped, failures]
     end
 
-    # Last dot-segment of the tube name, e.g. "splat.ducklake.spans" -> "spans".
+    # Last dot-segment of the tube name, e.g. "ducklake.spans" -> "spans".
     # Beaneater::Job#tube lazy-loads via STATS-JOB and caches on the object.
     def tube_to_table(job)
       job.tube.split(".").last
