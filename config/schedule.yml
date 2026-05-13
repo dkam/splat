@@ -9,12 +9,18 @@
 # for jobs sharing that key. Maintenance jobs use con:1 — only one heavy
 # flush/retention/cleanup can run at a time across the pool, regardless of how
 # many consumers are watching or how deep the maintenance tube has backed up.
+#
+# `idp:` adds a tuber idempotency key. While a job with that key is already in
+# the tube (ready or reserved), further puts with the same key are suppressed.
+# Use on cron jobs that occasionally run longer than their cron interval —
+# stops the scheduler from stacking duplicates while one is mid-flight.
 
 ducklake_flush_inlined:
   class: DuckLake::FlushInlinedJob
   tube: splat.ducklake.maintenance
   schedule: every 1m
   con: 1
+  idp: ducklake_flush_inlined
 
 data_retention:
   class: DataRetentionJob
