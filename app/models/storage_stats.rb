@@ -1,5 +1,4 @@
 class StorageStats
-  DUCKLAKE_CATALOG = "splat_lake".freeze
   DUCKLAKE_TABLES = %w[events transactions spans issues].freeze
 
   class << self
@@ -43,7 +42,7 @@ class StorageStats
         FROM ducklake_list_files(?, ?)
       SQL
 
-      row = ApplicationDucklakeRecord.query(sql, DUCKLAKE_CATALOG, table).first || {}
+      row = ApplicationDucklakeRecord.query(sql, ApplicationDucklakeRecord::CATALOG_NAME, table).first || {}
 
       {
         name: table,

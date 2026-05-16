@@ -15,6 +15,8 @@ class ApplicationDucklakeRecord
 
   class_attribute :table_name, instance_accessor: false
 
+  CATALOG_NAME = "splat_lake"
+
   @bootstrap_mutex = Mutex.new
   @database        = nil
   @config          = nil
@@ -312,7 +314,7 @@ class ApplicationDucklakeRecord
 
     def apply_catalog_options!(conn)
       %w[expire_older_than delete_older_than].each do |opt|
-        conn.execute("CALL splat_lake.set_option('#{opt}', '#{CATALOG_RETENTION_WINDOW}')")
+        conn.execute("CALL #{CATALOG_NAME}.set_option(?, ?)", opt, CATALOG_RETENTION_WINDOW)
       end
     end
 

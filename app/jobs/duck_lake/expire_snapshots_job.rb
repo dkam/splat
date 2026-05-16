@@ -12,15 +12,15 @@ module DuckLake
   # ApplicationDucklakeRecord::CATALOG_RETENTION_WINDOW) so this call
   # inherits the same window as CHECKPOINT and CleanupOldFilesJob.
   class ExpireSnapshotsJob
-    LAKE = "splat_lake"
-
     def perform
       return if ApplicationDucklakeRecord.disabled?
 
       Rails.logger.info "[DuckLake] expire_snapshots starting"
       t0 = Time.current
 
-      result = ApplicationDucklakeRecord.query("CALL ducklake_expire_snapshots('#{LAKE}')")
+      result = ApplicationDucklakeRecord.query(
+        "CALL ducklake_expire_snapshots('#{ApplicationDucklakeRecord::CATALOG_NAME}')"
+      )
 
       Rails.logger.info "[DuckLake] expire_snapshots done in #{(Time.current - t0).round(2)}s — #{result.inspect}"
     rescue => e
