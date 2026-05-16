@@ -60,6 +60,7 @@ class ApplicationDucklakeRecord
         load_schema!(primer)
         ensure_columns!(primer)
         apply_partitioning!(primer)
+        apply_catalog_options!(primer)
       end
       ApplicationDucklakeRecord.instance_variable_get(:@database)
     end
@@ -297,6 +298,21 @@ class ApplicationDucklakeRecord
         conn.execute(
           "ALTER TABLE #{table} SET PARTITIONED BY (year(timestamp), month(timestamp))"
         )
+      end
+    end
+
+    # Sets the catalog-wide retention windows used by CHECKPOINT and the
+    # ducklake_expire_snapshots / ducklake_cleanup_old_files /
+    # ducklake_delete_orphaned_files functions when called without an
+    # explicit older_than arg. Splat doesn't use snapshot history — pages
+    # and MCP tools query current data only — so a tight window keeps
+    # parquet count and disk usage low without risking in-flight readers
+    # (our queries finish in well under a second).
+    CATALOG_RETENTION_WINDOW = "5 minutes"
+
+    def apply_catalog_options!(conn)
+      %w[expire_older_than delete_older_than].each do |opt|
+        conn.execute("CALL splat_lake.set_option('#{opt}', '#{CATALOG_RETENTION_WINDOW}')")
       end
     end
 
