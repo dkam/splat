@@ -22,6 +22,47 @@ ducklake_flush_inlined:
   con: 1
   idp: ducklake_flush_inlined
 
+# Compacts adjacent parquet files within the same partition / schema version.
+# Without this the 1-minute flush produces a steady stream of small files and
+# scans get slow as DuckLake has to open more files per query.
+ducklake_compaction:
+  class: DuckLake::CompactionJob
+  tube: ducklake.maintenance
+  schedule: every 15m
+  con: 1
+  idp: ducklake_compaction
+
+# Expires snapshots older than the catalog's expire_older_than option (see
+# ApplicationDucklakeRecord::CATALOG_RETENTION_WINDOW) so their parquet files
+# become eligible for cleanup. Hourly cadence keeps catalog row counts bounded.
+ducklake_expire_snapshots:
+  class: DuckLake::ExpireSnapshotsJob
+  tube: ducklake.maintenance
+  schedule: every 1h
+  con: 1
+  idp: ducklake_expire_snapshots
+
+# Reclaims disk by deleting parquet files no longer referenced by any
+# non-expired snapshot. Daily is enough — orphans lingering for hours are
+# harmless, and the storage walk (especially on S3) isn't free.
+ducklake_cleanup_old_files:
+  class: DuckLake::CleanupOldFilesJob
+  tube: ducklake.maintenance
+  schedule: cron 15 3 * * *
+  con: 1
+  idp: ducklake_cleanup_old_files
+
+# Storage-walk safety net: deletes parquet files in the data path that
+# no snapshot references. Catches crashed writers / interrupted flushes
+# that CleanupOldFilesJob can't see. Staggered 30m after cleanup so the
+# two don't queue back-to-back.
+ducklake_delete_orphaned_files:
+  class: DuckLake::DeleteOrphanedFilesJob
+  tube: ducklake.maintenance
+  schedule: cron 45 3 * * *
+  con: 1
+  idp: ducklake_delete_orphaned_files
+
 data_retention:
   class: DataRetentionJob
   tube: maintenance
