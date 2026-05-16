@@ -40,6 +40,17 @@
           </button>
         </div>
 
+        <!-- Storage Link -->
+        <%= link_to storage_path,
+            class: "inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-700 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-900 transition-colors",
+            title: "Postgres + DuckLake storage sizes" do %>
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <ellipse cx="12" cy="5" rx="8" ry="3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></ellipse>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5v6c0 1.657 3.582 3 8 3s8-1.343 8-3V5"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 11v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6"></path>
+          </svg>
+          Storage
+        <% end %>
         <!-- Settings Link -->
         <%= link_to settings_path,
             class: "inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-700 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-900 transition-colors",

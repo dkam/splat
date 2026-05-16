@@ -60,4 +60,7 @@ Rails.application.routes.draw do
   # Settings (singleton resource)
   get "settings", to: "settings#index"
   put "settings", to: "settings#update"
+
+  # Storage stats (Postgres + DuckLake sizes)
+  get "storage", to: "storage#show"
 end
