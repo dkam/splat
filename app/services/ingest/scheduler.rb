@@ -33,18 +33,32 @@ module Ingest
         klass = entry.fetch("class")
         tube  = entry.fetch("tube")
         sched = entry.fetch("schedule")
+        con   = entry["con"]
+        idp   = entry["idp"]
 
-        register(name, klass, tube, sched)
+        register(name, klass, tube, sched, con, idp)
       end
     end
 
-    def register(name, klass, tube, sched)
+    # `idp:` makes the put idempotent — tuber suppresses the put if a job
+    # with the same key already exists in the tube (ready or reserved). For
+    # a cron-driven maintenance job that occasionally runs longer than its
+    # interval, this stops a queue pileup that would otherwise turn one
+    # slow run into a flood after the next worker restart.
+    def register(name, klass, tube, sched, con, idp)
       method, expr = sched.split(/\s+/, 2)
       payload = { class: klass, args: [] }
+      put_opts = {}
+      put_opts[:con] = con unless con.nil?
+      put_opts[:idp] = idp unless idp.nil?
 
       handler = -> {
-        Rails.logger.info "[Scheduler] firing #{name} → #{tube}"
-        Tuber.put(tube, payload)
+        tags = []
+        tags << "con:#{con}" if con
+        tags << "idp:#{idp}" if idp
+        suffix = tags.empty? ? "" : " (#{tags.join(', ')})"
+        Rails.logger.info "[Scheduler] firing #{name} → #{tube}#{suffix}"
+        Tuber.put(tube, payload, **put_opts)
       }
 
       case method

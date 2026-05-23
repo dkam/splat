@@ -14,6 +14,8 @@ class ApplicationDucklakeRecord
 
   class_attribute :table_name, instance_accessor: false
 
+  CATALOG_NAME = "splat_lake"
+
   @bootstrap_mutex = Mutex.new
   # A Ruby-side @write_mutex previously serialized writes to absorb
   # SQLITE_BUSY errors. In practice it amplified flush-induced stalls: when
@@ -66,6 +68,7 @@ class ApplicationDucklakeRecord
         load_schema!(primer)
         ensure_columns!(primer)
         apply_partitioning!(primer)
+        apply_catalog_options!(primer)
       end
       ApplicationDucklakeRecord.instance_variable_get(:@database)
     end
@@ -219,6 +222,17 @@ class ApplicationDucklakeRecord
         conn.execute("SET threads = #{threads_per_conn.to_i}")
       end
 
+      # DuckDB spills to disk when a query's working set exceeds memory_limit.
+      # The default `temp_directory` is `.tmp` relative to the process working
+      # directory — in the container that's `/rails`, which is root-owned, so
+      # the rails-uid process can't create it. The first time a flush needs
+      # to spill, DuckDB fails to write the spill file and the OS OOM-killer
+      # takes the container. Point temp_directory at a writable path so
+      # memory_limit actually clamps the working set.
+      temp_dir = ENV.fetch("DUCKDB_TEMP_DIR", Rails.root.join("storage", "duckdb_tmp").to_s)
+      FileUtils.mkdir_p(temp_dir)
+      conn.execute("SET temp_directory = '#{quote(temp_dir)}'")
+
       # DuckLake commits a new catalog snapshot per write; under burst load
       # (event/transaction/span ingest from many workers concurrently) the
       # default 10-retry optimistic-concurrency loop exceeds. Bump to 100;
@@ -330,6 +344,23 @@ class ApplicationDucklakeRecord
           "ALTER TABLE #{table} SET PARTITIONED BY (year(timestamp), month(timestamp))"
         )
       end
+    end
+
+    # Sets the catalog-wide retention windows used by CHECKPOINT and the
+    # ducklake_expire_snapshots / ducklake_cleanup_old_files /
+    # ducklake_delete_orphaned_files functions when called without an
+    # explicit older_than arg. Splat doesn't use snapshot history — pages
+    # and MCP tools query current data only — so a tight window keeps
+    # parquet count and disk usage low without risking in-flight readers
+    # (our queries finish in well under a second).
+    CATALOG_RETENTION_WINDOW = "5 minutes"
+
+    def apply_catalog_options!(conn)
+      %w[expire_older_than delete_older_than].each do |opt|
+        conn.execute("CALL #{CATALOG_NAME}.set_option(?, ?)", opt, CATALOG_RETENTION_WINDOW)
+      end
+    rescue => e
+      Rails.logger.warn "[DuckLake] could not set catalog retention options: #{e.class}: #{e.message}"
     end
 
     def current_partition_transforms(conn, table)
