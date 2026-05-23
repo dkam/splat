@@ -31,8 +31,14 @@ module Ingest
         Thread.current[:ingest_tuber_producer] ||= ::Beaneater.new(address)
       end
 
-      def put(tube_name, payload, ttr: DEFAULT_TTR, pri: DEFAULT_PRI, delay: 0)
-        producer.tubes[tube_name].put(JSON.generate(payload), ttr: ttr, pri: pri, delay: delay)
+      # con: / idp: are tuber server extensions (per-key concurrency cap +
+      # idempotency suppression). Tuber rejects unknown opts on vanilla
+      # beanstalkd, so callers omit them unless they want the behavior.
+      def put(tube_name, payload, ttr: DEFAULT_TTR, pri: DEFAULT_PRI, delay: 0, con: nil, idp: nil)
+        opts = { ttr: ttr, pri: pri, delay: delay }
+        opts[:con] = con unless con.nil?
+        opts[:idp] = idp unless idp.nil?
+        producer.tubes[tube_name].put(JSON.generate(payload), **opts)
       end
 
       # Consumers WATCH tubes; producers USE them. Keeping the consumer on its

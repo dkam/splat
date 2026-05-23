@@ -46,9 +46,14 @@ module Ingest
     end
 
     def forward_to_mirror(transactions, span_rows)
-      Tuber.put(Tuber::DUCKLAKE_TRANSACTIONS_TUBE,
-                { rows: transactions.map(&:to_ducklake_row) }) if transactions.any?
-      Tuber.put(Tuber::DUCKLAKE_SPANS_TUBE, { rows: span_rows }) if span_rows.any?
+      if transactions.any?
+        Tuber.put(Tuber::DUCKLAKE_TRANSACTIONS_TUBE,
+                  { table: "transactions", rows: transactions.map(&:to_ducklake_row) })
+      end
+      if span_rows.any?
+        Tuber.put(Tuber::DUCKLAKE_SPANS_TUBE,
+                  { table: "spans", rows: span_rows })
+      end
     rescue => e
       log_exception("[#{self.class.name}] mirror forward failed", e)
     end
