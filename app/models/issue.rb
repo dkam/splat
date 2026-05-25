@@ -29,15 +29,15 @@ class Issue < ApplicationRecord
     broadcast_refresh_to(project, "issues")
   }, if: :saved_change_to_status?
 
-  def self.group_event(event_payload, project)
+  def self.group_event(event_payload, project, timestamp: Time.current)
     fingerprint = generate_fingerprint(event_payload)
     attempts = 0
     begin
       find_or_create_by!(project: project, fingerprint: fingerprint) do |issue|
         issue.title = extract_title(event_payload)
         issue.exception_type = extract_exception_type(event_payload)
-        issue.first_seen = Time.current
-        issue.last_seen = Time.current
+        issue.first_seen = timestamp
+        issue.last_seen = timestamp
         issue.status = :open
       end
     rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid

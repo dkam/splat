@@ -209,4 +209,39 @@ class EventTest < ActiveSupport::TestCase
 
     assert_equal "Something unexpected happened", event.issue.title
   end
+
+  test "create_from_sentry_payload! advances issue.last_seen to newest event timestamp" do
+    base_payload = {
+      "exception" => {
+        "values" => [
+          { "type" => "RuntimeError", "value" => "boom",
+            "stacktrace" => { "frames" => [ { "filename" => "a.rb", "lineno" => 1 } ] } }
+        ]
+      },
+      "platform" => "ruby"
+    }
+
+    first  = Event.create_from_sentry_payload!("ev-old", base_payload.merge("timestamp" => "2025-10-18T08:00:00Z"), @project)
+    second = Event.create_from_sentry_payload!("ev-new", base_payload.merge("timestamp" => "2025-10-18T12:00:00Z"), @project)
+
+    assert_equal first.issue_id, second.issue_id
+    assert_in_delta second.timestamp.to_f, first.issue.reload.last_seen.to_f, 0.001
+  end
+
+  test "create_from_sentry_payload! does not regress issue.last_seen on out-of-order events" do
+    base_payload = {
+      "exception" => {
+        "values" => [
+          { "type" => "RuntimeError", "value" => "boom",
+            "stacktrace" => { "frames" => [ { "filename" => "a.rb", "lineno" => 1 } ] } }
+        ]
+      },
+      "platform" => "ruby"
+    }
+
+    newer = Event.create_from_sentry_payload!("ev-new", base_payload.merge("timestamp" => "2025-10-18T12:00:00Z"), @project)
+    Event.create_from_sentry_payload!("ev-old", base_payload.merge("timestamp" => "2025-10-18T08:00:00Z"), @project)
+
+    assert_in_delta newer.timestamp.to_f, newer.issue.reload.last_seen.to_f, 0.001
+  end
 end

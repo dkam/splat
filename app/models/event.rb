@@ -26,15 +26,17 @@ class Event < ApplicationRecord
   before_validation :extract_fields_from_payload
 
   def self.create_from_sentry_payload!(event_id, payload, project)
+    timestamp = parse_timestamp(payload["timestamp"])
+
     # Find or create the issue for grouping
-    issue = Issue.group_event(payload, project)
+    issue = Issue.group_event(payload, project, timestamp: timestamp)
 
     # Create the event
-    create!(
+    event = create!(
       project: project,
       event_id: event_id,
       issue: issue,
-      timestamp: parse_timestamp(payload["timestamp"]),
+      timestamp: timestamp,
       payload: payload,
       platform: payload["platform"],
       sdk_name: payload.dig("sdk", "name"),
@@ -44,6 +46,14 @@ class Event < ApplicationRecord
       server_name: payload["server_name"],
       transaction_name: payload["transaction"]
     )
+
+    # counter_cache bumps issue.count, but last_seen has no auto-update.
+    # Conditional WHERE keeps out-of-order events from clobbering a newer timestamp.
+    Issue.where(id: issue.id)
+         .where("last_seen < ?", event.timestamp)
+         .update_all(last_seen: event.timestamp, updated_at: Time.current)
+
+    event
   end
 
   def self.parse_timestamp(timestamp)
