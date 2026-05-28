@@ -41,6 +41,18 @@ class IssuesController < ApplicationController
 
   def show
     @events = @issue.events.recent.limit(50)
+
+    @spark_range = 7.days.ago..Time.current
+    @spark_buckets = 168
+    @spark_counts = DuckLake::Event.event_counts_by_bucket(
+      issue_ids: [@issue.id],
+      time_range: @spark_range,
+      buckets: @spark_buckets,
+      project_id: @project.id
+    )[@issue.id]
+    @deploy_markers = @project.releases
+      .where(first_seen_at: @spark_range)
+      .pluck(:first_seen_at)
   end
 
   def resolve

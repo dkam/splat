@@ -91,6 +91,21 @@
     </div>
   </div>
 
+  <!-- 7-day event volume -->
+  <% if @spark_counts.any? { |v| v.to_i.positive? } %>
+    <div class="mb-8 bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="flex justify-between items-baseline mb-3">
+        <h2 class="text-sm font-medium text-gray-600 dark:text-gray-400">Events · last 7 days</h2>
+        <span class="text-xs text-gray-500 dark:text-gray-400">peak <%= number_with_delimiter(@spark_counts.max) %> / hr</span>
+      </div>
+      <div class="text-blue-500 dark:text-blue-400 [&_svg]:w-full [&_svg]:h-20" title="Events per hour, last 7 days. Dashed lines = deploys.">
+        <%= sparkline(@spark_counts, width: 600, height: 80,
+            title: "#{number_with_delimiter(@spark_counts.sum)} events in last 7 days — peak #{number_with_delimiter(@spark_counts.max)} / hr",
+            markers: @deploy_markers, time_range: @spark_range) %>
+      </div>
+    </div>
+  <% end %>
+
   <!-- Releases -->
   <% if @issue.first_seen_release.present? || @issue.last_seen_release.present? %>
     <% regression = @issue.first_seen_release.present? &&
