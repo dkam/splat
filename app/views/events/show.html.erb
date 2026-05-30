@@ -53,22 +53,22 @@
     </div>
   <% end %>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- Tags -->
-    <% if @event.tags.present? && @event.tags.any? %>
-      <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Tags</h2>
-        <dl class="space-y-2">
-          <% @event.tags.each do |key, value| %>
-            <div class="flex justify-between text-sm">
-              <dt class="text-gray-600 dark:text-gray-400 font-medium"><%= key %></dt>
-              <dd class="text-gray-900 dark:text-gray-100 font-mono"><%= value %></dd>
-            </div>
-          <% end %>
-        </dl>
-      </div>
-    <% end %>
+  <!-- Tags -->
+  <% if @event.tags.present? && @event.tags.any? %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Tags</h2>
+      <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
+        <% @event.tags.each do |key, value| %>
+          <div class="flex justify-between text-sm gap-3">
+            <dt class="text-gray-600 dark:text-gray-400 font-medium"><%= key %></dt>
+            <dd class="text-gray-900 dark:text-gray-100 font-mono truncate"><%= value %></dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+  <% end %>
 
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <!-- Request Info -->
     <% if @event.request.present? && @event.request.any? %>
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
@@ -118,6 +118,29 @@
       </div>
     <% end %>
 
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 items-start">
+    <!-- Breadcrumbs -->
+    <% if @event.breadcrumbs.present? && @event.breadcrumbs.any? %>
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Breadcrumbs</h2>
+        <div class="space-y-2">
+          <% @event.breadcrumbs.each do |breadcrumb| %>
+            <div class="flex items-start gap-4 text-sm py-2 border-l-2 border-gray-300 dark:border-gray-700 pl-3">
+              <span class="text-gray-500 dark:text-gray-400 font-mono text-xs min-w-[140px]">
+                <%= Time.at(breadcrumb["timestamp"]).strftime("%H:%M:%S.%L") rescue breadcrumb["timestamp"] %>
+              </span>
+              <span class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 rounded min-w-[80px] text-center">
+                <%= breadcrumb["category"] || breadcrumb["type"] %>
+              </span>
+              <span class="text-gray-900 dark:text-gray-100 flex-1"><%= breadcrumb["message"] || breadcrumb["data"] %></span>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
     <!-- Contexts -->
     <% if @event.contexts.present? && @event.contexts.any? %>
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
@@ -144,26 +167,6 @@
       </div>
     <% end %>
   </div>
-
-  <!-- Breadcrumbs -->
-  <% if @event.breadcrumbs.present? && @event.breadcrumbs.any? %>
-    <div class="mt-6 bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
-      <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Breadcrumbs</h2>
-      <div class="space-y-2">
-        <% @event.breadcrumbs.each do |breadcrumb| %>
-          <div class="flex items-start gap-4 text-sm py-2 border-l-2 border-gray-300 dark:border-gray-700 pl-3">
-            <span class="text-gray-500 dark:text-gray-400 font-mono text-xs min-w-[140px]">
-              <%= Time.at(breadcrumb["timestamp"]).strftime("%H:%M:%S.%L") rescue breadcrumb["timestamp"] %>
-            </span>
-            <span class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 rounded min-w-[80px] text-center">
-              <%= breadcrumb["category"] || breadcrumb["type"] %>
-            </span>
-            <span class="text-gray-900 dark:text-gray-100 flex-1"><%= breadcrumb["message"] || breadcrumb["data"] %></span>
-          </div>
-        <% end %>
-      </div>
-    </div>
-  <% end %>
 
   <!-- Stacktrace -->
   <% if @event.stacktrace.present? %>
