@@ -21,7 +21,10 @@
         <% if @event.environment.present? %>
           <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded"><%= @event.environment %></span>
         <% end %>
-        <span><%= @event.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %></span>
+        <span>
+          <%= @event.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %>
+          <span class="text-gray-500 dark:text-gray-500">&mdash; <%= time_ago_in_words(@event.timestamp) %> ago</span>
+        </span>
       </div>
     </div>
 
@@ -47,40 +50,6 @@
       <% if exception[:value].present? %>
         <p class="text-red-800 dark:text-red-200 font-mono text-sm"><%= exception[:value] %></p>
       <% end %>
-    </div>
-  <% end %>
-
-  <!-- Stacktrace -->
-  <% if @event.stacktrace.present? %>
-    <div class="mb-6">
-      <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Stack Trace</h2>
-      <div class="bg-gray-900 dark:bg-black rounded-lg p-4 overflow-x-auto border border-gray-800 dark:border-gray-700">
-        <% frames = @event.stacktrace["frames"] || [] %>
-        <% frames.reverse.each_with_index do |frame, index| %>
-          <div class="mb-3 font-mono text-sm <%= frame['in_app'] ? 'text-red-400' : 'text-gray-400' %>">
-            <div class="flex items-start gap-3">
-              <span class="text-gray-500 min-w-[2rem] text-right"><%= index + 1 %></span>
-              <div class="flex-1">
-                <div>
-                  <span class="text-blue-300"><%= frame["filename"] || "unknown" %></span>
-                  <% if frame["lineno"] %>
-                    <span class="text-gray-500">:<%= frame["lineno"] %></span>
-                    <% if frame["colno"] %>
-                      <span class="text-gray-500">:<%= frame["colno"] %></span>
-                    <% end %>
-                  <% end %>
-                </div>
-                <% if frame["function"] %>
-                  <div class="text-yellow-300">in <%= frame["function"] %></div>
-                <% end %>
-                <% if frame["context_line"] %>
-                  <div class="mt-1 text-gray-300"><%= frame["context_line"].strip %></div>
-                <% end %>
-              </div>
-            </div>
-          </div>
-        <% end %>
-      </div>
     </div>
   <% end %>
 
@@ -190,6 +159,40 @@
               <%= breadcrumb["category"] || breadcrumb["type"] %>
             </span>
             <span class="text-gray-900 dark:text-gray-100 flex-1"><%= breadcrumb["message"] || breadcrumb["data"] %></span>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <!-- Stacktrace -->
+  <% if @event.stacktrace.present? %>
+    <div class="mt-6">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Stack Trace</h2>
+      <div class="bg-gray-900 dark:bg-black rounded-lg p-4 overflow-x-auto border border-gray-800 dark:border-gray-700">
+        <% frames = @event.stacktrace["frames"] || [] %>
+        <% frames.reverse.each_with_index do |frame, index| %>
+          <div class="mb-3 font-mono text-sm <%= frame['in_app'] ? 'text-red-400' : 'text-gray-400' %>">
+            <div class="flex items-start gap-3">
+              <span class="text-gray-500 min-w-[2rem] text-right"><%= index + 1 %></span>
+              <div class="flex-1">
+                <div>
+                  <span class="text-blue-300"><%= frame["filename"] || "unknown" %></span>
+                  <% if frame["lineno"] %>
+                    <span class="text-gray-500">:<%= frame["lineno"] %></span>
+                    <% if frame["colno"] %>
+                      <span class="text-gray-500">:<%= frame["colno"] %></span>
+                    <% end %>
+                  <% end %>
+                </div>
+                <% if frame["function"] %>
+                  <div class="text-yellow-300">in <%= frame["function"] %></div>
+                <% end %>
+                <% if frame["context_line"] %>
+                  <div class="mt-1 text-gray-300"><%= frame["context_line"].strip %></div>
+                <% end %>
+              </div>
+            </div>
           </div>
         <% end %>
       </div>
