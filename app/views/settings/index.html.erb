@@ -6,8 +6,8 @@
 
   <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <div class="text-sm text-gray-500 dark:text-gray-400">Postgres total</div>
-      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@postgres_total) %></div>
+      <div class="text-sm text-gray-500 dark:text-gray-400">SQLite total</div>
+      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@sqlite_total) %></div>
     </div>
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <div class="text-sm text-gray-500 dark:text-gray-400">DuckLake parquet total</div>
@@ -18,15 +18,15 @@
     </div>
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <div class="text-sm text-gray-500 dark:text-gray-400">Grand total</div>
-      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@postgres_total + @ducklake_total + @ducklake_delete_total) %></div>
+      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@sqlite_total + @ducklake_total + @ducklake_delete_total) %></div>
     </div>
   </div>
 
   <details class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-4 overflow-hidden group">
     <summary class="px-6 py-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 list-none">
       <div>
-        <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">Postgres tables</h2>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Primary <code>splat</code> database — public schema only. Row counts are planner estimates from <code>pg_class.reltuples</code>.</p>
+        <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">SQLite tables</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Primary <code>splat</code> database. Per-page bytes from the <code>dbstat</code> virtual table.</p>
       </div>
       <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform group-open:rotate-90 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
@@ -36,14 +36,14 @@
       <thead class="bg-gray-50 dark:bg-gray-800/50">
         <tr>
           <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rows (est.)</th>
+          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rows</th>
           <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table size</th>
           <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Indexes</th>
           <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-        <% @postgres_tables.each do |t| %>
+        <% @sqlite_tables.each do |t| %>
           <tr>
             <td class="px-6 py-3 text-sm font-mono text-gray-900 dark:text-gray-100"><%= t[:name] %></td>
             <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_with_delimiter(t[:row_estimate]) %></td>
