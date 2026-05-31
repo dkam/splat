@@ -5,7 +5,7 @@
 # tuber instance name are all suffixed/offset to avoid collision.
 # Run with:
 #
-#   docker compose -f compose.production.yml -p splat-sqlite up -d
+#   docker compose -f compose.production.yml -p splat-booko-sqlite up -d
 #
 # Required .env vars: HOST, HOST_IP, SECRET_KEY_BASE, SPLAT_HOST,
 # SPLAT_INTERNAL_HOST, SPLAT_ADMIN_EMAILS, SPLAT_EMAIL_FROM, SMTP_*,
@@ -57,7 +57,7 @@ x-splat-worker: &splat-worker
   depends_on:
     - tuber
   volumes:
-    - /storage/splat-sqlite/storage:/rails/storage
+    - /storage/splat-booko-sqlite/storage:/rails/storage
   environment:
     <<: *common-variables
   logging:
@@ -78,8 +78,8 @@ services:
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
     volumes:
-      - /storage/splat-sqlite/storage:/rails/storage
-      - /storage/splat-sqlite/logs/web:/rails/log
+      - /storage/splat-booko-sqlite/storage:/rails/storage
+      - /storage/splat-booko-sqlite/logs/web:/rails/log
     ports:
       - "${HOST_IP}:3031:3000"
     depends_on:
@@ -93,20 +93,20 @@ services:
 
   ingest:
     <<: *splat-worker
-    container_name: splat-sqlite-ingest
+    container_name: splat-booko-sqlite-ingest
     command: bin/ingest_worker
     volumes:
-      - /storage/splat-sqlite/storage:/rails/storage
-      - /storage/splat-sqlite/logs/ingest:/rails/log
+      - /storage/splat-booko-sqlite/storage:/rails/storage
+      - /storage/splat-booko-sqlite/logs/ingest:/rails/log
     mem_limit: 512M
 
   ducklake:
     <<: *splat-worker
-    container_name: splat-sqlite-ducklake
+    container_name: splat-booko-sqlite-ducklake
     command: bin/ducklake_worker
     volumes:
-      - /storage/splat-sqlite/storage:/rails/storage
-      - /storage/splat-sqlite/logs/ducklake:/rails/log
+      - /storage/splat-booko-sqlite/storage:/rails/storage
+      - /storage/splat-booko-sqlite/logs/ducklake:/rails/log
     # With DUCKDB_MEMORY_LIMIT=256MB × 5 connections = 1.28GB DuckDB
     # ceiling, plus Ruby + reserved tube bodies (DUCKLAKE_MIRROR_BATCH_SIZE=100)
     # ≈ 500MB-1GB more, this fits well under 2GB.
@@ -120,11 +120,11 @@ services:
 
   scheduler:
     <<: *splat-worker
-    container_name: splat-sqlite-scheduler
+    container_name: splat-booko-sqlite-scheduler
     command: bin/scheduler
     volumes:
-      - /storage/splat-sqlite/storage:/rails/storage
-      - /storage/splat-sqlite/logs/scheduler:/rails/log
+      - /storage/splat-booko-sqlite/storage:/rails/storage
+      - /storage/splat-booko-sqlite/logs/scheduler:/rails/log
     mem_limit: 128M
 
   tuber:
@@ -136,7 +136,7 @@ services:
       - "${HOST}:11331:11300"           # protocol — distinct host port from the PG-flavour tuber (11330)
       - "${HOST}:9131:9100"             # metrics — Prometheus / Uptime Kuma reachable here
     volumes:
-      - /storage/splat-sqlite/storage/tuber:/var/lib/tuber/binlog
+      - /storage/splat-booko-sqlite/storage/tuber:/var/lib/tuber/binlog
     restart: unless-stopped
     mem_limit: 1500M
     ulimits:
@@ -144,7 +144,7 @@ services:
         soft: 65536
         hard: 65536
     environment:
-      - TUBER_NAME=splat-sqlite         # distinct from the PG-flavour tuber; shows in metrics + tuber-tui
+      - TUBER_NAME=splat-booko-sqlite         # distinct from the PG-flavour tuber; shows in metrics + tuber-tui
       - TUBER_LISTEN=0.0.0.0
       - TUBER_PORT=11300
       - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
