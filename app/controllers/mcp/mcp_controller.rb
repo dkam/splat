@@ -1060,8 +1060,8 @@ module Mcp
           result += "### Event #{index + 1}\n"
           result += "**Event ID:** #{event.event_id}\n"
           result += "**Timestamp:** #{event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
-          result += "**Environment:** #{event.payload['environment']}\n" if event.payload["environment"]
-          result += "**Server:** #{event.payload['server_name']}\n" if event.payload["server_name"]
+          result += "**Environment:** #{event.environment}\n" if event.environment.present?
+          result += "**Server:** #{event.server_name}\n" if event.server_name.present?
           result += "\n"
         end
       end

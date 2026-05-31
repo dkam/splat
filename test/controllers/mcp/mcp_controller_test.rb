@@ -56,6 +56,36 @@ module Mcp
       end
     end
 
+    test "get_issue_events does not crash when an event payload is nil" do
+      # Old events can have payload purged by retention while the event row stays.
+      # format_issue_events used to dig into event.payload['environment'] and
+      # raise 'undefined method [] for nil'. The fix reads denormalized columns.
+      project = projects(:one)
+      issue = Issue.create!(
+        project: project,
+        fingerprint: "purged-payload-test",
+        title: "Test",
+        first_seen: 2.weeks.ago,
+        last_seen: 2.weeks.ago
+      )
+      Event.create!(
+        project: project,
+        issue: issue,
+        event_id: SecureRandom.uuid,
+        timestamp: 2.weeks.ago,
+        environment: "production",
+        server_name: "test-host",
+        payload: nil
+      )
+
+      call_tool("get_issue_events", { "issue_id" => issue.id })
+      assert_response :success
+      body = JSON.parse(response.body)
+      text = body.dig("result", "content", 0, "text").to_s
+      assert_match(/Environment:.*production/, text)
+      assert_match(/Server:.*test-host/, text)
+    end
+
     private
 
     def call_tool(name, arguments)
