@@ -1,8 +1,11 @@
-# Production docker-compose for splat — web + tuber + three worker sidecars
-# (ingest, ducklake, scheduler), replacing the old single Solid Queue `jobs`
-# service. Run with:
+# Production docker-compose for splat (SQLite flavour) — web + tuber + three
+# worker sidecars (ingest, ducklake, scheduler), replacing the old single
+# Solid Queue `jobs` service. Designed to run alongside the PG flavour on
+# the same host, so volume paths, container names, host ports, and the
+# tuber instance name are all suffixed/offset to avoid collision.
+# Run with:
 #
-#   docker compose -f compose.production.yml up -d
+#   docker compose -f compose.production.yml -p splat-sqlite up -d
 #
 # Required .env vars: HOST, HOST_IP, SECRET_KEY_BASE, SPLAT_HOST,
 # SPLAT_INTERNAL_HOST, SPLAT_ADMIN_EMAILS, SPLAT_EMAIL_FROM, SMTP_*,
@@ -49,12 +52,12 @@ x-common-variables: &common-variables
   TUBER_URL: tuber:11300
 
 x-splat-worker: &splat-worker
-  image: reg.tbdb.info/splat:latest
+  image: reg.tbdb.info/splat:sqlite-latest
   restart: unless-stopped
   depends_on:
     - tuber
   volumes:
-    - /storage/splat/storage:/rails/storage
+    - /storage/splat-sqlite/storage:/rails/storage
   environment:
     <<: *common-variables
   logging:
@@ -65,7 +68,7 @@ x-splat-worker: &splat-worker
 
 services:
   web:
-    image: reg.tbdb.info/splat:latest
+    image: reg.tbdb.info/splat:sqlite-latest
     environment:
       <<: *common-variables
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
@@ -75,10 +78,10 @@ services:
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/web:/rails/log
+      - /storage/splat-sqlite/storage:/rails/storage
+      - /storage/splat-sqlite/logs/web:/rails/log
     ports:
-      - "${HOST_IP}:3030:3000"
+      - "${HOST_IP}:3031:3000"
     depends_on:
       - tuber
     restart: unless-stopped
@@ -90,20 +93,20 @@ services:
 
   ingest:
     <<: *splat-worker
-    container_name: splat-ingest
+    container_name: splat-sqlite-ingest
     command: bin/ingest_worker
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/ingest:/rails/log
+      - /storage/splat-sqlite/storage:/rails/storage
+      - /storage/splat-sqlite/logs/ingest:/rails/log
     mem_limit: 512M
 
   ducklake:
     <<: *splat-worker
-    container_name: splat-ducklake
+    container_name: splat-sqlite-ducklake
     command: bin/ducklake_worker
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/ducklake:/rails/log
+      - /storage/splat-sqlite/storage:/rails/storage
+      - /storage/splat-sqlite/logs/ducklake:/rails/log
     # With DUCKDB_MEMORY_LIMIT=256MB × 5 connections = 1.28GB DuckDB
     # ceiling, plus Ruby + reserved tube bodies (DUCKLAKE_MIRROR_BATCH_SIZE=100)
     # ≈ 500MB-1GB more, this fits well under 2GB.
@@ -117,11 +120,11 @@ services:
 
   scheduler:
     <<: *splat-worker
-    container_name: splat-scheduler
+    container_name: splat-sqlite-scheduler
     command: bin/scheduler
     volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/scheduler:/rails/log
+      - /storage/splat-sqlite/storage:/rails/storage
+      - /storage/splat-sqlite/logs/scheduler:/rails/log
     mem_limit: 128M
 
   tuber:
@@ -130,10 +133,10 @@ services:
     # it prints help and exits. Env vars only populate flag values.
     command: server
     ports:
-      - "${HOST}:11330:11300"           # protocol — distinct host port from any other tuber instance
-      - "${HOST}:9130:9100"             # metrics — Prometheus / Uptime Kuma reachable here
+      - "${HOST}:11331:11300"           # protocol — distinct host port from the PG-flavour tuber (11330)
+      - "${HOST}:9131:9100"             # metrics — Prometheus / Uptime Kuma reachable here
     volumes:
-      - /storage/splat/storage/tuber:/var/lib/tuber/binlog
+      - /storage/splat-sqlite/storage/tuber:/var/lib/tuber/binlog
     restart: unless-stopped
     mem_limit: 1500M
     ulimits:
@@ -141,7 +144,7 @@ services:
         soft: 65536
         hard: 65536
     environment:
-      - TUBER_NAME=splat                # distinct from the other tuber's name; shows in metrics + tuber-tui
+      - TUBER_NAME=splat-sqlite         # distinct from the PG-flavour tuber; shows in metrics + tuber-tui
       - TUBER_LISTEN=0.0.0.0
       - TUBER_PORT=11300
       - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
