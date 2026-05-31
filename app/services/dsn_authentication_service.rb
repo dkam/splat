@@ -69,7 +69,8 @@ class DsnAuthenticationService
   def self.validate_project_access!(public_key, project_id)
     return nil if public_key.blank? || project_id.blank?
 
-    project = Project.find_by_project_id(project_id)
+    project = Project.find_by_project_id(project_id) ||
+              auto_create_project(project_id, public_key)
     raise AuthenticationError, 'Invalid project ID' unless project
 
     unless project.public_key == public_key
@@ -78,5 +79,40 @@ class DsnAuthenticationService
     end
 
     project
+  end
+
+  # Slug shape required for auto-create: starts with a lowercase letter, only
+  # lowercase letters, digits, hyphens, underscores; max 64 chars. Must start
+  # with a letter so a stray numeric project_id can't accidentally spawn a
+  # slug-shaped project that shadows the numeric-id lookup.
+  AUTO_CREATE_SLUG = /\A[a-z][a-z0-9_-]{0,63}\z/.freeze
+
+  # Auto-create a project when the inbound DSN points at an unknown slug,
+  # gated by SPLAT_AUTO_CREATE_SLUGS env. The env value is a comma-separated
+  # list of allowed slugs; the literal "*" allows any slug that matches the
+  # shape regex above. Unset/empty disables auto-create entirely.
+  def self.auto_create_project(slug, public_key)
+    return nil unless slug.is_a?(String) && slug.match?(AUTO_CREATE_SLUG)
+    return nil unless auto_create_allowed?(slug)
+
+    project = Project.create!(
+      name: slug.titleize,
+      slug: slug,
+      public_key: public_key
+    )
+    Rails.logger.warn "[DsnAuthenticationService] auto-created project slug=#{slug} (SPLAT_AUTO_CREATE_SLUGS)"
+    project
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+    # Another request created it concurrently, or public_key collides with an
+    # existing project's key. Fall back to a lookup — the caller will then
+    # re-check the public_key match and reject if it doesn't line up.
+    Project.find_by(slug: slug)
+  end
+
+  def self.auto_create_allowed?(slug)
+    allowed = ENV['SPLAT_AUTO_CREATE_SLUGS'].to_s.split(',').map(&:strip).reject(&:empty?)
+    return false if allowed.empty?
+    return true if allowed.include?('*')
+    allowed.include?(slug)
   end
 end

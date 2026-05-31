@@ -85,4 +85,99 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
 
     assert_nil extracted_key
   end
+
+  test "auto-create disabled when SPLAT_AUTO_CREATE_SLUGS unset" do
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "fresh-key"
+
+    with_env('SPLAT_AUTO_CREATE_SLUGS' => nil) do
+      assert_raises(DsnAuthenticationService::AuthenticationError) do
+        DsnAuthenticationService.authenticate(request, "brand-new-app")
+      end
+    end
+    assert_nil Project.find_by(slug: "brand-new-app")
+  end
+
+  test "auto-create disabled when SPLAT_AUTO_CREATE_SLUGS is empty" do
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "fresh-key"
+
+    with_env('SPLAT_AUTO_CREATE_SLUGS' => '') do
+      assert_raises(DsnAuthenticationService::AuthenticationError) do
+        DsnAuthenticationService.authenticate(request, "brand-new-app")
+      end
+    end
+    assert_nil Project.find_by(slug: "brand-new-app")
+  end
+
+  test "auto-creates project when slug is in SPLAT_AUTO_CREATE_SLUGS list" do
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "baffle-key-abc"
+
+    project = with_env('SPLAT_AUTO_CREATE_SLUGS' => 'baffle,other') do
+      DsnAuthenticationService.authenticate(request, "baffle")
+    end
+
+    assert_equal "baffle", project.slug
+    assert_equal "baffle-key-abc", project.public_key
+  end
+
+  test "auto-creates project when SPLAT_AUTO_CREATE_SLUGS is wildcard" do
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "anything-key"
+
+    project = with_env('SPLAT_AUTO_CREATE_SLUGS' => '*') do
+      DsnAuthenticationService.authenticate(request, "some-new-app")
+    end
+
+    assert_equal "some-new-app", project.slug
+    assert_equal "anything-key", project.public_key
+  end
+
+  test "auto-create rejects slug not in allowlist" do
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "fresh-key"
+
+    with_env('SPLAT_AUTO_CREATE_SLUGS' => 'baffle') do
+      assert_raises(DsnAuthenticationService::AuthenticationError) do
+        DsnAuthenticationService.authenticate(request, "not-allowed")
+      end
+    end
+    assert_nil Project.find_by(slug: "not-allowed")
+  end
+
+  test "auto-create rejects malformed slug even with wildcard" do
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "fresh-key"
+
+    with_env('SPLAT_AUTO_CREATE_SLUGS' => '*') do
+      assert_raises(DsnAuthenticationService::AuthenticationError) do
+        DsnAuthenticationService.authenticate(request, "Has Spaces")
+      end
+    end
+    assert_nil Project.find_by(slug: "Has Spaces")
+  end
+
+  test "auto-create rejects numeric project id even with wildcard" do
+    # Numeric IDs hit find_by_project_id's id-based fallback, never auto-create.
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = "fresh-key"
+
+    with_env('SPLAT_AUTO_CREATE_SLUGS' => '*') do
+      assert_raises(DsnAuthenticationService::AuthenticationError) do
+        DsnAuthenticationService.authenticate(request, "9999")
+      end
+    end
+  end
+
+  private
+
+  def with_env(vars)
+    previous = vars.transform_values { |_| nil }
+    vars.each { |k, _| previous[k] = ENV[k] }
+    vars.each { |k, v| ENV[k] = v }
+    yield
+  ensure
+    previous.each { |k, v| ENV[k] = v }
+  end
 end

@@ -56,6 +56,10 @@ class Setting < ApplicationRecord
     ducklake_spans_retention_days.days.ago
   end
 
+  def forwarding?
+    forward_dsn.present?
+  end
+
   # Validation
   validates :event_payloads_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
   validates :events_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
@@ -65,4 +69,15 @@ class Setting < ApplicationRecord
   validates :ducklake_transactions_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :ducklake_issues_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :ducklake_spans_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
+  validate :forward_dsn_parseable
+
+  private
+
+  def forward_dsn_parseable
+    return if forward_dsn.blank?
+
+    EnvelopeForwarder.parse_dsn(forward_dsn)
+  rescue EnvelopeForwarder::InvalidDsn => e
+    errors.add(:forward_dsn, e.message)
+  end
 end

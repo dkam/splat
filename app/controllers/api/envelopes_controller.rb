@@ -56,6 +56,8 @@ class Api::EnvelopesController < ApplicationController
 
     SentryProtocol::EnvelopeProcessor.new(raw_body, project).process
 
+    EnvelopeForwarder.forward(raw_body, project: project, content_type: request.content_type || "application/x-sentry-envelope")
+
     # Always return 200 OK to avoid client retries
     head :ok
   rescue DsnAuthenticationService::AuthenticationError => e
