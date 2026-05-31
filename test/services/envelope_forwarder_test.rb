@@ -57,4 +57,26 @@ class EnvelopeForwarderTest < ActiveSupport::TestCase
       EnvelopeForwarder.forward("raw-body", project: @project)
     end
   end
+
+  test "outbound_request includes SPLAT_FORWARDER_TOKEN when set" do
+    previous = ENV['SPLAT_FORWARDER_TOKEN']
+    ENV['SPLAT_FORWARDER_TOKEN'] = 'shared-secret'
+    begin
+      req = EnvelopeForwarder.outbound_request("https://x@target.example/y", @project)
+      assert_equal 'shared-secret', req[:forwarder_token]
+    ensure
+      ENV['SPLAT_FORWARDER_TOKEN'] = previous
+    end
+  end
+
+  test "outbound_request returns nil forwarder_token when env not set" do
+    previous = ENV['SPLAT_FORWARDER_TOKEN']
+    ENV.delete('SPLAT_FORWARDER_TOKEN')
+    begin
+      req = EnvelopeForwarder.outbound_request("https://x@target.example/y", @project)
+      assert_nil req[:forwarder_token]
+    ensure
+      ENV['SPLAT_FORWARDER_TOKEN'] = previous if previous
+    end
+  end
 end

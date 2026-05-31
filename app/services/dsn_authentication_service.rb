@@ -1,9 +1,32 @@
 # frozen_string_literal: true
 
 # Service for authenticating DSN (Data Source Name) requests
-# Follows Sentry protocol for extracting and validating authentication credentials
+# Follows Sentry protocol for extracting and validating authentication credentials.
+#
+# Two auth modes:
+#
+# 1. Direct client (default): Sentry-protocol DSN auth. The client supplies its
+#    project's public_key via X-Sentry-Auth / Authorization / ?sentry_key=, and
+#    we look up the project and require the stored public_key to match.
+#
+# 2. Trusted forwarder (when SPLAT_FORWARDER_TOKEN is set and the request
+#    carries a matching X-Splat-Forwarder-Token header): we trust the upstream
+#    Splat's identification of the project. The public_key in the inbound
+#    X-Sentry-Auth becomes the *seed* for an auto-created project if the slug
+#    is unknown, but we do NOT require it to match an existing project's key.
+#    This breaks the cross-instance key-sync requirement that direct-mode DSN
+#    auth would otherwise impose on a forwarding chain.
 class DsnAuthenticationService
   class AuthenticationError < StandardError; end
+
+  # Header used by EnvelopeForwarder to declare a trusted-forwarder hop.
+  FORWARDER_TOKEN_HEADER = 'X-Splat-Forwarder-Token'
+
+  # Slug shape required for forwarder-driven auto-create: starts with a
+  # lowercase letter, only lowercase letters/digits/hyphens/underscores;
+  # max 64 chars. Leading-letter rule prevents a numeric project_id from
+  # shadowing the id-based lookup with a slug-shaped project.
+  AUTO_CREATE_SLUG = /\A[a-z][a-z0-9_-]{0,63}\z/.freeze
 
   # Supported authentication methods per Sentry protocol
   # 1. Query parameter: ?sentry_key=public_key
@@ -11,7 +34,12 @@ class DsnAuthenticationService
   # 3. Authorization header (Bearer token or custom format)
   def self.authenticate(request, project_id)
     public_key = extract_public_key(request)
-    validate_project_access!(public_key, project_id)
+
+    if trusted_forwarder?(request)
+      authenticate_via_forwarder(project_id, public_key)
+    else
+      validate_project_access!(public_key, project_id)
+    end
   end
 
   # Extract public key from various authentication sources
@@ -36,6 +64,19 @@ class DsnAuthenticationService
     end
 
     raise AuthenticationError, 'Unable to find authentication information'
+  end
+
+  # Whether the request carries a valid trusted-forwarder token. Constant-time
+  # comparison; returns false unless ENV configures a token and the inbound
+  # header matches it exactly.
+  def self.trusted_forwarder?(request)
+    expected = ENV['SPLAT_FORWARDER_TOKEN']
+    return false if expected.blank?
+
+    provided = request.headers[FORWARDER_TOKEN_HEADER]
+    return false if provided.blank?
+
+    ActiveSupport::SecurityUtils.secure_compare(expected.to_s, provided.to_s)
   end
 
   private
@@ -65,12 +106,12 @@ class DsnAuthenticationService
     nil
   end
 
-  # Validate that the public key has access to the specified project
+  # Validate that the public key has access to the specified project. Used
+  # for direct (un-forwarded) client requests.
   def self.validate_project_access!(public_key, project_id)
     return nil if public_key.blank? || project_id.blank?
 
-    project = Project.find_by_project_id(project_id) ||
-              auto_create_project(project_id, public_key)
+    project = Project.find_by_project_id(project_id)
     raise AuthenticationError, 'Invalid project ID' unless project
 
     unless project.public_key == public_key
@@ -81,38 +122,37 @@ class DsnAuthenticationService
     project
   end
 
-  # Slug shape required for auto-create: starts with a lowercase letter, only
-  # lowercase letters, digits, hyphens, underscores; max 64 chars. Must start
-  # with a letter so a stray numeric project_id can't accidentally spawn a
-  # slug-shaped project that shadows the numeric-id lookup.
-  AUTO_CREATE_SLUG = /\A[a-z][a-z0-9_-]{0,63}\z/.freeze
+  # Forwarder-trusted path: look the project up by id/slug; auto-create if
+  # missing using the inbound public_key as the seed for the new project's
+  # key. We do not require the stored public_key to match the inbound key —
+  # the trust signal is the verified forwarder token, not the per-project
+  # DSN secret (which need not be in sync across instances).
+  def self.authenticate_via_forwarder(project_id, public_key)
+    raise AuthenticationError, 'Missing project ID for forwarded envelope' if project_id.blank?
 
-  # Auto-create a project when the inbound DSN points at an unknown slug,
-  # gated by SPLAT_AUTO_CREATE_SLUGS env. The env value is a comma-separated
-  # list of allowed slugs; the literal "*" allows any slug that matches the
-  # shape regex above. Unset/empty disables auto-create entirely.
-  def self.auto_create_project(slug, public_key)
-    return nil unless slug.is_a?(String) && slug.match?(AUTO_CREATE_SLUG)
-    return nil unless auto_create_allowed?(slug)
+    project = Project.find_by_project_id(project_id)
+    return project if project
 
-    project = Project.create!(
-      name: slug.titleize,
-      slug: slug,
-      public_key: public_key
-    )
-    Rails.logger.warn "[DsnAuthenticationService] auto-created project slug=#{slug} (SPLAT_AUTO_CREATE_SLUGS)"
+    project = auto_create_project(project_id, public_key)
+    raise AuthenticationError, "Cannot auto-create project for slug '#{project_id}'" unless project
+
     project
-  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
-    # Another request created it concurrently, or public_key collides with an
-    # existing project's key. Fall back to a lookup — the caller will then
-    # re-check the public_key match and reject if it doesn't line up.
-    Project.find_by(slug: slug)
   end
 
-  def self.auto_create_allowed?(slug)
-    allowed = ENV['SPLAT_AUTO_CREATE_SLUGS'].to_s.split(',').map(&:strip).reject(&:empty?)
-    return false if allowed.empty?
-    return true if allowed.include?('*')
-    allowed.include?(slug)
+  def self.auto_create_project(slug, public_key)
+    return nil unless slug.is_a?(String) && slug.match?(AUTO_CREATE_SLUG)
+
+    attrs = { name: slug.titleize, slug: slug }
+    attrs[:public_key] = public_key if public_key.present?
+
+    project = Project.create!(attrs)
+    Rails.logger.info "[DsnAuthenticationService] auto-created project slug=#{slug} via trusted forwarder"
+    project
+  rescue ActiveRecord::RecordNotUnique
+    # Another concurrent forward created it; refetch.
+    Project.find_by(slug: slug)
+  rescue ActiveRecord::RecordInvalid => e
+    Rails.logger.warn "[DsnAuthenticationService] failed to auto-create project slug=#{slug}: #{e.message}"
+    nil
   end
 end

@@ -38,6 +38,7 @@ class EnvelopeForwarder
       response = conn.post do |r|
         r.headers["Content-Type"] = content_type
         r.headers["X-Sentry-Auth"] = req[:auth_header]
+        r.headers["X-Splat-Forwarder-Token"] = req[:forwarder_token] if req[:forwarder_token].present?
         r.body = raw_body
       end
 
@@ -50,14 +51,15 @@ class EnvelopeForwarder
       Rails.logger.warn("EnvelopeForwarder: forward failed: #{e.class} #{e.message}")
     end
 
-    # Build the outbound URL + auth header for a given project. Exposed so
-    # tests can verify project identity is preserved without doing a real HTTP
-    # round trip.
+    # Build the outbound URL, X-Sentry-Auth, and optional shared-secret token
+    # for a given project. Exposed so tests can verify forwarding identity
+    # without doing a real HTTP round trip.
     def outbound_request(forward_dsn, project)
       target = parse_dsn(forward_dsn)
       {
         url: target.envelope_url(project.slug),
-        auth_header: auth_header(project.public_key)
+        auth_header: auth_header(project.public_key),
+        forwarder_token: ENV["SPLAT_FORWARDER_TOKEN"]
       }
     end
 

@@ -86,11 +86,12 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
     assert_nil extracted_key
   end
 
-  test "auto-create disabled when SPLAT_AUTO_CREATE_SLUGS unset" do
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "fresh-key"
+  # --- Trusted-forwarder mode -------------------------------------------------
 
-    with_env('SPLAT_AUTO_CREATE_SLUGS' => nil) do
+  test "trusted forwarder header without server token does nothing" do
+    request = make_request(sentry_key: "any-key", forwarder_token: "anything")
+
+    with_env('SPLAT_FORWARDER_TOKEN' => nil) do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "brand-new-app")
       end
@@ -98,59 +99,45 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
     assert_nil Project.find_by(slug: "brand-new-app")
   end
 
-  test "auto-create disabled when SPLAT_AUTO_CREATE_SLUGS is empty" do
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "fresh-key"
+  test "mismatched forwarder token falls through to direct DSN auth" do
+    request = make_request(sentry_key: "wrong-key", forwarder_token: "wrong-token")
 
-    with_env('SPLAT_AUTO_CREATE_SLUGS' => '') do
+    with_env('SPLAT_FORWARDER_TOKEN' => 'correct-token') do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
-        DsnAuthenticationService.authenticate(request, "brand-new-app")
+        DsnAuthenticationService.authenticate(request, @project.slug)
       end
     end
-    assert_nil Project.find_by(slug: "brand-new-app")
   end
 
-  test "auto-creates project when slug is in SPLAT_AUTO_CREATE_SLUGS list" do
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "baffle-key-abc"
+  test "trusted forwarder returns existing project even when public_key mismatches stored key" do
+    # This is the whole point of Model 3: cross-instance key drift becomes a non-issue
+    # for forwarded envelopes — only the forwarder token matters.
+    request = make_request(sentry_key: "totally-different-key", forwarder_token: "T")
 
-    project = with_env('SPLAT_AUTO_CREATE_SLUGS' => 'baffle,other') do
+    project = with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
+      DsnAuthenticationService.authenticate(request, @project.slug)
+    end
+
+    assert_equal @project, project
+    assert_equal "test-public-key-123", project.reload.public_key  # stored key unchanged
+  end
+
+  test "trusted forwarder auto-creates unknown slug using inbound public_key" do
+    request = make_request(sentry_key: "baffle-key-abc", forwarder_token: "T")
+
+    project = with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
       DsnAuthenticationService.authenticate(request, "baffle")
     end
 
     assert_equal "baffle", project.slug
     assert_equal "baffle-key-abc", project.public_key
+    assert_equal "Baffle", project.name
   end
 
-  test "auto-creates project when SPLAT_AUTO_CREATE_SLUGS is wildcard" do
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "anything-key"
+  test "trusted forwarder rejects malformed slug for auto-create" do
+    request = make_request(sentry_key: "any-key", forwarder_token: "T")
 
-    project = with_env('SPLAT_AUTO_CREATE_SLUGS' => '*') do
-      DsnAuthenticationService.authenticate(request, "some-new-app")
-    end
-
-    assert_equal "some-new-app", project.slug
-    assert_equal "anything-key", project.public_key
-  end
-
-  test "auto-create rejects slug not in allowlist" do
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "fresh-key"
-
-    with_env('SPLAT_AUTO_CREATE_SLUGS' => 'baffle') do
-      assert_raises(DsnAuthenticationService::AuthenticationError) do
-        DsnAuthenticationService.authenticate(request, "not-allowed")
-      end
-    end
-    assert_nil Project.find_by(slug: "not-allowed")
-  end
-
-  test "auto-create rejects malformed slug even with wildcard" do
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "fresh-key"
-
-    with_env('SPLAT_AUTO_CREATE_SLUGS' => '*') do
+    with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "Has Spaces")
       end
@@ -158,19 +145,38 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
     assert_nil Project.find_by(slug: "Has Spaces")
   end
 
-  test "auto-create rejects numeric project id even with wildcard" do
-    # Numeric IDs hit find_by_project_id's id-based fallback, never auto-create.
-    request = ActionDispatch::TestRequest.create
-    request.query_parameters[:sentry_key] = "fresh-key"
+  test "trusted forwarder rejects numeric project id" do
+    # Numeric ids hit find_by_project_id's id-based fallback first; if nothing
+    # exists, auto-create's leading-letter regex rejects them.
+    request = make_request(sentry_key: "any-key", forwarder_token: "T")
 
-    with_env('SPLAT_AUTO_CREATE_SLUGS' => '*') do
+    with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "9999")
       end
     end
   end
 
+  test "forwarder token comparison rejects shorter-prefix tokens" do
+    # secure_compare returns false on length mismatch — no early-exit timing leak.
+    request = make_request(sentry_key: "any-key", forwarder_token: "T")
+
+    with_env('SPLAT_FORWARDER_TOKEN' => 'TT') do
+      assert_raises(DsnAuthenticationService::AuthenticationError) do
+        DsnAuthenticationService.authenticate(request, "new-slug")
+      end
+    end
+    assert_nil Project.find_by(slug: "new-slug")
+  end
+
   private
+
+  def make_request(sentry_key:, forwarder_token: nil)
+    request = ActionDispatch::TestRequest.create
+    request.query_parameters[:sentry_key] = sentry_key
+    request.headers[DsnAuthenticationService::FORWARDER_TOKEN_HEADER] = forwarder_token if forwarder_token
+    request
+  end
 
   def with_env(vars)
     previous = vars.transform_values { |_| nil }
