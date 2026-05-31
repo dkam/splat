@@ -81,8 +81,8 @@
     </div>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Error Rate</div>
-      <div class="text-3xl font-bold <%= @project.error_rate > 5 ? 'text-red-600 dark:text-red-400' : @project.error_rate > 1 ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400' %>">
-        <%= @project.error_rate %>%
+      <div class="text-3xl font-bold <%= @error_rate > 5 ? 'text-red-600 dark:text-red-400' : @error_rate > 1 ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400' %>">
+        <%= @error_rate %>%
       </div>
     </div>
   </div>

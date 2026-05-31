@@ -41,6 +41,29 @@ module DuckLake
         (query(sql, *binds).first || {})["c"].to_i
       end
 
+      # Single query returning {total:, errors:} for an optional time/project
+      # filter. Replaces a two-call pattern (count_in_range + error_count_in_range)
+      # used by Project#error_rate — halves DuckLake roundtrips on the project
+      # dashboard, which dominate its cold-cache latency.
+      def total_and_error_count_in_range(time_range: nil, project_id: nil)
+        sql = +"SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE TRY_CAST(http_status AS INTEGER) >= 500) AS errors FROM transactions"
+        binds = []
+        clauses = []
+
+        if time_range
+          clauses << "timestamp BETWEEN ? AND ?"
+          binds << time_range.begin << time_range.end
+        end
+        if project_id.present?
+          clauses << "project_id = ?"
+          binds << project_id.to_i
+        end
+
+        sql << " WHERE " << clauses.join(" AND ") if clauses.any?
+        row = query(sql, *binds).first || {}
+        { total: row["total"].to_i, errors: row["errors"].to_i }
+      end
+
       def stats_by_endpoint(time_range = 24.hours.ago..Time.current, project_id: nil, limit: nil)
         sql = +<<~SQL
           SELECT

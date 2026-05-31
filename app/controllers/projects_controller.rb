@@ -23,10 +23,15 @@ class ProjectsController < ApplicationController
   # Show is a dashboard — six DuckLake aggregates per page load was beating
   # the columnar reads to death (especially on Docker volumes), and made the
   # whole app contend on the shared DuckLake connection. We now compute the
-  # DuckLake-derived ivars once per 30s per project and stash them in Rails
-  # cache. SQLite-backed lookups (recent_issues, recent_events) and the queue
-  # depth stay live since they're cheap.
-  SHOW_METRICS_TTL = 30.seconds
+  # DuckLake-derived ivars once per cache window per project and stash them in
+  # Rails cache. SQLite-backed lookups (recent_issues, recent_events) and the
+  # queue depth stay live since they're cheap.
+  #
+  # TTL is generous (5 min) because cold-miss latency is ~minutes when DuckLake
+  # is busy; a 30s TTL meant a misfortunate cron + cache expiry tag-team could
+  # take the dashboard to >2-minute responses. The data is for human eyeballs
+  # on a dashboard, freshness within 5 minutes is fine.
+  SHOW_METRICS_TTL = 5.minutes
 
   def show
     @recent_issues = @project.open_issues.limit(5)
@@ -40,7 +45,7 @@ class ProjectsController < ApplicationController
     @sparkline_range = 24.hours.ago..Time.current
 
     metrics = Rails.cache.fetch(
-      "project_#{@project.id}_show_metrics/v3",
+      "project_#{@project.id}_show_metrics/v4",
       expires_in: SHOW_METRICS_TTL,
       race_condition_ttl: 10.seconds
     ) do
@@ -50,6 +55,10 @@ class ProjectsController < ApplicationController
         event_count_24h: @project.event_count(24.hours.ago..Time.current),
         transaction_count_24h: @project.transaction_count(24.hours.ago..Time.current),
         p50_response_time: @project.p50_response_time,
+        # error_rate moved into the cached bundle so it isn't recomputed
+        # multiple times in the view (it was previously called 3x in
+        # show.html.erb's CSS-class ternary).
+        error_rate: @project.error_rate,
         endpoint_sparklines: DuckLake::Transaction.p95_by_bucket(
           transaction_names: top_endpoints.map { |e| e["transaction_name"] },
           time_range: @sparkline_range, buckets: @sparkline_buckets,
@@ -70,6 +79,7 @@ class ProjectsController < ApplicationController
     @event_count_24h = metrics[:event_count_24h]
     @transaction_count_24h = metrics[:transaction_count_24h]
     @p50_response_time = metrics[:p50_response_time]
+    @error_rate = metrics[:error_rate]
     @endpoint_sparklines = metrics[:endpoint_sparklines]
     @events_by_hour = metrics[:events_by_hour]
     @transactions_by_hour = metrics[:transactions_by_hour]
