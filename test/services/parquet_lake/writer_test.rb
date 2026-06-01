@@ -125,6 +125,14 @@ class ParquetLake::WriterTest < ActiveSupport::TestCase
     assert_empty Dir.glob(File.join(@data_path, "**", "*.parquet"))
   end
 
+  test "Connection.query returns [] for a glob with no files (fresh deploy / empty table)" do
+    # No Writer.write call — the events partition tree doesn't exist yet.
+    result = ParquetLake::Connection.query(
+      "SELECT COUNT(*) AS c FROM read_parquet('#{File.join(@data_path, "events", "**", "*.parquet")}', hive_partitioning=true)"
+    )
+    assert_equal [], result
+  end
+
   test "PARQUET_LAKE_DISABLED makes write a no-op returning false" do
     ENV["PARQUET_LAKE_DISABLED"] = "true"
     assert_equal false, ParquetLake::Writer.write(table: "events",

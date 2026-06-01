@@ -38,11 +38,19 @@ module ParquetLake
       # Run a SELECT and return [{column_name => value}, ...]. Matches the
       # legacy ApplicationDucklakeRecord.query signature so reader models can
       # swap their parent class with no other change at the call site.
+      #
+      # Returns [] when read_parquet hits a glob with no matching files —
+      # the expected state on a fresh deploy, after retention rm -rf's old
+      # partitions, or for a table that hasn't ingested anything yet. Better
+      # to 0-render the page than to 500 it.
       def query(sql, *binds)
         return [] if disabled?
         result = binds.empty? ? connection.query(sql) : connection.query(sql, *binds)
         columns = result.columns.map(&:name)
         result.each.map { |row| columns.zip(row).to_h }
+      rescue DuckDB::Error => e
+        return [] if empty_glob_error?(e)
+        raise
       end
 
       # Run a statement without expecting a result set. Used by the Writer
@@ -112,6 +120,16 @@ module ParquetLake
 
       def escape(s)
         s.to_s.gsub("'", "''")
+      end
+
+      # DuckDB's "No files found that match the pattern" surfaces as
+      # DuckDB::Error with that text in the message. It fires for both
+      # the empty-data-path case and the case where one table has files
+      # but another doesn't — independent per-glob, so a query against
+      # `events` can succeed while one against `spans` returns []. Both
+      # are correct "no data" answers.
+      def empty_glob_error?(e)
+        e.message.to_s.include?("No files found that match the pattern")
       end
     end
   end
