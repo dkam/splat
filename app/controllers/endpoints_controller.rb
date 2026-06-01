@@ -126,7 +126,7 @@ class EndpointsController < ApplicationController
         quantile_cont(duration, 0.50)  AS p50,
         quantile_cont(duration, 0.95)  AS p95,
         quantile_cont(duration, 0.99)  AS p99
-      FROM transactions
+      FROM #{DuckLake::Transaction.from_clause}
       WHERE timestamp BETWEEN ? AND ?
         AND project_id = ?
     SQL

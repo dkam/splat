@@ -1,5 +1,5 @@
 class StorageStats
-  DUCKLAKE_TABLES = %w[events transactions spans issues].freeze
+  PARQUET_LAKE_TABLES = %w[events transactions spans].freeze
 
   class << self
     def sqlite_tables
@@ -33,8 +33,8 @@ class StorageStats
       }.sort_by { |t| -t[:total_bytes] }
     end
 
-    def ducklake_tables
-      DUCKLAKE_TABLES.map { |table| ducklake_table_stats(table) }
+    def parquet_lake_tables
+      PARQUET_LAKE_TABLES.map { |table| parquet_lake_table_stats(table) }
     end
 
     private
@@ -48,29 +48,21 @@ class StorageStats
       {}
     end
 
-    def ducklake_table_stats(table)
-      sql = <<~SQL
-        SELECT COUNT(*)::BIGINT                             AS file_count,
-               COALESCE(SUM(data_file_size_bytes), 0)::BIGINT   AS total_bytes,
-               COALESCE(MAX(data_file_size_bytes), 0)::BIGINT   AS max_file_bytes,
-               COUNT(delete_file)::BIGINT                       AS delete_file_count,
-               COALESCE(SUM(delete_file_size_bytes), 0)::BIGINT AS delete_bytes
-        FROM ducklake_list_files(?, ?)
-      SQL
-
-      row = ApplicationDucklakeRecord.query(sql, ApplicationDucklakeRecord::CATALOG_NAME, table).first || {}
-
+    # Walks the on-disk Parquet tree for one table and reports file count + total
+    # bytes. No catalog query — each Parquet file is independent on disk.
+    def parquet_lake_table_stats(table)
+      pattern = File.join(ParquetLake::Connection.data_path, table, "**", "*.parquet")
+      files = Dir.glob(pattern)
+      sizes = files.map { |f| File.size(f) rescue 0 }
       {
         name: table,
-        file_count: row["file_count"].to_i,
-        total_bytes: row["total_bytes"].to_i,
-        max_file_bytes: row["max_file_bytes"].to_i,
-        delete_file_count: row["delete_file_count"].to_i,
-        delete_bytes: row["delete_bytes"].to_i
+        file_count: files.size,
+        total_bytes: sizes.sum,
+        max_file_bytes: sizes.max || 0
       }
     rescue => e
-      Rails.logger.warn("StorageStats: ducklake_list_files failed for #{table}: #{e.class} #{e.message}")
-      {name: table, file_count: 0, total_bytes: 0, max_file_bytes: 0, delete_file_count: 0, delete_bytes: 0}
+      Rails.logger.warn("StorageStats: parquet walk failed for #{table}: #{e.class} #{e.message}")
+      {name: table, file_count: 0, total_bytes: 0, max_file_bytes: 0}
     end
   end
 end

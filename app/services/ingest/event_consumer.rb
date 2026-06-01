@@ -14,7 +14,6 @@ module Ingest
 
     def process_batch(jobs)
       events = []
-      issues = {}
       outcomes = []
 
       jobs.each do |job|
@@ -28,7 +27,6 @@ module Ingest
 
         event = Event.create_from_sentry_payload!(args["event_id"], args["payload"], project)
         events << event
-        issues[event.issue_id] = event.issue if event.issue
         outcomes << [job, :ok]
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
@@ -37,23 +35,18 @@ module Ingest
         outcomes << [job, :retry]
       end
 
-      forward_to_mirror(events, issues.values)
+      forward_to_mirror(events)
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
     end
 
-    # One body per tube per batch — beanstalkd has no batch put, so packing
-    # collapses N RTTs to 1. Stage 2 unpacks via the {rows: [...]} convention.
-    # `table:` lets UnifiedConsumer dispatch to the right model without
-    # paying STATS-JOB per body to recover the tube name.
-    def forward_to_mirror(events, issues)
-      if events.any?
-        Tuber.put(Tuber::DUCKLAKE_EVENTS_TUBE,
-                  { table: "events", rows: events.map(&:to_ducklake_row) })
-      end
-      if issues.any?
-        Tuber.put(Tuber::DUCKLAKE_ISSUES_TUBE,
-                  { table: "issues", rows: issues.map(&:to_ducklake_row) })
-      end
+    # One body per batch — beanstalkd has no batch put, so packing collapses
+    # N RTTs to 1. UnifiedConsumer unpacks via the {rows: [...]} convention.
+    # Issues no longer mirror to the analytics layer — they're read live from
+    # the AR Issue table.
+    def forward_to_mirror(events)
+      return if events.empty?
+      Tuber.put(Tuber::DUCKLAKE_EVENTS_TUBE,
+                { table: "events", rows: events.map(&:to_ducklake_row) })
     rescue => e
       log_exception("[#{self.class.name}] mirror forward failed", e)
     end

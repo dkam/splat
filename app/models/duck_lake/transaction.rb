@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 module DuckLake
-  class Transaction < ApplicationDucklakeRecord
+  class Transaction < ApplicationParquetLakeRecord
     self.table_name = "transactions"
 
     class << self
       def count_in_range(time_range: nil, project_id: nil)
-        sql = +"SELECT COUNT(*) AS c FROM transactions"
+        sql = +"SELECT COUNT(*) AS c FROM #{from_clause}"
         binds = []
         clauses = []
 
@@ -24,7 +24,7 @@ module DuckLake
       end
 
       def error_count_in_range(time_range: nil, project_id: nil)
-        sql = +"SELECT COUNT(*) AS c FROM transactions"
+        sql = +"SELECT COUNT(*) AS c FROM #{from_clause}"
         binds = []
         clauses = ["TRY_CAST(http_status AS INTEGER) >= 500"]
 
@@ -46,7 +46,7 @@ module DuckLake
       # used by Project#error_rate — halves DuckLake roundtrips on the project
       # dashboard, which dominate its cold-cache latency.
       def total_and_error_count_in_range(time_range: nil, project_id: nil)
-        sql = +"SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE TRY_CAST(http_status AS INTEGER) >= 500) AS errors FROM transactions"
+        sql = +"SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE TRY_CAST(http_status AS INTEGER) >= 500) AS errors FROM #{from_clause}"
         binds = []
         clauses = []
 
@@ -74,7 +74,7 @@ module DuckLake
             COUNT(*)       AS count,
             AVG(db_time)   AS avg_db_time,
             AVG(view_time) AS avg_view_time
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, time_range.end]
@@ -104,7 +104,7 @@ module DuckLake
             #{n_plus_one_count_expr}       AS n_plus_one_count,
             AVG(#{queries_expr})           AS avg_queries,
             MAX(#{queries_expr})           AS max_queries
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, time_range.end]
@@ -145,7 +145,7 @@ module DuckLake
             quantile_cont(duration, 0.99)                  AS p99_duration,
             AVG(#{queries_expr})                           AS avg_queries,
             MAX(#{queries_expr})                           AS max_queries
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, time_range.end]
@@ -193,7 +193,7 @@ module DuckLake
             quantile_cont(duration, 0.99)     AS p99,
             MIN(duration)                     AS min,
             MAX(duration)                     AS max
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, time_range.end]
@@ -230,7 +230,7 @@ module DuckLake
             quantile_cont(db_time, 0.95)      AS p95_db_time,
             AVG(view_time)                    AS avg_view_time,
             quantile_cont(view_time, 0.95)    AS p95_view_time
-          FROM transactions
+          FROM #{from_clause}
           WHERE transaction_name = ?
             AND timestamp BETWEEN ? AND ?
         SQL
@@ -269,7 +269,7 @@ module DuckLake
             quantile_cont(duration, 0.95)  AS p95_duration,
             quantile_cont(duration, 0.99)  AS p99_duration,
             MAX(duration)                  AS max_duration
-          FROM transactions
+          FROM #{from_clause}
           WHERE transaction_name = ?
             AND timestamp BETWEEN ? AND ?
         SQL
@@ -314,7 +314,7 @@ module DuckLake
             COUNT(*)                       AS request_count,
             AVG(duration)                  AS avg_duration,
             MAX(duration)                  AS max_duration
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, time_range.end]
@@ -339,7 +339,7 @@ module DuckLake
           SELECT
             CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
             COUNT(*) AS c
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, bucket_seconds, time_range.begin, time_range.end]
@@ -376,7 +376,7 @@ module DuckLake
             transaction_name,
             CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
             COUNT(*) AS c
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
             AND transaction_name IN (#{placeholders})
         SQL
@@ -421,7 +421,7 @@ module DuckLake
             transaction_name,
             CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
             quantile_cont(duration, 0.95) AS p95
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
             AND transaction_name IN (#{placeholders})
         SQL
@@ -452,7 +452,7 @@ module DuckLake
                endpoint: nil, http_status: nil, http_method: nil, environment: nil, tags: nil, limit: 50)
         sql = +<<~SQL
           SELECT *
-          FROM transactions
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
             AND duration >= ?
         SQL

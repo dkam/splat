@@ -11,7 +11,7 @@ module DuckLake
   # Rows are written one transaction at a time via multi_insert, so
   # spans of one transaction land in the same Parquet row group and
   # repeated trace_id/transaction_id/project_id collapse via RLE.
-  class Span < ApplicationDucklakeRecord
+  class Span < ApplicationParquetLakeRecord
     self.table_name = "spans"
 
     # Fetch all spans for a transaction, ordered by sequence.
@@ -26,7 +26,7 @@ module DuckLake
           timestamp, end_timestamp,
           (epoch(end_timestamp) - epoch(timestamp)) * 1000 AS duration_ms,
           op, status, description, tags, data, depth, sequence
-        FROM spans
+        FROM #{from_clause}
         WHERE transaction_id = ?
           AND project_id = ?
           AND timestamp BETWEEN ? AND ?

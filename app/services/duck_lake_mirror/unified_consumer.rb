@@ -1,27 +1,19 @@
 # frozen_string_literal: true
 
 module DuckLakeMirror
-  # Single consumer that watches all four DuckLake mirror tubes and dispatches
-  # each reserved job to its target model based on the `table:` field in the
-  # body. Replaces the per-tube EventConsumer / IssueConsumer / TransactionConsumer
-  # / SpanConsumer quartet.
+  # Single consumer that watches the analytics mirror tubes (events,
+  # transactions, spans) and dispatches each reserved job to the
+  # ParquetLake::Writer using the `table:` field in the body.
   #
   # Tuber's reserve_batch pulls across watched tubes in one call (FIFO by
   # default), so the server gives us the union of work — no idle-tube spin
-  # or per-tube thread overhead. With SQLite catalog, fewer concurrent
-  # connections also means fewer would-be writers fighting the catalog
-  # write lock.
+  # or per-tube thread overhead. Coalescing into one Writer.write call per
+  # (table, batch) keeps row groups dense for ZSTD/dictionary compression.
   class UnifiedConsumer < Ingest::TubeConsumer
-    TABLE_TO_MODEL = {
-      "events"       => ::DuckLake::Event,
-      "issues"       => ::DuckLake::Issue,
-      "transactions" => ::DuckLake::Transaction,
-      "spans"        => ::DuckLake::Span
-    }.freeze
+    VALID_TABLES = %w[events transactions spans].to_set.freeze
 
     WATCHED_TUBES = [
       ::Ingest::Tuber::DUCKLAKE_EVENTS_TUBE,
-      ::Ingest::Tuber::DUCKLAKE_ISSUES_TUBE,
       ::Ingest::Tuber::DUCKLAKE_TRANSACTIONS_TUBE,
       ::Ingest::Tuber::DUCKLAKE_SPANS_TUBE
     ].freeze
@@ -30,9 +22,8 @@ module DuckLakeMirror
 
     # Small coalesce wait when reserve returns a partial batch. Under low
     # traffic (a single event every few seconds) reserve_batch(500) returns
-    # 1, the loop processes immediately, and each row pays its own DuckLake
-    # catalog commit. 250ms gives stragglers a chance to collect into the
-    # same multi_insert without adding meaningful latency to a mirror path.
+    # 1, the loop processes immediately. 250ms gives stragglers a chance to
+    # collect into the same Writer.write batch — fewer, denser Parquet files.
     COALESCE_WAIT_S = ENV.fetch("DUCKLAKE_MIRROR_COALESCE_WAIT", "0.25").to_f
 
     Grouped = Struct.new(:jobs, :rows)
@@ -67,18 +58,18 @@ module DuckLakeMirror
     def process_batch(jobs)
       grouped, parse_failures = group_by_target(jobs)
 
-      grouped.each do |model, g|
-        ok = g.rows.empty? || safe_multi_insert(model, g.rows)
+      grouped.each do |table, g|
+        ok = g.rows.empty? || safe_write(table, g.rows)
         g.jobs.each { |job| safe_finalize(job, ok ? :ok : :retry) }
       end
 
       parse_failures.each { |job| safe_finalize(job, :retry) }
     end
 
-    # Returns [Hash{model => Grouped}, Array<failed_jobs>]. Bodies are
-    # expected to carry { table: "events"|..., rows: [...] }. If `table:`
-    # is missing (legacy jobs queued before the producer change), fall
-    # back to the last dot-segment of the tube name via Beaneater::Job#tube
+    # Returns [Hash{table_name => Grouped}, Array<failed_jobs>]. Bodies are
+    # expected to carry { table: "events"|"transactions"|"spans", rows: [...] }.
+    # If `table:` is missing (legacy jobs queued before the producer change),
+    # fall back to the last dot-segment of the tube name via Beaneater::Job#tube
     # — one STATS-JOB round-trip per legacy job, only during the migration
     # window.
     def group_by_target(jobs)
@@ -88,16 +79,15 @@ module DuckLakeMirror
       jobs.each do |job|
         body  = JSON.parse(job.body, symbolize_names: true)
         table = body[:table]&.to_s || tube_to_table(job)
-        model = TABLE_TO_MODEL[table]
 
-        if model.nil?
+        unless VALID_TABLES.include?(table)
           log_exception("[#{self.class.name}] unknown table #{table.inspect}",
-                        RuntimeError.new("no model for table"))
+                        RuntimeError.new("not in VALID_TABLES"))
           failures << job
           next
         end
 
-        g = grouped[model]
+        g = grouped[table]
         g.jobs << job
         Array(body[:rows]).each { |r| g.rows << r }
       rescue => e
@@ -114,11 +104,11 @@ module DuckLakeMirror
       job.tube.split(".").last
     end
 
-    def safe_multi_insert(model, rows)
-      model.multi_insert(rows)
+    def safe_write(table, rows)
+      ParquetLake::Writer.write(table: table, rows: rows)
       true
     rescue => e
-      log_exception("[#{self.class.name}] multi_insert(#{model}) failed", e)
+      log_exception("[#{self.class.name}] Writer.write(#{table}) failed", e)
       false
     end
   end

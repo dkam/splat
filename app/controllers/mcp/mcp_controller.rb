@@ -674,13 +674,13 @@ module Mcp
           max: percentiles["max_duration"]&.to_f || 0
         }
         total_count = DuckLake::Transaction.query(
-          "SELECT COUNT(*) AS n FROM transactions WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?",
+          "SELECT COUNT(*) AS n FROM #{DuckLake::Transaction.from_clause} WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?",
           endpoint, time_range.begin, time_range.end
         ).first["n"]
       else
         percentiles = DuckLake::Transaction.percentiles(time_range)
         total_count = DuckLake::Transaction.query(
-          "SELECT COUNT(*) AS n FROM transactions WHERE timestamp BETWEEN ? AND ?",
+          "SELECT COUNT(*) AS n FROM #{DuckLake::Transaction.from_clause} WHERE timestamp BETWEEN ? AND ?",
           time_range.begin, time_range.end
         ).first["n"]
       end
@@ -836,7 +836,7 @@ module Mcp
     def endpoint_extreme_row(endpoint, time_range, environment, release, direction)
       sql = +<<~SQL
         SELECT id, duration, db_time, view_time, timestamp
-        FROM transactions
+        FROM #{DuckLake::Transaction.from_clause}
         WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?
       SQL
       binds = [endpoint, time_range.begin, time_range.end]
@@ -962,7 +962,7 @@ module Mcp
     end
 
     def durations_for(endpoint, time_range, environment: nil, release: nil)
-      sql = +"SELECT duration FROM transactions WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?"
+      sql = +"SELECT duration FROM #{DuckLake::Transaction.from_clause} WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?"
       binds = [endpoint, time_range.begin, time_range.end]
       if environment.present?
         sql << " AND environment = ?"

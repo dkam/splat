@@ -4,10 +4,9 @@ class SettingsController < ApplicationController
   def index
     @setting = Setting.instance
     @sqlite_tables = StorageStats.sqlite_tables
-    @ducklake_tables = StorageStats.ducklake_tables
+    @parquet_lake_tables = StorageStats.parquet_lake_tables
     @sqlite_total = @sqlite_tables.sum { |t| t[:total_bytes] }
-    @ducklake_total = @ducklake_tables.sum { |t| t[:total_bytes] }
-    @ducklake_delete_total = @ducklake_tables.sum { |t| t[:delete_bytes] }
+    @parquet_lake_total = @parquet_lake_tables.sum { |t| t[:total_bytes] }
   end
 
   def update

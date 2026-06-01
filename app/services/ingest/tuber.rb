@@ -5,17 +5,15 @@ module Ingest
     EVENTS_TUBE = "splat.events"
     TRANSACTIONS_TUBE = "splat.transactions"
     DUCKLAKE_EVENTS_TUBE = "splat.ducklake.events"
-    DUCKLAKE_ISSUES_TUBE = "splat.ducklake.issues"
     DUCKLAKE_TRANSACTIONS_TUBE = "splat.ducklake.transactions"
     DUCKLAKE_SPANS_TUBE = "splat.ducklake.spans"
     MAINTENANCE_TUBE = "splat.maintenance"
     DUCKLAKE_MAINTENANCE_TUBE = "splat.ducklake.maintenance"
     ACTIVEJOB_TUBE = "splat.activejob"
 
-    # TTR has to cover one full batch round-trip (AR transaction + DuckLake
-    # multi_insert + delete-all). 100-row batches finish in well under a
-    # second locally, but DuckLake catalog contention can stretch a commit;
-    # 120s leaves plenty of headroom before beanstalkd re-releases the batch.
+    # TTR has to cover one full batch round-trip (AR write + ParquetLake
+    # COPY + delete-all). 100-row batches finish in well under a second;
+    # 120s leaves headroom before beanstalkd re-releases the batch.
     DEFAULT_TTR = 120
     DEFAULT_PRI = 1024
 
@@ -51,7 +49,7 @@ module Ingest
       # and the layout chrome to show backlog at a glance.
       INGEST_TUBES = [
         EVENTS_TUBE, TRANSACTIONS_TUBE,
-        DUCKLAKE_EVENTS_TUBE, DUCKLAKE_ISSUES_TUBE,
+        DUCKLAKE_EVENTS_TUBE,
         DUCKLAKE_TRANSACTIONS_TUBE, DUCKLAKE_SPANS_TUBE,
         MAINTENANCE_TUBE, DUCKLAKE_MAINTENANCE_TUBE, ACTIVEJOB_TUBE
       ].freeze

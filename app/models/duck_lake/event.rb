@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 module DuckLake
-  class Event < ApplicationDucklakeRecord
+  class Event < ApplicationParquetLakeRecord
     self.table_name = "events"
 
     class << self
       def count_in_range(time_range: nil, project_id: nil)
-        sql = +"SELECT COUNT(*) AS c FROM events"
+        sql = +"SELECT COUNT(*) AS c FROM #{from_clause}"
         binds = []
         clauses = []
 
@@ -34,7 +34,7 @@ module DuckLake
           SELECT
             CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
             COUNT(*) AS c
-          FROM events
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
         SQL
         binds = [time_range.begin, bucket_seconds, time_range.begin, time_range.end]
@@ -72,7 +72,7 @@ module DuckLake
             issue_id,
             CAST(floor((epoch(timestamp) - epoch(?::TIMESTAMP)) / ?) AS INTEGER) AS bucket_idx,
             COUNT(*) AS c
-          FROM events
+          FROM #{from_clause}
           WHERE timestamp BETWEEN ? AND ?
             AND issue_id IN (#{id_list})
         SQL
