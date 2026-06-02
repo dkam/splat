@@ -1,8 +1,7 @@
-# Production docker-compose for splat (SQLite flavour) — web + tuber + three
-# worker sidecars (ingest, ducklake, scheduler), replacing the old single
-# Solid Queue `jobs` service. Designed to run alongside the PG flavour on
-# the same host, so volume paths, container names, host ports, and the
-# tuber instance name are all suffixed/offset to avoid collision.
+# Production docker-compose for splat (SQLite flavour) — web + tuber + two
+# worker sidecars (ingest, scheduler). Designed to run alongside the PG
+# flavour on the same host, so volume paths, container names, host ports,
+# and the tuber instance name are all suffixed/offset to avoid collision.
 # Run with:
 #
 #   docker compose -f compose.production.yml -p splat-booko-sqlite up -d
@@ -28,17 +27,6 @@ x-common-variables: &common-variables
   MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
   SENTRY_DSN: ${SENTRY_DSN}
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
-
-  # DuckDB defaults memory_limit to ~80% of physical RAM PER CONNECTION
-  # and threads to all physical cores. Splat's workload is small COPYs +
-  # short analytics scans, not large joins; per-connection budgets are
-  # appropriate. 256MB × 1 thread keeps each Parquet write bounded.
-  DUCKDB_MEMORY_LIMIT: 256MB
-  DUCKDB_THREADS: "1"
-
-  # Bodies stay in RAM until the COPY finishes. 100 reserved × ~few-MB
-  # packed body fits comfortably under 1GB Ruby-side per consumer.
-  DUCKLAKE_MIRROR_BATCH_SIZE: "100"
 
   # Send Rails logs to stdout so `docker compose logs <service>` shows
   # them. Without this, Rails writes to log/production.log and the bind-
@@ -98,33 +86,6 @@ services:
       - /storage/splat-booko-sqlite/storage:/rails/storage
       - /storage/splat-booko-sqlite/logs/ingest:/rails/log
     mem_limit: 512M
-
-  ducklake:
-    <<: *splat-worker
-    container_name: splat-booko-sqlite-ducklake
-    command: bin/ducklake_worker
-    volumes:
-      - /storage/splat-booko-sqlite/storage:/rails/storage
-      - /storage/splat-booko-sqlite/logs/ducklake:/rails/log
-    environment:
-      <<: *common-variables
-      # Compaction's COPY (SELECT * FROM read_parquet([files...])) holds
-      # per-file footer/dictionary/decompression state in working memory —
-      # non-spillable read state, not just sort buffer. A bad day (bug
-      # firing tens of thousands of events into one partition) can push
-      # working set to ~1 GB. Give DuckDB room to handle it without
-      # falling back to chunked manual compaction.
-      DUCKDB_MEMORY_LIMIT: 1GB
-    # Ingest's working set is tiny (per-batch COPY of ~100 rows); compaction's
-    # is whatever yesterday accumulated. 1.5 G fits DUCKDB_MEMORY_LIMIT=1GB
-    # plus Ruby + reserved tube bodies, with headroom for the occasional
-    # backlog catch-up. Still 25% lower than the pre-cutover 2 G DuckLake
-    # needed because there's no catalog SQLite buffer cache to feed.
-    mem_limit: 1500M
-    # Can safely scale beyond 1 now that there's no shared catalog. Each
-    # consumer writes its own UUID-named Parquet file per batch; no contention.
-    deploy:
-      replicas: 1
 
   scheduler:
     <<: *splat-worker

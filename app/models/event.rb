@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
-class Event < ApplicationRecord
+class Event < IssuesEventsRecord
+  include Compression::CompressedJson
+  compressed_json :payload, db: :issues_events, table: "events", platform: :platform
+
+  # project lives on the primary DB. The belongs_to still works for
+  # `event.project` (issues a separate SELECT against primary), but Rails
+  # won't generate a cross-DB JOIN, so avoid `.includes(:project)` here.
   belongs_to :project
   belongs_to :issue, optional: true, counter_cache: :count
 
@@ -9,9 +15,9 @@ class Event < ApplicationRecord
   validates :event_id, presence: true, uniqueness: { scope: :project_id }
   validates :timestamp, presence: true
 
-  # Per-event broadcasts are throttled to avoid swamping Solid Queue / Cable during error bursts.
-  # The Issue#after_update_commit callback covers issue-status changes; this only refreshes
-  # event-list views at most once per BROADCAST_THROTTLE per stream.
+  # Per-event broadcasts are throttled to avoid swamping during error bursts.
+  # The Issue#after_update_commit callback covers issue-status changes; this
+  # only refreshes event-list views at most once per BROADCAST_THROTTLE.
   BROADCAST_THROTTLE = 5.seconds
 
   after_create_commit :throttled_broadcast_refresh
@@ -22,16 +28,14 @@ class Event < ApplicationRecord
   scope :by_platform, ->(platform) { where(platform: platform) }
   scope :by_exception_type, ->(type) { where(exception_type: type) }
 
-  # Extract key fields from payload before saving
+  # Extract promoted columns from payload before saving.
   before_validation :extract_fields_from_payload
 
   def self.create_from_sentry_payload!(event_id, payload, project)
     timestamp = parse_timestamp(payload["timestamp"])
 
-    # Find or create the issue for grouping
     issue = Issue.group_event(payload, project, timestamp: timestamp)
 
-    # Create the event
     event = create!(
       project: project,
       event_id: event_id,
@@ -61,7 +65,6 @@ class Event < ApplicationRecord
     when String
       Time.parse(timestamp)
     when Numeric
-      # Sentry timestamps can be in seconds with decimals
       Time.at(timestamp)
     when Time
       timestamp
@@ -73,9 +76,60 @@ class Event < ApplicationRecord
     Time.current
   end
 
+  def self.count_in_range(time_range:, project_id: nil)
+    scope = all
+    scope = scope.where(timestamp: time_range)  if time_range
+    scope = scope.where(project_id: project_id) if project_id
+    scope.count
+  end
+
+  # Hourly bucket counts for issue/event sparklines.
+  #   { issue_id => Array(bucket_count, ...) }, oldest bucket first.
+  def self.event_counts_by_bucket(issue_ids:, time_range:, buckets:, project_id: nil)
+    return {} if issue_ids.empty?
+    window         = time_range.end - time_range.begin
+    bucket_seconds = (window / buckets).to_i.clamp(1, nil)
+    range_start    = time_range.begin
+
+    scope = where(issue_id: issue_ids).where(timestamp: time_range)
+    scope = scope.where(project_id: project_id) if project_id
+    rows = scope
+           .group(:issue_id)
+           .group(Arel.sql("CAST((strftime('%s', timestamp) - #{range_start.to_i}) / #{bucket_seconds} AS INTEGER)"))
+           .count
+
+    result = issue_ids.each_with_object({}) { |id, h| h[id] = Array.new(buckets, 0) }
+    rows.each do |(issue_id, bucket_idx), count|
+      idx = bucket_idx.to_i
+      next if idx < 0 || idx >= buckets
+      result[issue_id] ||= Array.new(buckets, 0)
+      result[issue_id][idx] = count
+    end
+    result
+  end
+
+  # Volume across all events bucketed by time.
+  def self.volume_by_bucket(project_id:, time_range:, buckets:)
+    window         = time_range.end - time_range.begin
+    bucket_seconds = (window / buckets).to_i.clamp(1, nil)
+    range_start    = time_range.begin
+
+    rows = where(project_id: project_id)
+           .where(timestamp: time_range)
+           .group(Arel.sql("CAST((strftime('%s', timestamp) - #{range_start.to_i}) / #{bucket_seconds} AS INTEGER)"))
+           .count
+
+    Array.new(buckets, 0).tap do |result|
+      rows.each do |idx, c|
+        i = idx.to_i
+        result[i] = c if i >= 0 && i < buckets
+      end
+    end
+  end
+
+  # ---- Convenience readers backed by the decoded payload. ----
   def exception_details
     return {} unless payload.present?
-
     exception_data = payload.dig("exception", "values", 0) || {}
     {
       type: exception_data["type"],
@@ -85,74 +139,15 @@ class Event < ApplicationRecord
     }
   end
 
-  def stacktrace
-    exception_details[:stacktrace]
-  end
-
-  def exception_type
-    exception_details[:type]
-  end
-
-  def exception_value
-    exception_details[:value]
-  end
-
-  def message
-    payload&.dig("message") || exception_value
-  end
-
-  def level
-    payload&.dig("level") || "error"
-  end
-
-  def tags
-    payload&.dig("tags") || {}
-  end
-
-  def user
-    payload&.dig("user") || {}
-  end
-
-  def request
-    payload&.dig("request") || {}
-  end
-
-  def contexts
-    payload&.dig("contexts") || {}
-  end
-
-  def breadcrumbs
-    payload&.dig("breadcrumbs", "values") || []
-  end
-
-  def fingerprint
-    payload&.dig("fingerprint") || []
-  end
-
-  def to_ducklake_row
-    {
-      id: id,
-      event_id: event_id,
-      project_id: project_id,
-      issue_id: issue_id,
-      timestamp: timestamp,
-      duration: duration,
-      environment: environment,
-      exception_type: exception_type,
-      exception_value: exception_value,
-      fingerprint: Array.wrap(fingerprint).join("::"),
-      message: message,
-      platform: platform,
-      release: release,
-      sdk_name: sdk_name,
-      sdk_version: sdk_version,
-      server_name: server_name,
-      transaction_name: transaction_name,
-      payload: payload,
-      created_at: created_at,
-      updated_at: updated_at
-    }
-  end
+  def stacktrace      = exception_details[:stacktrace]
+  def message         = payload&.dig("message") || exception_value
+  def level           = payload&.dig("level") || "error"
+  def tags            = payload&.dig("tags") || {}
+  def user            = payload&.dig("user") || {}
+  def request         = payload&.dig("request") || {}
+  def contexts        = payload&.dig("contexts") || {}
+  def breadcrumbs     = payload&.dig("breadcrumbs", "values") || []
+  def fingerprint     = payload&.dig("fingerprint") || []
 
   private
 
@@ -166,8 +161,6 @@ class Event < ApplicationRecord
 
   def throttle_broadcast(key)
     cache_key = "event_broadcast_throttle:#{key}"
-    # fetch only invokes the block on a cache miss; subsequent calls within the
-    # TTL return the cached marker and skip the (expensive) broadcast enqueue.
     Rails.cache.fetch(cache_key, expires_in: BROADCAST_THROTTLE) do
       yield
       true
@@ -177,14 +170,12 @@ class Event < ApplicationRecord
   def extract_fields_from_payload
     return unless payload.present?
 
-    # Extract exception details for direct querying
     exception_data = payload.dig("exception", "values", 0) || {}
     self.exception_type = exception_data["type"]
     self.exception_value = exception_data["value"]
 
-    # Extract fingerprint for grouping (if provided)
     if payload["fingerprint"].present?
-      self.fingerprint = payload["fingerprint"]
+      self[:fingerprint] = payload["fingerprint"].to_s
     end
   end
 end

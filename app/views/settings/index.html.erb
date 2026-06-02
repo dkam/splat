@@ -4,88 +4,56 @@
     <%= link_to "← Back to Projects", projects_path, class: "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300" %>
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <div class="text-sm text-gray-500 dark:text-gray-400">SQLite total</div>
+      <div class="text-sm text-gray-500 dark:text-gray-400">SQLite total (all 3 DBs)</div>
       <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@sqlite_total) %></div>
     </div>
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <div class="text-sm text-gray-500 dark:text-gray-400">Parquet total</div>
-      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@parquet_lake_total) %></div>
-    </div>
-    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <div class="text-sm text-gray-500 dark:text-gray-400">Grand total</div>
-      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@sqlite_total + @parquet_lake_total) %></div>
+      <div class="text-sm text-gray-500 dark:text-gray-400">Histogram rows</div>
+      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
+        <%= number_with_delimiter(TransactionsSpansRecord.connection.select_value("SELECT COUNT(*) FROM transaction_histograms").to_i) %>
+      </div>
     </div>
   </div>
 
-  <details class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-4 overflow-hidden group">
-    <summary class="px-6 py-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 list-none">
-      <div>
-        <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">SQLite tables</h2>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Primary <code>splat</code> database. Per-page bytes from the <code>dbstat</code> virtual table.</p>
-      </div>
-      <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform group-open:rotate-90 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-      </svg>
-    </summary>
-    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 border-t border-gray-200 dark:border-gray-800">
-      <thead class="bg-gray-50 dark:bg-gray-800/50">
-        <tr>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rows</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table size</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Indexes</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-        <% @sqlite_tables.each do |t| %>
+  <% @sqlite_groups.each do |group| %>
+    <details class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-4 overflow-hidden group">
+      <summary class="px-6 py-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 list-none">
+        <div>
+          <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100"><%= group[:name] %></h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1"><code><%= group[:base] %></code> — per-page bytes from <code>dbstat</code>.</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform group-open:rotate-90 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </summary>
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 border-t border-gray-200 dark:border-gray-800">
+        <thead class="bg-gray-50 dark:bg-gray-800/50">
           <tr>
-            <td class="px-6 py-3 text-sm font-mono text-gray-900 dark:text-gray-100"><%= t[:name] %></td>
-            <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_with_delimiter(t[:row_estimate]) %></td>
-            <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(t[:table_bytes]) %></td>
-            <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(t[:index_bytes]) %></td>
-            <td class="px-6 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100"><%= number_to_human_size(t[:total_bytes]) %></td>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rows</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table size</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Indexes</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
           </tr>
-        <% end %>
-      </tbody>
-    </table>
-  </details>
+        </thead>
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+          <% group[:tables].each do |t| %>
+            <tr>
+              <td class="px-6 py-3 text-sm font-mono text-gray-900 dark:text-gray-100"><%= t[:name] %></td>
+              <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_with_delimiter(t[:row_estimate]) %></td>
+              <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(t[:table_bytes]) %></td>
+              <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(t[:index_bytes]) %></td>
+              <td class="px-6 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100"><%= number_to_human_size(t[:total_bytes]) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </details>
+  <% end %>
 
-  <details class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-8 overflow-hidden group">
-    <summary class="px-6 py-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 list-none">
-      <div>
-        <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">Parquet files</h2>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Per-table file counts and bytes from the on-disk Parquet tree under <code>storage/parquet_lake/</code>.</p>
-      </div>
-      <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform group-open:rotate-90 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-      </svg>
-    </summary>
-    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 border-t border-gray-200 dark:border-gray-800">
-      <thead class="bg-gray-50 dark:bg-gray-800/50">
-        <tr>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Files</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Largest file</th>
-          <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-        <% @parquet_lake_tables.each do |t| %>
-          <tr>
-            <td class="px-6 py-3 text-sm font-mono text-gray-900 dark:text-gray-100"><%= t[:name] %></td>
-            <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_with_delimiter(t[:file_count]) %></td>
-            <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(t[:max_file_bytes]) %></td>
-            <td class="px-6 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100"><%= number_to_human_size(t[:total_bytes]) %></td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-  </details>
-
-  <h2 class="font-bold text-2xl text-gray-900 dark:text-gray-100 mb-4">Data Retention</h2>
+  <h2 class="font-bold text-2xl text-gray-900 dark:text-gray-100 mb-4 mt-8">Data Retention</h2>
 
   <% if flash[:notice] %>
     <div class="bg-green-100 dark:bg-green-900/40 border border-green-400 dark:border-green-700 text-green-700 dark:text-green-300 px-4 py-3 rounded mb-6">
@@ -101,165 +69,76 @@
 
   <%= form_with(model: @setting, url: settings_path, method: :put, class: "space-y-6") do |form| %>
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Event Data Retention</h2>
-      <p class="text-gray-600 dark:text-gray-400 mb-4">Configure how long to keep error event data and payloads</p>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <%= form.label :event_payloads_retention_days, "Keep Event Payloads", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :event_payloads_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Full JSON payloads for debugging (recommended: 7 days)</p>
-        </div>
-
-        <div>
-          <%= form.label :events_data_retention_days, "Keep Event Records", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :events_data_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Basic event data for trend analysis (recommended: 30 days)</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Transaction Data Retention</h2>
-      <p class="text-gray-600 dark:text-gray-400 mb-4">Configure how long to keep performance transaction data and measurements</p>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <%= form.label :transaction_measurements_retention_days, "Keep Transaction Measurements", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :transaction_measurements_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Detailed performance measurements (recommended: 7 days)</p>
-        </div>
-
-        <div>
-          <%= form.label :transactions_data_retention_days, "Keep Transaction Records", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :transactions_data_retention_days, min: 1, max: 365, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Basic performance data for trends (recommended: 90 days)</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">DuckLake (Analytics) Retention</h2>
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Raw row retention</h2>
       <p class="text-gray-600 dark:text-gray-400 mb-4">
-        DuckLake holds the long-tail copy used for percentiles, group-by-endpoint, and time-bucketing.
-        Columnar storage is cheap, so these can run a lot longer than the SQLite values above.
+        How long to keep the raw events / transactions / spans before the daily retention job deletes them.
+        Aggregate trend data lives in <code>transaction_histograms</code> and is retained separately below.
       </p>
 
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <%= form.label :ducklake_events_retention_days, "Keep Events", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.label :events_data_retention_days, "Keep events", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="flex items-center space-x-2">
-            <%= form.number_field :ducklake_events_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <%= form.number_field :events_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 365 days</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days</p>
         </div>
 
         <div>
-          <%= form.label :ducklake_transactions_retention_days, "Keep Transactions", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.label :transactions_data_retention_days, "Keep transactions", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="flex items-center space-x-2">
-            <%= form.number_field :ducklake_transactions_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <%= form.number_field :transactions_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 365 days</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 90 days</p>
         </div>
 
         <div>
-          <%= form.label :ducklake_issues_retention_days, "Keep Issue Snapshots", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.label :spans_data_retention_days, "Keep spans", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="flex items-center space-x-2">
-            <%= form.number_field :ducklake_issues_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <%= form.number_field :spans_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 730 days</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days (waterfall is high-volume)</p>
         </div>
 
         <div>
-          <%= form.label :ducklake_spans_retention_days, "Keep Spans", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.label :histograms_retention_days, "Keep histograms", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="flex items-center space-x-2">
-            <%= form.number_field :ducklake_spans_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <%= form.number_field :histograms_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days (high-volume detail)</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 540 days — they're tiny.</p>
         </div>
       </div>
     </div>
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Current Status</h2>
-
-      <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">SQLite (hot)</h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Counts</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            <%= number_with_delimiter(Event.count) %>
-          </div>
-          <div class="text-sm text-gray-600 dark:text-gray-400">Total Events</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            <%= number_with_delimiter(Event.where.not(payload: nil).count) %> with payloads
-          </div>
+          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= number_with_delimiter(Issue.count) %></div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">Issues</div>
         </div>
-
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-green-600 dark:text-green-400">
-            <%= number_with_delimiter(Transaction.count) %>
-          </div>
-          <div class="text-sm text-gray-600 dark:text-gray-400">Total Transactions</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            <%= number_with_delimiter(Transaction.where.not(measurements: nil).count) %> with measurements
-          </div>
+          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= number_with_delimiter(Event.count) %></div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">Events</div>
+        </div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
+          <div class="text-2xl font-bold text-green-600 dark:text-green-400"><%= number_with_delimiter(Transaction.count) %></div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">Transactions</div>
+        </div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
+          <div class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= number_with_delimiter(Span.count) %></div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">Spans</div>
         </div>
       </div>
-
-      <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">DuckLake (analytics)</h3>
-      <%
-        ducklake_counts =
-          begin
-            {
-              events:       DuckLake::Event.query("SELECT COUNT(*) AS n FROM #{DuckLake::Event.from_clause}").first["n"],
-              transactions: DuckLake::Transaction.query("SELECT COUNT(*) AS n FROM #{DuckLake::Transaction.from_clause}").first["n"],
-              spans:        DuckLake::Span.query("SELECT COUNT(*) AS n FROM #{DuckLake::Span.from_clause}").first["n"]
-            }
-          rescue => e
-            { error: "#{e.class}: #{e.message}" }
-          end
-      %>
-      <% if ducklake_counts[:error] %>
-        <div class="p-4 bg-red-50 dark:bg-red-900/30 rounded text-sm text-red-700 dark:text-red-300">
-          DuckLake unavailable: <%= ducklake_counts[:error] %>
-        </div>
-      <% else %>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-            <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= number_with_delimiter(ducklake_counts[:events]) %></div>
-            <div class="text-sm text-gray-600 dark:text-gray-400">Events</div>
-          </div>
-          <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-            <div class="text-2xl font-bold text-green-600 dark:text-green-400"><%= number_with_delimiter(ducklake_counts[:transactions]) %></div>
-            <div class="text-sm text-gray-600 dark:text-gray-400">Transactions</div>
-          </div>
-          <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-            <div class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= number_with_delimiter(ducklake_counts[:spans]) %></div>
-            <div class="text-sm text-gray-600 dark:text-gray-400">Spans</div>
-          </div>
-        </div>
-      <% end %>
 
       <div class="mt-4 p-4 bg-blue-50 dark:bg-blue-900/30 rounded">
         <div class="text-sm text-blue-800 dark:text-blue-300">
-          <strong>SQLite cleanup</strong> runs daily at 2am via <code>DataRetentionJob</code>.
-          <strong>Parquet cleanup</strong> runs daily via <code>ParquetLake::CompactionJob</code> and <code>ParquetLake::RetentionJob</code> (see <code>config/schedule.yml</code>).
+          Retention runs daily at 02:00 via <code>Maintenance::RetentionJob</code>; histogram rollup runs hourly at <code>:05</code>.
+          See <code>config/schedule.yml</code>.
         </div>
       </div>
     </div>

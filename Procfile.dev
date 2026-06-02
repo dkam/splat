@@ -1,6 +1,5 @@
 web: bin/rails server -b 0.0.0.0 -p 3030
 ingest: bin/ingest_worker
-ducklake: bin/ducklake_worker
 scheduler: bin/scheduler
 css: bin/rails tailwindcss:watch
 tuber: tuber server -p 11331 --name "Splat Tuber"

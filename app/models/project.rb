@@ -75,42 +75,42 @@ class Project < ApplicationRecord
   end
 
   def event_count(time_range = nil)
-    DuckLake::Event.count_in_range(time_range: time_range, project_id: id)
+    Event.count_in_range(time_range: time_range, project_id: id)
   end
 
   def transaction_count(time_range = nil)
-    DuckLake::Transaction.count_in_range(time_range: time_range, project_id: id)
+    Transaction.count_in_range(time_range: time_range, project_id: id)
   end
 
   def error_rate(time_range = 24.hours.ago..Time.current)
-    counts = DuckLake::Transaction.total_and_error_count_in_range(time_range: time_range, project_id: id)
+    counts = Transaction.total_and_error_count_in_range(time_range: time_range, project_id: id)
     return 0 if counts[:total].zero?
 
     (counts[:errors].to_f / counts[:total] * 100).round(2)
   end
 
   def avg_response_time(time_range = 24.hours.ago..Time.current)
-    DuckLake::Transaction.percentiles(time_range, project_id: id)[:avg] || 0
+    Transaction.percentiles(time_range, project_id: id)[:avg] || 0
   end
 
   def p50_response_time(time_range = 24.hours.ago..Time.current)
-    DuckLake::Transaction.percentiles(time_range, project_id: id)[:p50] || 0
+    Transaction.percentiles(time_range, project_id: id)[:p50] || 0
   end
 
   def p95_response_time(time_range = 24.hours.ago..Time.current)
-    DuckLake::Transaction.percentiles(time_range, project_id: id)[:p95] || 0
+    Transaction.percentiles(time_range, project_id: id)[:p95] || 0
   end
 
   def slowest_endpoints(limit: 10, time_range: 24.hours.ago..Time.current)
-    DuckLake::Transaction.stats_by_endpoint(time_range, project_id: id, limit: limit)
+    Transaction.stats_by_endpoint(time_range, project_id: id, limit: limit)
   end
 
   def top_endpoints_by_impact(limit: 5, time_range: 24.hours.ago..Time.current)
-    DuckLake::Transaction.stats_by_endpoint_with_impact(time_range, project_id: id, limit: limit)
+    Transaction.stats_by_endpoint_with_impact(time_range, project_id: id, limit: limit)
   end
 
   def response_time_by_hour(time_range: 24.hours.ago..Time.current)
-    DuckLake::Transaction.response_time_by_hour(time_range, project_id: id)
+    Transaction.response_time_by_hour(time_range, project_id: id)
   end
 
   private

@@ -1,7 +1,7 @@
 # Recurring jobs read by bin/scheduler. Each entry pushes a body of
 #   { "class": "<class_name>", "args": [] }
-# onto the named tube on the given schedule. The maintenance consumers in
-# ingest_worker / ducklake_worker dispatch by class name.
+# onto the named tube on the given schedule. The maintenance consumer in
+# ingest_worker dispatches by class name.
 #
 # Schedules accept rufus syntax: "every Xs/m/h/d" or cron strings.
 #
@@ -15,30 +15,34 @@
 # Use on cron jobs that occasionally run longer than their cron interval —
 # stops the scheduler from stacking duplicates while one is mid-flight.
 
-# ParquetLake compaction — daily merge of yesterday's per-batch Parquet files
-# into one file per partition. Without this, ingest leaves N small files per
-# day-partition and scans get slower as DuckDB has to open more files.
-parquet_lake_compaction:
-  class: ParquetLake::CompactionJob
-  tube: splat.ducklake.maintenance
-  schedule: cron 30 2 * * *
+# Hourly rollup of the previous hour's transactions into per-bucket counts in
+# transaction_histograms. Runs a few minutes past the hour so any in-flight
+# inserts for that hour have landed. Idempotent — re-running overwrites.
+histogram_rollup:
+  class: Analytics::HistogramRollupJob
+  tube: splat.maintenance
+  schedule: cron 5 * * * *
   con: 1
-  idp: parquet_lake_compaction
+  idp: histogram_rollup
 
-# ParquetLake retention — daily rm -rf of partition directories older than
-# the configured retention window (config/parquet_lake.yml).
-parquet_lake_retention:
-  class: ParquetLake::RetentionJob
-  tube: splat.ducklake.maintenance
-  schedule: cron 30 3 * * *
-  con: 1
-  idp: parquet_lake_retention
-
+# Daily delete-by-timestamp of aged events/transactions/spans, plus
+# incremental_vacuum to actually return pages to disk. Histograms are
+# retained much longer than raw rows.
 data_retention:
-  class: DataRetentionJob
+  class: Maintenance::RetentionJob
   tube: splat.maintenance
   schedule: cron 0 2 * * *
   con: 1
+
+# Daily dictionary-drift check. Per-segment enumeration job that fans out
+# Compression::DictTrainingJob — trains a candidate against recent samples,
+# promotes if it beats the current dict by more than the gain threshold.
+dictionary_drift:
+  class: Compression::DictDriftJob
+  tube: splat.maintenance
+  schedule: cron 10 4 * * *
+  con: 1
+  idp: dictionary_drift
 
 cleanup_expired_oidc_sessions:
   class: CleanupExpiredOidcSessionsJob

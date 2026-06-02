@@ -28,7 +28,7 @@ class IssuesController < ApplicationController
 
     @sparkline_buckets = 24
     @sparkline_range = 24.hours.ago..Time.current
-    @sparklines = DuckLake::Event.event_counts_by_bucket(
+    @sparklines = Event.event_counts_by_bucket(
       issue_ids: @issues.map(&:id),
       time_range: @sparkline_range,
       buckets: @sparkline_buckets,
@@ -44,7 +44,7 @@ class IssuesController < ApplicationController
 
     @spark_range = 7.days.ago..Time.current
     @spark_buckets = 168
-    @spark_counts = DuckLake::Event.event_counts_by_bucket(
+    @spark_counts = Event.event_counts_by_bucket(
       issue_ids: [@issue.id],
       time_range: @spark_range,
       buckets: @spark_buckets,

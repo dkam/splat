@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
-class Issue < ApplicationRecord
+class Issue < IssuesEventsRecord
+  # project lives on the primary DB; AR can't JOIN across DBs but
+  # `issue.project` is fine (one extra SELECT against primary).
   belongs_to :project
   has_many :events, dependent: :nullify
 
@@ -85,22 +87,6 @@ class Issue < ApplicationRecord
       count: count + 1,
       last_seen: timestamp
     )
-  end
-
-  def to_ducklake_row
-    {
-      id: id,
-      project_id: project_id,
-      fingerprint: fingerprint,
-      title: title,
-      exception_type: exception_type,
-      status: Issue.statuses[status],
-      count: count,
-      first_seen: first_seen,
-      last_seen: last_seen,
-      created_at: created_at,
-      updated_at: updated_at
-    }
   end
 
   private

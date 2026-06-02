@@ -1,0 +1,68 @@
+require "concurrent/map"
+require "zstd-ruby"
+
+module Compression
+  # Per-process cache of zstd dictionaries.
+  #
+  # Indexed by (db, id) for direct lookups (encode-known and decode-by-row-id).
+  # Also tracks the currently-active dict id for each (db, segment) so the
+  # chooser can ask "what dict do I write events:project:42 with right now?".
+  #
+  # Entries hold raw bytes plus pre-constructed Zstd::CDict/DDict, since
+  # constructing those is cheap-ish but not free per-call.
+  class DictStore
+    Entry = Struct.new(:id, :segment, :version, :bytes, :cdict, :ddict)
+
+    class << self
+      def fetch(db, id)
+        return nil if id.nil?
+        by_id(db)[id] ||= load_row(db, id)
+      end
+
+      # Active dict id for a segment (e.g. "events" or "events:platform:python").
+      # Returns nil if no active dict exists for that segment.
+      def active_id(db, segment)
+        active_by_segment(db).compute_if_absent(segment) do
+          model(db).where(segment: segment, active: true).limit(1).pick(:id) || :missing
+        end.then { |v| v == :missing ? nil : v }
+      end
+
+      # Invalidate the active-id cache for a segment. Called after the
+      # training job promotes a new dict so the next write picks it up.
+      def invalidate_active(db, segment)
+        active_by_segment(db).delete(segment)
+      end
+
+      # Wipe everything — useful in tests.
+      def reset!
+        @by_id = {}
+        @active_by_segment = {}
+      end
+
+      private
+
+      def model(db)
+        case db
+        when :issues_events      then IssuesEventsDict
+        when :transactions_spans then TransactionsSpansDict
+        else raise ArgumentError, "unknown db #{db.inspect}"
+        end
+      end
+
+      def by_id(db)
+        (@by_id ||= {})[db] ||= Concurrent::Map.new
+      end
+
+      def active_by_segment(db)
+        (@active_by_segment ||= {})[db] ||= Concurrent::Map.new
+      end
+
+      def load_row(db, id)
+        row = model(db).find_by(id: id)
+        return nil unless row
+        Entry.new(row.id, row.segment, row.version, row.dict,
+                  Zstd::CDict.new(row.dict), Zstd::DDict.new(row.dict))
+      end
+    end
+  end
+end

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module Ingest
-  # Stage 1 transactions: drain splat.transactions, run AR
-  # create_from_sentry_payload! per row, then push hydrated transaction +
-  # span rows downstream as one packed body per tube per batch.
+  # Drains splat.transactions: runs AR create_from_sentry_payload!, extracts
+  # spans into the same DB via insert_all!, and bumps the live-hour
+  # transaction_histograms counters in one batched ON CONFLICT INSERT.
   class TransactionConsumer < TubeConsumer
     def initialize(batch_size: DEFAULT_BATCH_SIZE)
       super(tube: Tuber::TRANSACTIONS_TUBE, batch_size: batch_size)
@@ -12,9 +12,9 @@ module Ingest
     private
 
     def process_batch(jobs)
-      transactions = []
-      span_rows = []
-      outcomes = []
+      outcomes      = []
+      span_rows     = []
+      hist_tuples   = []
 
       jobs.each do |job|
         args = JSON.parse(job.body)
@@ -31,8 +31,9 @@ module Ingest
                                    timestamp: transaction.timestamp, kind: :transaction)
         end
 
-        transactions << transaction
         span_rows.concat(build_span_rows(transaction, args["payload"]))
+        hist_tuples << [transaction.project_id, transaction.transaction_name,
+                        transaction.timestamp, transaction.duration]
         outcomes << [job, :ok]
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
@@ -41,21 +42,20 @@ module Ingest
         outcomes << [job, :retry]
       end
 
-      forward_to_mirror(transactions, span_rows)
+      persist_side_effects(span_rows, hist_tuples)
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
     end
 
-    def forward_to_mirror(transactions, span_rows)
-      if transactions.any?
-        Tuber.put(Tuber::DUCKLAKE_TRANSACTIONS_TUBE,
-                  { table: "transactions", rows: transactions.map(&:to_ducklake_row) })
-      end
-      if span_rows.any?
-        Tuber.put(Tuber::DUCKLAKE_SPANS_TUBE,
-                  { table: "spans", rows: span_rows })
+    # Spans + histogram updates land in the transactions_spans DB, all in
+    # one connection. If the batch is empty (every job failed), this is a no-op.
+    def persist_side_effects(span_rows, hist_tuples)
+      return if span_rows.empty? && hist_tuples.empty?
+      TransactionsSpansRecord.connection.transaction do
+        Span.insert_all!(span_rows) if span_rows.any?
+        Analytics::Histogram.bump_many!(hist_tuples)
       end
     rescue => e
-      log_exception("[#{self.class.name}] mirror forward failed", e)
+      log_exception("[#{self.class.name}] persist side effects failed", e)
     end
 
     def build_span_rows(transaction, payload)
@@ -108,8 +108,17 @@ module Ingest
       rows
     end
 
+    # Pre-compressed span row for Span.insert_all! — bypasses the AR
+    # before_save concern, so encode here.
     def build_span_row(project_id:, trace_id:, transaction_id:, span_id:, parent_span_id:,
                        start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
+      dict_id = Compression::DictChooser.choose(
+        db: :transactions_spans, table: "spans", project_id: project_id
+      )
+      blob = Compression::Codec.encode(
+        { "tags" => tags, "data" => data }.to_json,
+        db: :transactions_spans, dict_id: dict_id
+      )
       {
         project_id: project_id,
         trace_id: trace_id,
@@ -121,16 +130,14 @@ module Ingest
         op: op,
         status: status,
         description: Transaction::SqlNormalizer.normalize(description),
-        tags: tags,
-        data: data,
+        payload_blob: blob,
+        dict_id: dict_id,
         depth: depth.to_i,
         sequence: sequence.to_i,
         created_at: Time.current
       }
     end
 
-    # Always return UTC. JSON-serializing a non-UTC Time produces a string
-    # with offset, which DuckDB's TIMESTAMP type rejects.
     def parse_ts(value)
       t = case value
           when Numeric then Time.at(value)
