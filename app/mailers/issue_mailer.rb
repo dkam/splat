@@ -25,6 +25,23 @@ class IssueMailer < ApplicationMailer
     )
   end
 
+  def burst_detected(issue, rate)
+    @issue = issue
+    @project = issue.project
+    @url = generate_issue_url(issue)
+    @rate = rate
+    @threshold = Setting.instance.auto_ignore_threshold
+    @auto_ignored = issue.ignored? && issue.auto_ignored_at.present?
+
+    subject_prefix = @auto_ignored ? "Auto-ignored noisy issue" : "Issue burst detected"
+
+    mail(
+      from: ENV.fetch('SPLAT_EMAIL_FROM', 'splat@example.com'),
+      to: admin_emails,
+      subject: "[Splat] #{subject_prefix}: #{issue.title}"
+    )
+  end
+
   private
 
   def admin_emails

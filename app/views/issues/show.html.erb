@@ -71,6 +71,46 @@
       </div>
     </div>
     <%= turbo_stream_from @issue, "updates" %>
+
+    <% if @issue.auto_ignored_at.present? && @issue.ignored? %>
+      <div class="mb-6 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">🤖</span>
+          <div class="flex-1 text-sm text-amber-900 dark:text-amber-200">
+            <p class="font-semibold mb-1">Auto-ignored due to event spike</p>
+            <p>
+              Splat ignored this issue at
+              <strong><%= @issue.auto_ignored_at.strftime("%Y-%m-%d %H:%M:%S") %></strong>
+              because it was emitting
+              <strong><%= number_with_delimiter(@issue.auto_ignore_rate) %> events/hour</strong>.
+              Reopen it if this is a real bug worth tracking.
+            </p>
+          </div>
+          <%= button_to reopen_project_issue_path(@project.slug, @issue),
+              method: :patch,
+              class: "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors",
+              form: { data: { turbo: true } } do %>
+            Reopen
+          <% end %>
+        </div>
+      </div>
+    <% elsif @issue.auto_ignore_rate.present? && @issue.open? && @issue.auto_ignore_rate >= Setting.instance.auto_ignore_threshold %>
+      <div class="mb-6 bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">🔥</span>
+          <div class="flex-1 text-sm text-orange-900 dark:text-orange-200">
+            <p class="font-semibold mb-1">Bursting</p>
+            <p>
+              This issue is emitting
+              <strong><%= number_with_delimiter(@issue.auto_ignore_rate) %> events/hour</strong>
+              (threshold: <%= number_with_delimiter(Setting.instance.auto_ignore_threshold) %>/hour).
+              Splat sent an alert; auto-ignore is off so the issue is still being tracked.
+            </p>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
     <!-- Stats -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">

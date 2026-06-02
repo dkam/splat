@@ -197,6 +197,64 @@
     </div>
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Noise Control</h2>
+      <p class="text-gray-600 dark:text-gray-400 mb-4">
+        When an open issue's event rate over the last hour crosses the threshold below, Splat
+        sends a spike alert (email + ntfy) — deduped to one per issue per hour. If
+        <em>Auto-ignore</em> is also enabled, the issue is additionally flipped to ignored so
+        it stops dominating the list. The same threshold drives the 🔥 burst badge on the
+        issues list.
+      </p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <%= form.label :auto_ignore_enabled, "Enable auto-ignore", class: "flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300" do %>
+            <%= form.check_box :auto_ignore_enabled, class: "rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600 focus:ring-blue-500" %>
+            Auto-ignore bursting issues
+          <% end %>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">When off (default), spike alerts still fire but the issue stays open and tracked normally.</p>
+        </div>
+
+        <div>
+          <%= form.label :auto_ignore_threshold, "Spike threshold", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :auto_ignore_threshold, min: 1, max: 1_000_000, class: "block w-32 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600 dark:text-gray-400">events / hour</span>
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 1,000 / hour.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">ntfy Notifications</h2>
+      <p class="text-gray-600 dark:text-gray-400 mb-4">
+        Push notifications via <a href="https://ntfy.sh" class="text-blue-600 dark:text-blue-400 underline" target="_blank" rel="noopener">ntfy</a> for new and reopened issues.
+        Leave the topic URL blank to disable.
+      </p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="md:col-span-2">
+          <%= form.label :ntfy_url, "Topic URL", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.url_field :ntfy_url, placeholder: "https://ntfy.sh/my-splat-topic", class: "block w-full rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Full URL to your topic (e.g. <code>https://ntfy.sh/my-topic</code> or a self-hosted server).</p>
+        </div>
+
+        <div>
+          <%= form.label :ntfy_token, "Access Token (optional)", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.password_field :ntfy_token, value: @setting.ntfy_token, autocomplete: "off", class: "block w-full rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Bearer token for protected topics. Sent as <code>Authorization: Bearer ...</code>.</p>
+        </div>
+
+        <div>
+          <%= form.label :ntfy_priority, "Priority", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.select :ntfy_priority, NtfyNotifier::VALID_PRIORITIES.map { |p| [p, p] }, {}, class: "block w-full rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default priority (<code>min</code>, <code>low</code>, <code>default</code>, <code>high</code>, <code>max</code>).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Current Status</h2>
 
       <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">SQLite (hot)</h3>

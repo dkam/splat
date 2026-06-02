@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_31_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_02_232710) do
   create_table "events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration", default: 0, null: false
@@ -40,6 +40,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_31_000000) do
   end
 
   create_table "issues", force: :cascade do |t|
+    t.integer "auto_ignore_rate"
+    t.datetime "auto_ignored_at"
     t.integer "count", default: 0
     t.datetime "created_at", null: false
     t.string "exception_type"
@@ -99,6 +101,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_31_000000) do
   end
 
   create_table "settings", force: :cascade do |t|
+    t.boolean "auto_ignore_enabled", default: false, null: false
+    t.integer "auto_ignore_threshold", default: 1000, null: false
     t.datetime "created_at", null: false
     t.integer "ducklake_events_retention_days", default: 365, null: false
     t.integer "ducklake_issues_retention_days", default: 730, null: false
@@ -107,6 +111,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_31_000000) do
     t.integer "event_payloads_retention_days", default: 7, null: false
     t.integer "events_data_retention_days", default: 30, null: false
     t.string "forward_dsn"
+    t.string "ntfy_priority", default: "default", null: false
+    t.string "ntfy_token"
+    t.string "ntfy_url"
     t.integer "transaction_measurements_retention_days", default: 7, null: false
     t.integer "transactions_data_retention_days", default: 90, null: false
     t.datetime "updated_at", null: false

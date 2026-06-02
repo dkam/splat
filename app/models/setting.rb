@@ -19,7 +19,19 @@ class Setting < ApplicationRecord
       ducklake_events_retention_days: 365,
       ducklake_transactions_retention_days: 365,
       ducklake_issues_retention_days: 730,
-      ducklake_spans_retention_days: 30
+      ducklake_spans_retention_days: 30,
+
+      # Noise control — when an open issue's hourly event rate crosses this
+      # threshold we send an email + ntfy spike alert (deduped ~1h per issue).
+      # If `auto_ignore_enabled` is true we also flip the issue to ignored.
+      # The same threshold drives the 🔥 burst badge on the issues list.
+      auto_ignore_enabled: false,
+      auto_ignore_threshold: 1000,
+
+      # ntfy (https://ntfy.sh) push notifications for new/reopened issues.
+      # ntfy_url is the full topic URL (e.g. https://ntfy.sh/my-splat); leave
+      # blank to disable.
+      ntfy_priority: "default"
     }
   end
 
@@ -60,6 +72,10 @@ class Setting < ApplicationRecord
     forward_dsn.present?
   end
 
+  def ntfy_configured?
+    ntfy_url.present?
+  end
+
   # Validation
   validates :event_payloads_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
   validates :events_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 365 }
@@ -69,7 +85,10 @@ class Setting < ApplicationRecord
   validates :ducklake_transactions_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :ducklake_issues_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :ducklake_spans_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
+  validates :auto_ignore_threshold, numericality: { greater_than: 0, less_than_or_equal_to: 1_000_000 }
   validate :forward_dsn_parseable
+  validates :ntfy_priority, inclusion: { in: NtfyNotifier::VALID_PRIORITIES }, allow_blank: true
+  validate :ntfy_url_parseable
 
   private
 
@@ -79,5 +98,13 @@ class Setting < ApplicationRecord
     EnvelopeForwarder.parse_dsn(forward_dsn)
   rescue EnvelopeForwarder::InvalidDsn => e
     errors.add(:forward_dsn, e.message)
+  end
+
+  def ntfy_url_parseable
+    return if ntfy_url.blank?
+
+    NtfyNotifier.parse_url(ntfy_url)
+  rescue NtfyNotifier::InvalidUrl => e
+    errors.add(:ntfy_url, e.message)
   end
 end

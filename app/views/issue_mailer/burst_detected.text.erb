@@ -1,0 +1,25 @@
+<%= @auto_ignored ? "🤖 Issue Auto-Ignored" : "🔥 Issue Burst Detected" %>
+
+Issue: <%= @issue.title %>
+
+This issue is emitting <%= number_with_delimiter(@rate) %> events/hour
+(threshold: <%= number_with_delimiter(@threshold) %>/hour).
+
+Details:
+- Exception Type: <%= @issue.exception_type || 'Unknown' %>
+- Project: <%= @project.name %>
+<% if @auto_ignored %>
+- Auto-ignored at: <%= @issue.auto_ignored_at.strftime('%Y-%m-%d %H:%M:%S UTC') %>
+
+The issue has been auto-ignored. Reopen it if this was a real bug worth tracking.
+<% else %>
+
+This is just a heads-up. The issue is still tracked normally — auto-ignore is off.
+You can enable auto-ignore in Settings → Noise Control if you want noisy issues
+silenced automatically.
+<% end %>
+
+View Issue: <%= @url %>
+
+---
+This notification was sent by Splat - your lightweight error tracker.

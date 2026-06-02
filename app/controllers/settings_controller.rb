@@ -32,7 +32,12 @@ class SettingsController < ApplicationController
       :ducklake_events_retention_days,
       :ducklake_transactions_retention_days,
       :ducklake_issues_retention_days,
-      :ducklake_spans_retention_days
+      :ducklake_spans_retention_days,
+      :auto_ignore_enabled,
+      :auto_ignore_threshold,
+      :ntfy_url,
+      :ntfy_token,
+      :ntfy_priority
     )
   end
 end

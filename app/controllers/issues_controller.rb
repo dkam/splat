@@ -37,6 +37,8 @@ class IssuesController < ApplicationController
     @deploy_markers = @project.releases
       .where(first_seen_at: @sparkline_range)
       .pluck(:first_seen_at)
+
+    @burst_threshold = Setting.instance.auto_ignore_threshold
   end
 
   def show
@@ -66,7 +68,7 @@ class IssuesController < ApplicationController
   end
 
   def reopen
-    @issue.open!
+    @issue.update!(status: :open, auto_ignored_at: nil, auto_ignore_rate: nil)
     redirect_to project_issue_path(@project.slug, @issue), notice: "Issue reopened"
   end
 

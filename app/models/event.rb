@@ -53,6 +53,8 @@ class Event < ApplicationRecord
          .where("last_seen < ?", event.timestamp)
          .update_all(last_seen: event.timestamp, updated_at: Time.current)
 
+    issue.maybe_alert_burst!
+
     event
   end
 
