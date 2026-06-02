@@ -106,10 +106,21 @@ services:
     volumes:
       - /storage/splat-booko-sqlite/storage:/rails/storage
       - /storage/splat-booko-sqlite/logs/ducklake:/rails/log
-    # ParquetLake writes are bounded per-batch (COPY of ~100 rows → one
-    # Parquet file) — no large catalog flush, no inlined-data buildup.
-    # 512M covers DuckDB + reserved tube bodies comfortably.
-    mem_limit: 512M
+    environment:
+      <<: *common-variables
+      # Compaction's COPY (SELECT * FROM read_parquet([files...])) holds
+      # per-file footer/dictionary/decompression state in working memory —
+      # non-spillable read state, not just sort buffer. A bad day (bug
+      # firing tens of thousands of events into one partition) can push
+      # working set to ~1 GB. Give DuckDB room to handle it without
+      # falling back to chunked manual compaction.
+      DUCKDB_MEMORY_LIMIT: 1GB
+    # Ingest's working set is tiny (per-batch COPY of ~100 rows); compaction's
+    # is whatever yesterday accumulated. 1.5 G fits DUCKDB_MEMORY_LIMIT=1GB
+    # plus Ruby + reserved tube bodies, with headroom for the occasional
+    # backlog catch-up. Still 25% lower than the pre-cutover 2 G DuckLake
+    # needed because there's no catalog SQLite buffer cache to feed.
+    mem_limit: 1500M
     # Can safely scale beyond 1 now that there's no shared catalog. Each
     # consumer writes its own UUID-named Parquet file per batch; no contention.
     deploy:
