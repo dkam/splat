@@ -139,12 +139,14 @@ module ParquetLake
         rows.group_by { |r| partition_for(r) }
       end
 
-      # Hive-partitioning convention: year=YYYY/month=M/day=D with unpadded
-      # month and day (matches what DuckDB itself emits with PARTITION_BY and
-      # what read_parquet(hive_partitioning=true) parses out as virtual cols).
+      # Hive-partitioning convention: year=YYYY/month=M/day=D/hour=H with
+      # unpadded numbers. Hour granularity bounds compaction's working set —
+      # one hour's data fits comfortably in DuckDB's memory limit regardless
+      # of traffic, where one day's data could blow past 1 GB and OOM on a
+      # JSON-heavy table like events.
       def partition_for(row)
         ts = parse_time(row[:timestamp] || row["timestamp"])
-        "year=#{ts.year}/month=#{ts.month}/day=#{ts.day}"
+        "year=#{ts.year}/month=#{ts.month}/day=#{ts.day}/hour=#{ts.hour}"
       end
 
       def parse_time(ts)

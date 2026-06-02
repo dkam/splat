@@ -14,9 +14,11 @@ module ParquetLake
     TABLES = %w[events transactions spans].freeze
 
     # Today's partition is excluded — writers are still appending to it.
-    # Yesterday and older are merged.
+    # Yesterday and older are merged. Each partition is one hour's worth of
+    # data, which fits in DuckDB's memory limit even on the events table.
     def perform(cutoff_date: Date.current)
       data_path = ParquetLake::Connection.data_path
+      ParquetLake::Connection.execute("SET preserve_insertion_order = false")
       compacted = 0
       TABLES.each do |table|
         PartitionPath.partition_dirs(data_path, table).each do |dir|
@@ -41,13 +43,13 @@ module ParquetLake
 
       file_list_sql = files.map { |f| "'#{escape(f)}'" }.join(", ")
 
-      # EXCLUDE (year, month, day): hive_partitioning=true injects these as
-      # virtual columns derived from the directory path. We don't want them
-      # in the merged file's row data — the directory path still provides
-      # the partition information on read.
+      # EXCLUDE the hive partition columns: hive_partitioning=true injects
+      # year/month/day/hour as virtual columns derived from the directory
+      # path. We don't want them in the merged file's row data — the
+      # directory path still provides the partition information on read.
       ParquetLake::Connection.execute(<<~SQL)
         COPY (
-          SELECT * EXCLUDE (year, month, day)
+          SELECT * EXCLUDE (year, month, day, hour)
           FROM read_parquet([#{file_list_sql}], hive_partitioning=true)
           ORDER BY timestamp
         ) TO '#{escape(tmp_path)}' (FORMAT PARQUET, COMPRESSION ZSTD)

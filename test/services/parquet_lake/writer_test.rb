@@ -26,7 +26,7 @@ class ParquetLake::WriterTest < ActiveSupport::TestCase
 
     files = Dir.glob(File.join(@data_path, "events", "**", "*.parquet"))
     assert_equal 1, files.size
-    assert_match %r{events/year=2026/month=6/day=1/}, files.first
+    assert_match %r{events/year=2026/month=6/day=1/hour=12/}, files.first
 
     result = ParquetLake::Connection.query(
       "SELECT * FROM read_parquet('#{File.join(@data_path, "events", "**", "*.parquet")}', hive_partitioning=true) ORDER BY id"
@@ -37,18 +37,20 @@ class ParquetLake::WriterTest < ActiveSupport::TestCase
     assert_equal "RuntimeError", result.first["exception_type"]
   end
 
-  test "rows spanning multiple days produce one file per day-partition" do
+  test "rows spanning multiple hours produce one file per hour-partition" do
     rows = [
       events_row(id: 1, timestamp: Time.utc(2026, 6, 1, 10, 0, 0)),
-      events_row(id: 2, timestamp: Time.utc(2026, 6, 2, 10, 0, 0)),
-      events_row(id: 3, timestamp: Time.utc(2026, 6, 2, 23, 0, 0))
+      events_row(id: 2, timestamp: Time.utc(2026, 6, 2, 10, 30, 0)),
+      events_row(id: 3, timestamp: Time.utc(2026, 6, 2, 23, 15, 0))
     ]
     ParquetLake::Writer.write(table: "events", rows: rows)
 
-    day1 = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=1", "*.parquet"))
-    day2 = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=2", "*.parquet"))
-    assert_equal 1, day1.size, "day=1 should have one file"
-    assert_equal 1, day2.size, "day=2 should have one file (both rows in same batch+partition)"
+    h10_d1 = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=1/hour=10", "*.parquet"))
+    h10_d2 = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=2/hour=10", "*.parquet"))
+    h23_d2 = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=2/hour=23", "*.parquet"))
+    assert_equal 1, h10_d1.size
+    assert_equal 1, h10_d2.size
+    assert_equal 1, h23_d2.size
 
     total = ParquetLake::Connection.query(
       "SELECT count(*) AS c FROM read_parquet('#{File.join(@data_path, "events", "**", "*.parquet")}', hive_partitioning=true)"
@@ -71,7 +73,7 @@ class ParquetLake::WriterTest < ActiveSupport::TestCase
     ParquetLake::Writer.write(table: "events", rows: [events_row(id: 1, timestamp: ts)])
     ParquetLake::Writer.write(table: "events", rows: [events_row(id: 2, timestamp: ts)])
 
-    files = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=1", "*.parquet"))
+    files = Dir.glob(File.join(@data_path, "events/year=2026/month=6/day=1/hour=12", "*.parquet"))
     assert_equal 2, files.size
     assert_equal files.size, files.uniq.size
   end

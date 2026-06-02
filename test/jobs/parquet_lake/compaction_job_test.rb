@@ -16,14 +16,16 @@ class ParquetLake::CompactionJobTest < ActiveSupport::TestCase
     ParquetLake::Connection.reset!
   end
 
-  test "merges multiple parquet files in an old partition into one" do
+  test "merges multiple parquet files in an old hour partition into one" do
     yesterday = Date.current - 1
-    # Two separate Writer.write calls land as two files in the same day-partition.
-    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "a", timestamp: yesterday.to_time(:utc) + 1.hour)])
-    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "b", timestamp: yesterday.to_time(:utc) + 2.hours)])
+    # Two writes at the same hour land as two files in one hour-partition.
+    base = yesterday.to_time(:utc) + 1.hour
+    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "a", timestamp: base)])
+    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "b", timestamp: base + 5.minutes)])
 
     partition_dir = File.join(@data_path, "transactions",
-                              "year=#{yesterday.year}", "month=#{yesterday.month}", "day=#{yesterday.day}")
+                              "year=#{yesterday.year}", "month=#{yesterday.month}",
+                              "day=#{yesterday.day}", "hour=1")
     assert_equal 2, Dir.glob(File.join(partition_dir, "*.parquet")).size
 
     compacted = ParquetLake::CompactionJob.new.perform
@@ -32,7 +34,6 @@ class ParquetLake::CompactionJobTest < ActiveSupport::TestCase
     files = Dir.glob(File.join(partition_dir, "*.parquet"))
     assert_equal 1, files.size, "expected exactly one merged file"
 
-    # All rows preserved
     result = ParquetLake::Connection.query(
       "SELECT count(*) AS c, sum(CASE WHEN transaction_id='a' THEN 1 ELSE 0 END) AS a_n " \
       "FROM read_parquet('#{files.first}')"
@@ -41,26 +42,31 @@ class ParquetLake::CompactionJobTest < ActiveSupport::TestCase
     assert_equal 1, result["a_n"]
   end
 
-  test "skips today's partition (still being written)" do
+  test "skips today's partitions (still being written)" do
     today = Date.current
-    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "a", timestamp: today.to_time(:utc) + 1.hour)])
-    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "b", timestamp: today.to_time(:utc) + 2.hours)])
+    base = today.to_time(:utc) + 1.hour
+    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "a", timestamp: base)])
+    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "b", timestamp: base + 5.minutes)])
 
     partition_dir = File.join(@data_path, "transactions",
-                              "year=#{today.year}", "month=#{today.month}", "day=#{today.day}")
+                              "year=#{today.year}", "month=#{today.month}",
+                              "day=#{today.day}", "hour=1")
     assert_equal 2, Dir.glob(File.join(partition_dir, "*.parquet")).size
 
     ParquetLake::CompactionJob.new.perform
 
-    assert_equal 2, Dir.glob(File.join(partition_dir, "*.parquet")).size, "today's partition should be untouched"
+    assert_equal 2, Dir.glob(File.join(partition_dir, "*.parquet")).size,
+                 "today's hour partition should be untouched"
   end
 
-  test "single-file partition is a no-op" do
+  test "single-file hour partition is a no-op" do
     yesterday = Date.current - 1
-    ParquetLake::Writer.write(table: "transactions", rows: [tx_row(transaction_id: "a", timestamp: yesterday.to_time(:utc) + 1.hour)])
+    ParquetLake::Writer.write(table: "transactions",
+                              rows: [tx_row(transaction_id: "a", timestamp: yesterday.to_time(:utc) + 1.hour)])
 
     partition_dir = File.join(@data_path, "transactions",
-                              "year=#{yesterday.year}", "month=#{yesterday.month}", "day=#{yesterday.day}")
+                              "year=#{yesterday.year}", "month=#{yesterday.month}",
+                              "day=#{yesterday.day}", "hour=1")
     files_before = Dir.glob(File.join(partition_dir, "*.parquet"))
     assert_equal 1, files_before.size
 
@@ -71,11 +77,35 @@ class ParquetLake::CompactionJobTest < ActiveSupport::TestCase
     assert_equal files_before, files_after
   end
 
+  test "compacts multiple hour partitions within yesterday" do
+    yesterday = Date.current - 1
+    [1, 2].each do |hour|
+      base = yesterday.to_time(:utc) + hour.hours
+      2.times do |i|
+        ParquetLake::Writer.write(table: "transactions",
+                                  rows: [tx_row(transaction_id: "h#{hour}-#{i}",
+                                                timestamp: base + (i * 60).seconds)])
+      end
+    end
+
+    compacted = ParquetLake::CompactionJob.new.perform
+    assert_equal 2, compacted, "should compact both hour=1 and hour=2"
+
+    [1, 2].each do |hour|
+      partition_dir = File.join(@data_path, "transactions",
+                                "year=#{yesterday.year}", "month=#{yesterday.month}",
+                                "day=#{yesterday.day}", "hour=#{hour}")
+      assert_equal 1, Dir.glob(File.join(partition_dir, "*.parquet")).size,
+                   "hour=#{hour} should have one merged file"
+    end
+  end
+
   test "no .tmp files remain after a successful compaction" do
     yesterday = Date.current - 1
+    base = yesterday.to_time(:utc) + 1.hour
     2.times do |i|
       ParquetLake::Writer.write(table: "transactions",
-                                rows: [tx_row(transaction_id: "tx#{i}", timestamp: yesterday.to_time(:utc) + i.hours)])
+                                rows: [tx_row(transaction_id: "tx#{i}", timestamp: base + (i * 60).seconds)])
     end
 
     ParquetLake::CompactionJob.new.perform

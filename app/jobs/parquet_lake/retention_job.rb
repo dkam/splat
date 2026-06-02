@@ -15,7 +15,10 @@ module ParquetLake
       data_path = ParquetLake::Connection.data_path
       removed = 0
       TABLES.each do |table|
-        PartitionPath.partition_dirs(data_path, table).each do |dir|
+        # day_dirs (not partition_dirs) so we delete the whole day at once —
+        # works for both the legacy day-level layout and the new layout where
+        # the day dir contains 24 hour=H subdirs.
+        PartitionPath.day_dirs(data_path, table).each do |dir|
           date = PartitionPath.date_from(dir)
           next unless date && date < cutoff
           FileUtils.rm_rf(dir)
