@@ -8,6 +8,12 @@ module Ingest
     DEFAULT_BATCH_SIZE = 100
     RETRY_DELAY = 5
 
+    # When the tubes are empty, park on a single blocking reserve for this many
+    # seconds rather than hot-looping on the non-blocking reserve-batch. The
+    # timeout bounds the park so the loop still wakes periodically to honour the
+    # @stop flag for graceful shutdown.
+    RESERVE_TIMEOUT = 30
+
     # Bury rather than release once a job has been re-tried this many times,
     # so a poison-pill body doesn't cycle on the tube forever.
     MAX_RETRIES = 5
@@ -60,7 +66,15 @@ module Ingest
     private
 
     def reserve_batch
-      @client.tubes.reserve_batch(@batch_size)
+      jobs = @client.tubes.reserve_batch(@batch_size)
+      return jobs unless jobs.empty?
+
+      # Tubes are empty: tuber's reserve-batch returns RESERVED_BATCH 0
+      # immediately, so looping on it busy-spins the CPU. Park on a single
+      # blocking reserve-with-timeout instead — it returns the instant a job
+      # lands, and the next iteration sweeps any siblings back up as a full
+      # batch.
+      [@client.tubes.reserve(RESERVE_TIMEOUT)]
     rescue Beaneater::TimedOutError
       []
     end
