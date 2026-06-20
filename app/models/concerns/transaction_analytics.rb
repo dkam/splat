@@ -37,14 +37,15 @@ module TransactionAnalytics
         Arel.sql("COUNT(*)")
       ) || [nil, nil, nil, 0]
 
+      pcts = global_percentiles(project_id: project_id, environment: environment, time_range: time_range, name_query: name_query)
       {
         avg:   avg.to_f.round(1),
         max:   mx.to_i,
         min:   mn.to_i,
         count: cnt.to_i,
-        p50:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.50, name_query: name_query),
-        p95:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.95, name_query: name_query),
-        p99:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.99, name_query: name_query)
+        p50:   pcts[:p50],
+        p95:   pcts[:p95],
+        p99:   pcts[:p99]
       }
     end
 
@@ -308,7 +309,12 @@ module TransactionAnalytics
     # table). project_id/name/env are bound only when present — `project_id = ?`
     # with NULL matches nothing, and a conditional bind is sargable where the old
     # COALESCE(?, project_id) was not.
-    def global_percentile(project_id:, environment:, time_range:, q:, name_query: nil)
+    # Returns { p50:, p95:, p99: } in ms (nil where there's no data). All three
+    # quantiles come from ONE pass over the merge CTE — the running cumulative is
+    # built once and each quantile is a scalar subquery over it (the 0.50/0.95/
+    # 0.99 constants are literals, not user input). This replaces three separate
+    # CTE evaluations per call.
+    def global_percentiles(project_id:, environment:, time_range:, name_query: nil)
       hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
       until_hour = Analytics::Histogram.hour_bucket(time_range.end)
       proj_filter = project_id.present?  ? "AND project_id = ?" : ""
@@ -340,10 +346,10 @@ module TransactionAnalytics
                  SUM(c) OVER () AS total
             FROM reduced
         )
-        SELECT bucket_index FROM running
-         WHERE cum >= ? * total
-         ORDER BY bucket_index
-         LIMIT 1
+        SELECT
+          (SELECT bucket_index FROM running WHERE cum >= 0.50 * total ORDER BY bucket_index LIMIT 1),
+          (SELECT bucket_index FROM running WHERE cum >= 0.95 * total ORDER BY bucket_index LIMIT 1),
+          (SELECT bucket_index FROM running WHERE cum >= 0.99 * total ORDER BY bucket_index LIMIT 1)
       SQL
       # See Transaction.histogram_percentile: clamp raw-branch lower bound so
       # a sub-hour window doesn't pull rows from before time_range.begin.
@@ -358,10 +364,14 @@ module TransactionAnalytics
       binds << project_id  if project_id.present?
       binds << like        if name_query.present?
       binds << environment if environment.present?
-      binds << q
 
-      bucket = connection.select_value(sanitize_sql_array([sql, *binds]))
-      bucket && Analytics::Histogram.index_to_ms(bucket.to_i)
+      row = connection.select_rows(sanitize_sql_array([sql, *binds])).first || []
+      p50, p95, p99 = row
+      {
+        p50: p50 && Analytics::Histogram.index_to_ms(p50.to_i),
+        p95: p95 && Analytics::Histogram.index_to_ms(p95.to_i),
+        p99: p99 && Analytics::Histogram.index_to_ms(p99.to_i)
+      }
     end
 
     def time_series_for_endpoint_global(time_range, project_id:, buckets:)

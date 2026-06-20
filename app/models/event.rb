@@ -146,7 +146,9 @@ class Event < IssuesEventsRecord
   end
 
   def stacktrace      = exception_details[:stacktrace]
-  def message         = payload&.dig("message") || exception_value
+  # Read the promoted column (populated at ingest) so list views don't
+  # decompress the payload blob per row; fall back to exception_value.
+  def message         = self[:message].presence || exception_value
   def level           = payload&.dig("level") || "error"
   def tags            = payload&.dig("tags") || {}
   def user            = payload&.dig("user") || {}
@@ -178,6 +180,11 @@ class Event < IssuesEventsRecord
     exception_data = payload.dig("exception", "values", 0) || {}
     self.exception_type = exception_data["type"]
     self.exception_value = exception_data["value"]
+
+    # Promote the display message so Event#message reads a column, not the blob.
+    # Sentry's "message" is a string or a {message, params, formatted} object.
+    raw_message = payload["message"]
+    self.message = raw_message.is_a?(Hash) ? raw_message["formatted"] : raw_message
 
     if payload["fingerprint"].present?
       self[:fingerprint] = Array.wrap(payload["fingerprint"]).join("::")

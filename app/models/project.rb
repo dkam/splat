@@ -89,16 +89,23 @@ class Project < ApplicationRecord
     (counts[:errors].to_f / counts[:total] * 100).round(2)
   end
 
+  # avg/p50/p95 all come from one percentiles call (now a single CTE pass);
+  # memoized per time_range so a page reading several doesn't recompute it.
+  def response_percentiles(time_range = 24.hours.ago..Time.current)
+    (@response_percentiles ||= {})[time_range] ||=
+      Transaction.percentiles(time_range, project_id: id)
+  end
+
   def avg_response_time(time_range = 24.hours.ago..Time.current)
-    Transaction.percentiles(time_range, project_id: id)[:avg] || 0
+    response_percentiles(time_range)[:avg] || 0
   end
 
   def p50_response_time(time_range = 24.hours.ago..Time.current)
-    Transaction.percentiles(time_range, project_id: id)[:p50] || 0
+    response_percentiles(time_range)[:p50] || 0
   end
 
   def p95_response_time(time_range = 24.hours.ago..Time.current)
-    Transaction.percentiles(time_range, project_id: id)[:p95] || 0
+    response_percentiles(time_range)[:p95] || 0
   end
 
   def slowest_endpoints(limit: 10, time_range: 24.hours.ago..Time.current)
