@@ -13,6 +13,14 @@ module Compression
   class DictStore
     Entry = Struct.new(:id, :segment, :version, :bytes, :cdict, :ddict)
 
+    # How long an active-id lookup is cached before it's re-read from the DB.
+    # Bounds how long a worker keeps writing with a stale answer after another
+    # process promotes a dict — most importantly, a worker that started before
+    # the first dict was seeded caches the "no active dict" result (which would
+    # otherwise stick until restart, forcing plain-zstd rows forever) for only
+    # this long before picking the new dict up.
+    ACTIVE_TTL = 60 # seconds
+
     class << self
       def fetch(db, id)
         return nil if id.nil?
@@ -20,11 +28,18 @@ module Compression
       end
 
       # Active dict id for a segment (e.g. "events" or "events:platform:python").
-      # Returns nil if no active dict exists for that segment.
+      # Returns nil if no active dict exists for that segment. Cached per process
+      # with a short TTL so cross-process promotions are picked up without a
+      # restart (in-process promotion calls invalidate_active for an instant swap).
       def active_id(db, segment)
-        active_by_segment(db).compute_if_absent(segment) do
-          model(db).where(segment: segment, active: true).order(version: :desc).limit(1).pick(:id) || :missing
-        end.then { |v| v == :missing ? nil : v }
+        cache = active_by_segment(db)
+        entry = cache[segment]
+        if entry.nil? || entry[:expires_at] <= monotonic_now
+          value = model(db).where(segment: segment, active: true).order(version: :desc).limit(1).pick(:id) || :missing
+          entry = { value: value, expires_at: monotonic_now + ACTIVE_TTL }
+          cache[segment] = entry
+        end
+        entry[:value] == :missing ? nil : entry[:value]
       end
 
       # Invalidate the active-id cache for a segment. Called after the
@@ -40,6 +55,10 @@ module Compression
       end
 
       private
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      end
 
       def model(db)
         case db

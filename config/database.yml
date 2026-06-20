@@ -11,6 +11,11 @@ default: &default
   # WAL with synchronous=NORMAL is the high-throughput SQLite config:
   # readers don't block writers, single fsync per checkpoint instead of per
   # commit. mmap_size + cache_size reduce IO under burst-write load.
+  #
+  # NOTE: auto_vacuum is deliberately NOT set here. A connect-time pragma is
+  # silently ineffective — the foreign_keys/journal_mode pragmas above read the
+  # schema first, after which SQLite ignores an auto_vacuum change until a
+  # VACUUM. It's enforced in config/initializers/sqlite_auto_vacuum.rb instead.
   pragmas:
     journal_mode: wal
     synchronous: normal
