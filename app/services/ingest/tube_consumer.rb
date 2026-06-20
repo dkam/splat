@@ -17,8 +17,6 @@ module Ingest
     def initialize(tube:, batch_size: DEFAULT_BATCH_SIZE)
       @tube = tube
       @batch_size = batch_size
-      @client = Tuber.consumer_client
-      @client.tubes.watch!(tube)
       @stop = false
     end
 
@@ -27,6 +25,16 @@ module Ingest
     end
 
     def run
+      # Open the connection and WATCH on the same thread that reserves.
+      # Beaneater connections are per-thread: a watch! issued on the
+      # constructing thread doesn't apply to the socket this thread reserves
+      # on, so the worker would silently reserve from `default` (empty) and
+      # never drain its tube. Each thread owning its own connection keeps the
+      # watched-tube state on the socket doing the work.
+      @client = Tuber.consumer_client
+      @client.tubes.watch!(@tube)
+      Rails.logger.info "[#{self.class.name}] watching #{@tube}"
+
       until @stop
         begin
           process_one_batch
@@ -36,7 +44,7 @@ module Ingest
         end
       end
     ensure
-      @client.close rescue nil
+      @client&.close rescue nil
     end
 
     def process_one_batch
