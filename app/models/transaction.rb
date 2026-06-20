@@ -15,7 +15,9 @@ class Transaction < TransactionsSpansRecord
   validates :duration, presence: true, numericality: { greater_than_or_equal_to: 0 }
 
   scope :recent, -> { order(timestamp: :desc) }
-  scope :slow, -> { where("duration > ?", 1000) }
+  # NOTE: no `scope :slow` — TransactionAnalytics.slow(time_range:, …) is the
+  # public API (used by MCP search_slow_transactions). A no-arg scope here would
+  # silently override it (scope is defined after the include) and break callers.
   scope :by_name, ->(name) { where(transaction_name: name) }
   scope :by_environment, ->(env) { where(environment: env) }
   scope :by_server, ->(server) { where(server_name: server) }
@@ -103,21 +105,26 @@ class Transaction < TransactionsSpansRecord
   def self.histogram_percentile(project_id:, transaction_name:, quantile:, since:, until_time: Time.current, environment: nil)
     hour_start = Analytics::Histogram.hour_bucket(since)
     until_hour = Analytics::Histogram.hour_bucket(until_time)
-    env_filter = environment.present? ? "AND environment = ?" : ""
+    # project_id is bound only when present: `project_id = NULL` matches no
+    # rows, so a nil (= "all projects") caller would otherwise get 0ms back.
+    proj_filter = project_id.present? ? "AND project_id = ?" : ""
+    env_filter  = environment.present? ? "AND environment = ?" : ""
     sql = <<~SQL
       WITH merged AS (
         SELECT bucket_index, SUM(count) AS c
           FROM transaction_histograms
-         WHERE project_id = ? AND transaction_name = ?
+         WHERE transaction_name = ?
            AND hour_bucket >= ? AND hour_bucket < ?
+           #{proj_filter}
            #{env_filter}
          GROUP BY bucket_index
         UNION ALL
         SELECT CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
                COUNT(*) AS c
           FROM transactions
-         WHERE project_id = ? AND transaction_name = ?
+         WHERE transaction_name = ?
            AND timestamp >= ? AND timestamp < ?
+           #{proj_filter}
            #{env_filter}
          GROUP BY 1
       ), reduced AS (
@@ -137,9 +144,12 @@ class Transaction < TransactionsSpansRecord
     # `since` and `until_time` land in the same hour, `until_hour` < `since`
     # and the raw window would otherwise widen to the start of the hour.
     raw_lower = [since, until_hour].max
-    binds = [project_id, transaction_name, hour_start, until_hour]
+    binds = [transaction_name, hour_start, until_hour]
+    binds << project_id  if project_id.present?
     binds << environment if environment.present?
-    binds.push(Analytics::Histogram::GAMMA, project_id, transaction_name, raw_lower, until_time)
+    binds << Analytics::Histogram::GAMMA
+    binds.push(transaction_name, raw_lower, until_time)
+    binds << project_id  if project_id.present?
     binds << environment if environment.present?
     binds << quantile
     bucket = connection.select_value(sanitize_sql_array([sql, *binds]))

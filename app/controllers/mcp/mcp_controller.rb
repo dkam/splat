@@ -707,6 +707,7 @@ module Mcp
         time_range: time_range_hours.hours.ago..Time.current,
         transaction_name: endpoint,
         http_status: http_status,
+        http_method: http_method,
         environment: environment,
         tags: tags,
         limit: limit
@@ -826,7 +827,7 @@ module Mcp
         bucket_count: buckets, environment: environment, release: release
       )
 
-      text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
+      text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release, time_range.begin)
 
       render_text(text)
     end
@@ -1428,8 +1429,9 @@ module Mcp
       header
     end
 
-    def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
-      bucket_minutes = (hours * 60.0 / buckets).round
+    def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release, start_time)
+      bucket_seconds = hours * 3600.0 / buckets
+      bucket_minutes = (bucket_seconds / 60.0).round
 
       header = "## Endpoint Time Series: #{endpoint}\n\n"
       header += "**Time Range:** Last #{hours} hour(s)\n"
@@ -1438,20 +1440,22 @@ module Mcp
       header += "**Release:** #{release}\n" if release.present?
       header += "\n"
 
-      if series.all? { |b| b[:count].zero? }
+      # time_series_for_endpoint returns string-keyed buckets: an integer
+      # "bucket" index plus "count" and "p50"/"p95"/"p99" (no avg/max). Derive
+      # each bucket's wall-clock start from its index and the window origin.
+      if series.all? { |b| b["count"].zero? }
         return header + "No requests in this window.\n"
       end
 
-      header += "| Bucket Start | Count | Avg | P50 | P95 | P99 | Max |\n"
-      header += "|---|---:|---:|---:|---:|---:|---:|\n"
+      header += "| Bucket Start | Count | P50 | P95 | P99 |\n"
+      header += "|---|---:|---:|---:|---:|\n"
       series.each do |b|
-        header += "| #{b[:bucket_start].strftime('%Y-%m-%d %H:%M')} " \
-                 "| #{b[:count]} " \
-                 "| #{format_ms(b[:avg_duration])} " \
-                 "| #{format_ms(b[:p50_duration])} " \
-                 "| #{format_ms(b[:p95_duration])} " \
-                 "| #{format_ms(b[:p99_duration])} " \
-                 "| #{format_ms(b[:max_duration])} |\n"
+        bucket_start = start_time + (b["bucket"] * bucket_seconds)
+        header += "| #{bucket_start.strftime('%Y-%m-%d %H:%M')} " \
+                 "| #{b["count"]} " \
+                 "| #{format_ms(b["p50"])} " \
+                 "| #{format_ms(b["p95"])} " \
+                 "| #{format_ms(b["p99"])} |\n"
       end
       header
     end

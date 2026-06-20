@@ -25,10 +25,11 @@ module TransactionAnalytics
 
     # ---- Aggregate percentiles + simple stats. ----
 
-    def percentiles(time_range, project_id: nil, environment: nil)
+    def percentiles(time_range, project_id: nil, environment: nil, name_query: nil)
       scope = where(timestamp: time_range)
       scope = scope.where(project_id: project_id)   if project_id
       scope = scope.where(environment: environment) if environment.present?
+      scope = scope.where("transaction_name LIKE ?", "%#{name_query}%") if name_query.present?
       avg, mx, mn, cnt = scope.pick(
         Arel.sql("AVG(duration)"),
         Arel.sql("MAX(duration)"),
@@ -41,9 +42,9 @@ module TransactionAnalytics
         max:   mx.to_i,
         min:   mn.to_i,
         count: cnt.to_i,
-        p50:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.50),
-        p95:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.95),
-        p99:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.99)
+        p50:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.50, name_query: name_query),
+        p95:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.95, name_query: name_query),
+        p99:   global_percentile(project_id: project_id, environment: environment, time_range: time_range, q: 0.99, name_query: name_query)
       }
     end
 
@@ -88,7 +89,9 @@ module TransactionAnalytics
     end
 
     # Top endpoints in a window ranked by impact (avg_duration * count).
-    # No histogram needed — count + avg from raw indexed columns is cheap.
+    # Count/avg/query-stats come from the raw indexed columns in one grouped
+    # scan; the histogram-backed p50/p95/p99 are computed only for the returned
+    # top-N (≤ limit endpoints × 3 quantiles) so the percentile cost stays bounded.
     def stats_by_endpoint_with_impact(time_range, project_id: nil, environment: nil, name_query: nil, limit: 20)
       scope = where(timestamp: time_range)
       scope = scope.where(project_id: project_id)        if project_id
@@ -99,18 +102,30 @@ module TransactionAnalytics
         :transaction_name,
         Arel.sql("AVG(duration)"),
         Arel.sql("COUNT(*)"),
-        Arel.sql("MAX(duration)")
+        Arel.sql("MAX(duration)"),
+        Arel.sql("AVG(query_count)"),
+        Arel.sql("MAX(query_count)"),
+        Arel.sql("SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END)")
       )
-      ranked = rows.map { |name, avg, count, mx|
+      ranked = rows.map { |name, avg, count, mx, avg_q, max_q, npo|
         {
           "transaction_name" => name,
           "avg_duration"     => avg.to_f.round(1),
           "count"            => count.to_i,
           "max_duration"     => mx.to_i,
-          "time_spent"       => (avg.to_f * count.to_i).round
+          "time_spent"       => (avg.to_f * count.to_i).round,
+          "avg_queries"      => avg_q.to_f.round(1),
+          "max_queries"      => max_q.to_i,
+          "n_plus_one_count" => npo.to_i
         }
       }.sort_by { |r| -r["time_spent"] }
-      limit ? ranked.first(limit) : ranked
+      ranked = ranked.first(limit) if limit
+
+      ranked.each do |r|
+        pcts = endpoint_percentiles(r["transaction_name"], time_range, project_id: project_id, environment: environment)
+        r.merge!(pcts)
+      end
+      ranked
     end
 
     def stats_by_endpoint(time_range, project_id: nil, limit: 20)
@@ -122,34 +137,56 @@ module TransactionAnalytics
     end
 
     def endpoints_by_n_plus_one(time_range, project_id: nil, environment: nil, limit: 50)
-      scope = where(timestamp: time_range).where(has_n_plus_one: true)
-      scope = scope.where(project_id: project_id)        if project_id
-      scope = scope.where(environment: environment)      if environment.present?
+      base = where(timestamp: time_range)
+      base = base.where(project_id: project_id)   if project_id
+      base = base.where(environment: environment) if environment.present?
 
-      scope.group(:transaction_name).pluck(
+      npo = base.where(has_n_plus_one: true).group(:transaction_name).pluck(
         :transaction_name,
         Arel.sql("COUNT(*)"),
         Arel.sql("AVG(duration)"),
         Arel.sql("MAX(duration)"),
-        Arel.sql("AVG(query_count)")
-      ).map { |name, count, avg, mx, q|
+        Arel.sql("AVG(query_count)"),
+        Arel.sql("MAX(query_count)")
+      )
+      return [] if npo.empty?
+
+      # Total requests per affected endpoint (all of them, not just the N+1 ones)
+      # so the view can show "N+1 / total" and the affected percentage.
+      names  = npo.map(&:first)
+      totals = base.where(transaction_name: names).group(:transaction_name).count
+
+      ranked = npo.map { |name, count, avg, mx, avg_q, max_q|
+        total = totals[name].to_i
         {
-          "transaction_name"   => name,
-          "n_plus_one_count"   => count.to_i,
-          "avg_duration"       => avg.to_f.round(1),
-          "max_duration"       => mx.to_i,
-          "avg_query_count"    => q.to_f.round(1)
+          "transaction_name" => name,
+          "n_plus_one_count" => count.to_i,
+          "total_count"      => total,
+          "n_plus_one_pct"   => total.zero? ? 0 : ((count.to_f / total) * 100).round(1),
+          "avg_duration"     => avg.to_f.round(1),
+          "max_duration"     => mx.to_i,
+          "avg_queries"      => avg_q.to_f.round(1),
+          "max_queries"      => max_q.to_i
         }
       }.sort_by { |r| -r["n_plus_one_count"] }.first(limit)
+
+      ranked.each do |r|
+        pcts = endpoint_percentiles(r["transaction_name"], time_range, project_id: project_id, environment: environment)
+        r.merge!(pcts)
+      end
+      ranked
     end
 
     def slow(time_range:, project_id: nil, threshold_ms: 1000, environment: nil, http_status: nil,
-             transaction_name: nil, tags: nil, limit: 100)
+             http_method: nil, transaction_name: nil, tags: nil, limit: 100)
       scope = where(timestamp: time_range).where("duration > ?", threshold_ms)
       scope = scope.where(project_id: project_id)             if project_id
       scope = scope.where(environment: environment)           if environment.present?
       scope = scope.where(http_status: http_status)           if http_status.present?
-      scope = scope.where(transaction_name: transaction_name) if transaction_name.present?
+      scope = scope.where(http_method: http_method)           if http_method.present?
+      # endpoint is advertised as a case-insensitive substring match (LIKE is
+      # case-insensitive for ASCII in SQLite), not exact equality.
+      scope = scope.where("transaction_name LIKE ?", "%#{transaction_name}%") if transaction_name.present?
       # Push tag predicates into SQL via json_extract so LIMIT applies to
       # the post-filter set. Key allowlist is enforced upstream
       # (mcp_controller#search_slow_transactions); we still bind the value.
@@ -249,26 +286,50 @@ module TransactionAnalytics
 
     private
 
-    def global_percentile(project_id:, environment:, time_range:, q:)
-      # Same shape as histogram_percentile but no transaction_name filter:
-      # merge histograms across all endpoint names, union the live hour.
+    # Histogram-backed p50/p95/p99 for one endpoint over a window, keyed to
+    # match the dashboard/MCP consumers (p50_duration/p95_duration/p99_duration).
+    def endpoint_percentiles(name, time_range, project_id:, environment:)
+      {
+        "p50_duration" => histogram_percentile(project_id: project_id, transaction_name: name,
+                                               environment: environment, quantile: 0.50,
+                                               since: time_range.begin, until_time: time_range.end),
+        "p95_duration" => histogram_percentile(project_id: project_id, transaction_name: name,
+                                               environment: environment, quantile: 0.95,
+                                               since: time_range.begin, until_time: time_range.end),
+        "p99_duration" => histogram_percentile(project_id: project_id, transaction_name: name,
+                                               environment: environment, quantile: 0.99,
+                                               since: time_range.begin, until_time: time_range.end)
+      }
+    end
+
+    # Aggregate percentile across endpoints. With no name_query it merges every
+    # endpoint name; name_query scopes it via the transaction_name dimension the
+    # histogram already carries (so a name-filtered dashboard header matches its
+    # table). project_id/name/env are bound only when present — `project_id = ?`
+    # with NULL matches nothing, and a conditional bind is sargable where the old
+    # COALESCE(?, project_id) was not.
+    def global_percentile(project_id:, environment:, time_range:, q:, name_query: nil)
       hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
       until_hour = Analytics::Histogram.hour_bucket(time_range.end)
-      env_filter = environment.present? ? "AND environment = ?" : ""
+      proj_filter = project_id.present?  ? "AND project_id = ?" : ""
+      name_filter = name_query.present?  ? "AND transaction_name LIKE ?" : ""
+      env_filter  = environment.present? ? "AND environment = ?" : ""
       sql = <<~SQL
         WITH merged AS (
           SELECT bucket_index, SUM(count) AS c
             FROM transaction_histograms
-           WHERE project_id = COALESCE(?, project_id)
-             AND hour_bucket >= ? AND hour_bucket < ?
+           WHERE hour_bucket >= ? AND hour_bucket < ?
+             #{proj_filter}
+             #{name_filter}
              #{env_filter}
            GROUP BY bucket_index
           UNION ALL
           SELECT CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
                  COUNT(*) AS c
             FROM transactions
-           WHERE project_id = COALESCE(?, project_id)
-             AND timestamp >= ? AND timestamp < ?
+           WHERE timestamp >= ? AND timestamp < ?
+             #{proj_filter}
+             #{name_filter}
              #{env_filter}
            GROUP BY 1
         ), reduced AS (
@@ -287,9 +348,15 @@ module TransactionAnalytics
       # See Transaction.histogram_percentile: clamp raw-branch lower bound so
       # a sub-hour window doesn't pull rows from before time_range.begin.
       raw_lower = [time_range.begin, until_hour].max
-      binds = [project_id, hour_start, until_hour]
+      like = "%#{name_query}%" if name_query.present?
+      binds = [hour_start, until_hour]
+      binds << project_id  if project_id.present?
+      binds << like        if name_query.present?
       binds << environment if environment.present?
-      binds.push(Analytics::Histogram::GAMMA, project_id, raw_lower, time_range.end)
+      binds << Analytics::Histogram::GAMMA
+      binds.push(raw_lower, time_range.end)
+      binds << project_id  if project_id.present?
+      binds << like        if name_query.present?
       binds << environment if environment.present?
       binds << q
 

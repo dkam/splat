@@ -23,7 +23,7 @@ class EndpointsController < ApplicationController
     base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
     base_scope = base_scope.where("transaction_name LIKE ?", "%#{@name_query}%") if @name_query
 
-    pct = Transaction.percentiles(time_range, project_id: @project.id, environment: params[:environment])
+    pct = Transaction.percentiles(time_range, project_id: @project.id, environment: params[:environment], name_query: @name_query)
     @p50_duration = pct[:p50] || 0
     @p95_duration = pct[:p95] || 0
     @p99_duration = pct[:p99] || 0
