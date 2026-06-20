@@ -734,11 +734,13 @@ module Mcp
       op_filter = args["op_filter"].to_s.strip
       limit = [[args["limit"]&.to_i || 100, 1].max, 1000].min
 
+      # Materialize a hash per span; duration_ms is a computed method, not
+      # a column, so .attributes alone would miss it.
       all_spans = Span.for_transaction(
         transaction.transaction_id,
         project_id: transaction.project_id,
         near_timestamp: transaction.timestamp
-      ).map(&:attributes)
+      ).map { |s| s.attributes.merge("duration_ms" => s.duration_ms) }
 
       filtered = op_filter.present? ? all_spans.select { |s| s["op"].to_s.start_with?(op_filter) } : all_spans
 

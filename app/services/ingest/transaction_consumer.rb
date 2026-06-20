@@ -12,9 +12,7 @@ module Ingest
     private
 
     def process_batch(jobs)
-      outcomes      = []
-      span_rows     = []
-      hist_tuples   = []
+      outcomes = []
 
       jobs.each do |job|
         args = JSON.parse(job.body)
@@ -25,15 +23,34 @@ module Ingest
           next
         end
 
-        transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
-        if transaction.release.present?
+        # One TransactionsSpansRecord transaction per job: the parent row,
+        # its spans, and the histogram bump commit together or not at all.
+        # On rollback the rescue below marks the job :retry so beanstalkd
+        # redelivers it. create_from_sentry_payload! is idempotent on
+        # (project_id, transaction_id): a redelivery finds the existing row
+        # and skips the save, leaving previously_new_record? false. We gate
+        # spans + the histogram bump on that so redelivery can't insert
+        # duplicate spans (no unique index) or double-count the live hour.
+        transaction = nil
+        TransactionsSpansRecord.transaction do
+          transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
+          if transaction.previously_new_record?
+            span_rows = build_span_rows(transaction, args["payload"])
+            Span.insert_all!(span_rows) if span_rows.any?
+            Analytics::Histogram.bump_many!([
+              [transaction.project_id, transaction.transaction_name, transaction.environment,
+               transaction.timestamp, transaction.duration]
+            ])
+          end
+        end
+
+        # Release lives on the primary DB, so it can't share the inner txn.
+        # record_sighting! is idempotent; safe to run after the inner commit.
+        if transaction&.release.present?
           Release.record_sighting!(project: project, version: transaction.release,
                                    timestamp: transaction.timestamp, kind: :transaction)
         end
 
-        span_rows.concat(build_span_rows(transaction, args["payload"]))
-        hist_tuples << [transaction.project_id, transaction.transaction_name,
-                        transaction.timestamp, transaction.duration]
         outcomes << [job, :ok]
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
@@ -42,20 +59,7 @@ module Ingest
         outcomes << [job, :retry]
       end
 
-      persist_side_effects(span_rows, hist_tuples)
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
-    end
-
-    # Spans + histogram updates land in the transactions_spans DB, all in
-    # one connection. If the batch is empty (every job failed), this is a no-op.
-    def persist_side_effects(span_rows, hist_tuples)
-      return if span_rows.empty? && hist_tuples.empty?
-      TransactionsSpansRecord.connection.transaction do
-        Span.insert_all!(span_rows) if span_rows.any?
-        Analytics::Histogram.bump_many!(hist_tuples)
-      end
-    rescue => e
-      log_exception("[#{self.class.name}] persist side effects failed", e)
     end
 
     def build_span_rows(transaction, payload)
@@ -108,17 +112,12 @@ module Ingest
       rows
     end
 
-    # Pre-compressed span row for Span.insert_all! — bypasses the AR
-    # before_save concern, so encode here.
+    # Row for Span.insert_all!. tags/data are :json columns — pass the raw
+    # Hash and let the column type serialize it once. Pre-encoding with
+    # .to_json double-encodes (Rails re-serializes through the json type),
+    # so Span#tags/#data would read back a JSON String instead of a Hash.
     def build_span_row(project_id:, trace_id:, transaction_id:, span_id:, parent_span_id:,
                        start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
-      dict_id = Compression::DictChooser.choose(
-        db: :transactions_spans, table: "spans", project_id: project_id
-      )
-      blob = Compression::Codec.encode(
-        { "tags" => tags, "data" => data }.to_json,
-        db: :transactions_spans, dict_id: dict_id
-      )
       {
         project_id: project_id,
         trace_id: trace_id,
@@ -130,8 +129,8 @@ module Ingest
         op: op,
         status: status,
         description: Transaction::SqlNormalizer.normalize(description),
-        payload_blob: blob,
-        dict_id: dict_id,
+        tags: tags || {},
+        data: data || {},
         depth: depth.to_i,
         sequence: sequence.to_i,
         created_at: Time.current

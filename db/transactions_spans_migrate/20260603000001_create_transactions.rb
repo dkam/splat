@@ -21,10 +21,11 @@ class CreateTransactions < ActiveRecord::Migration[8.1]
       t.integer :query_count, default: 0, null: false
       t.boolean :has_n_plus_one, default: false, null: false
 
-      # Compressed { tags: ..., measurements: ... } JSON. dict_id
-      # NULL means plain zstd; otherwise references compression_dictionaries.id.
-      t.binary :payload_blob
-      t.bigint :dict_id
+      # Tags + measurements stored as plain JSON — small per row, queryable
+      # via json_extract, no compression overhead. Stack-trace-bearing
+      # payloads (events) stay compressed; transactions don't carry them.
+      t.json :tags
+      t.json :measurements
 
       t.timestamps
     end

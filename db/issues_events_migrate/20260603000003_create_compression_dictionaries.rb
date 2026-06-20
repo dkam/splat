@@ -13,6 +13,6 @@ class CreateCompressionDictionaries < ActiveRecord::Migration[8.1]
     end
 
     add_index :compression_dictionaries, [:segment, :version], unique: true
-    add_index :compression_dictionaries, :segment, where: "active = 1", name: "index_compression_dictionaries_on_active_segment"
+    add_index :compression_dictionaries, :segment, unique: true, where: "active = 1", name: "index_compression_dictionaries_on_active_segment"
   end
 end

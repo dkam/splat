@@ -11,16 +11,17 @@ module Analytics
   class HistogramRollupJob
     HAS_LN_QUERY = "SELECT LN(2.71)".freeze
     INSERT_SQL = <<~SQL.freeze
-      INSERT INTO transaction_histograms (project_id, transaction_name, hour_bucket, bucket_index, count)
+      INSERT INTO transaction_histograms (project_id, transaction_name, environment, hour_bucket, bucket_index, count)
       SELECT project_id,
              transaction_name,
+             COALESCE(environment, '') AS environment,
              strftime('%Y-%m-%d %H:00:00', timestamp) AS hour_bucket,
              CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
              COUNT(*) AS count
         FROM transactions
        WHERE timestamp >= ? AND timestamp < ?
-       GROUP BY 1, 2, 3, 4
-      ON CONFLICT(project_id, transaction_name, hour_bucket, bucket_index)
+       GROUP BY 1, 2, 3, 4, 5
+      ON CONFLICT(project_id, transaction_name, environment, hour_bucket, bucket_index)
       DO UPDATE SET count = excluded.count
     SQL
 
@@ -58,23 +59,23 @@ module Analytics
     def ruby_rollup(range_start, range_end)
       tally = Hash.new(0)
       Transaction.where(timestamp: range_start...range_end)
-                 .pluck(:project_id, :transaction_name, :timestamp, :duration)
-                 .each do |pid, name, ts, dur|
-        key = [pid, name, Histogram.hour_bucket(ts), Histogram.bucket_index(dur)]
+                 .pluck(:project_id, :transaction_name, :environment, :timestamp, :duration)
+                 .each do |pid, name, env, ts, dur|
+        key = [pid, name, env.to_s, Histogram.hour_bucket(ts), Histogram.bucket_index(dur)]
         tally[key] += 1
       end
       return if tally.empty?
 
       conn = TransactionsSpansRecord.connection
-      sql = +"INSERT INTO transaction_histograms (project_id, transaction_name, hour_bucket, bucket_index, count) VALUES "
+      sql = +"INSERT INTO transaction_histograms (project_id, transaction_name, environment, hour_bucket, bucket_index, count) VALUES "
       placeholders = []
       binds = []
-      tally.each do |(pid, name, hour, bucket), count|
-        placeholders << "(?, ?, ?, ?, ?)"
-        binds.push(pid, name, hour, bucket, count)
+      tally.each do |(pid, name, env, hour, bucket), count|
+        placeholders << "(?, ?, ?, ?, ?, ?)"
+        binds.push(pid, name, env, hour, bucket, count)
       end
       sql << placeholders.join(", ")
-      sql << " ON CONFLICT(project_id, transaction_name, hour_bucket, bucket_index)"
+      sql << " ON CONFLICT(project_id, transaction_name, environment, hour_bucket, bucket_index)"
       sql << " DO UPDATE SET count = excluded.count"
       conn.exec_insert(sql, "HistogramRollupJob fallback", binds)
     end

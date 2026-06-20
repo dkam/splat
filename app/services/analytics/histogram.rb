@@ -28,30 +28,31 @@ module Analytics
     # call adds 1) — only call once per transaction inserted. The hourly
     # rollup job overwrites the row via excluded.count, so any drift gets
     # corrected within the hour boundary.
-    def bump!(project_id:, transaction_name:, timestamp:, duration_ms:)
-      bump_many!([[project_id, transaction_name, timestamp, duration_ms]])
+    def bump!(project_id:, transaction_name:, environment:, timestamp:, duration_ms:)
+      bump_many!([[project_id, transaction_name, environment, timestamp, duration_ms]])
     end
 
     # Batched form for ingest consumers — collapses N transactions into a
     # single multi-row INSERT ... ON CONFLICT DO UPDATE count = count + N.
+    # Each tuple is [project_id, transaction_name, environment, timestamp, duration_ms].
     def bump_many!(tuples)
       return if tuples.empty?
       deltas = Hash.new(0)
-      tuples.each do |(pid, name, ts, dur)|
-        key = [pid, name, hour_bucket(ts), bucket_index(dur)]
+      tuples.each do |(pid, name, env, ts, dur)|
+        key = [pid, name, env.to_s, hour_bucket(ts), bucket_index(dur)]
         deltas[key] += 1
       end
 
       conn = TransactionsSpansRecord.connection
-      sql = +"INSERT INTO transaction_histograms (project_id, transaction_name, hour_bucket, bucket_index, count) VALUES "
+      sql = +"INSERT INTO transaction_histograms (project_id, transaction_name, environment, hour_bucket, bucket_index, count) VALUES "
       placeholders = []
       binds = []
-      deltas.each do |(pid, name, hour, bucket), delta|
-        placeholders << "(?, ?, ?, ?, ?)"
-        binds.push(pid, name, hour, bucket, delta)
+      deltas.each do |(pid, name, env, hour, bucket), delta|
+        placeholders << "(?, ?, ?, ?, ?, ?)"
+        binds.push(pid, name, env, hour, bucket, delta)
       end
       sql << placeholders.join(", ")
-      sql << " ON CONFLICT(project_id, transaction_name, hour_bucket, bucket_index)"
+      sql << " ON CONFLICT(project_id, transaction_name, environment, hour_bucket, bucket_index)"
       sql << " DO UPDATE SET count = count + excluded.count"
       conn.exec_insert(sql, "histogram bump", binds)
     end

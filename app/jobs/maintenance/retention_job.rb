@@ -53,9 +53,14 @@ module Maintenance
 
       txn_scope = Transaction.where("timestamp < ?", transactions_cutoff)
       # Drop any remaining spans linked to retiring transactions, regardless of span cutoff.
-      retiring_txn_ids = txn_scope.pluck(:transaction_id)
-      retiring_txn_ids.each_slice(BATCH_SIZE) do |batch|
-        spans_deleted += Span.where(transaction_id: batch).delete_all
+      # Stream (project_id, transaction_id) pairs in batches — avoids materialising
+      # every retiring UUID at once, and keeps the span delete scoped to the
+      # transaction's project (transaction_id is not globally unique across projects).
+      txn_scope.in_batches(of: BATCH_SIZE) do |batch|
+        batch.pluck(:project_id, :transaction_id).group_by(&:first).each do |project_id, pairs|
+          ids = pairs.map(&:last)
+          spans_deleted += Span.where(project_id: project_id, transaction_id: ids).delete_all
+        end
         sleep SLEEP_BETWEEN_BATCHES
       end
       txn_deleted = batched_delete_all(txn_scope)

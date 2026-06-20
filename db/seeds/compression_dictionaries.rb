@@ -1,27 +1,20 @@
-# Seeds the v1 baseline zstd dictionaries trained from production data.
+# Seeds the v1 baseline zstd dictionary trained from production event payloads.
+#
+# Only events compress: stack traces, breadcrumbs, request data, and the
+# modules dump are large and highly repetitive. Transactions and spans
+# carry small {tags, data/measurements} blobs and live as plain JSON.
 #
 # Idempotent: re-running skips rows that already exist for (segment, version: 1).
-# Source files live under zstd_dicts/ in the repo root.
-#
-# Layout:
-#   zstd_dicts/events.dict        → issues_events DB, segment: "events"
-#   zstd_dicts/transactions.dict  → transactions_spans DB, segment: "transactions"
-#   zstd_dicts/spans.dict         → transactions_spans DB, segment: "spans"
 
 class CompressionDictionarySeeder
   DICTS = [
-    { segment: "events",       db: :issues_events,      file: "events.dict" },
-    { segment: "transactions", db: :transactions_spans, file: "transactions.dict" },
-    { segment: "spans",        db: :transactions_spans, file: "spans.dict" }
+    { segment: "events", file: "events.dict" }
   ].freeze
 
-  # Internal AR models scoped to each DB so the :binary type handles ASCII-8BIT
-  # dict bytes correctly (raw exec_insert tries to UTF-8-encode the blob).
+  # Internal AR model scoped to the issues_events DB so the :binary type
+  # handles ASCII-8BIT dict bytes correctly (raw exec_insert tries to
+  # UTF-8-encode the blob).
   class IssuesEventsDict < IssuesEventsRecord
-    self.table_name = "compression_dictionaries"
-  end
-
-  class TransactionsSpansDict < TransactionsSpansRecord
     self.table_name = "compression_dictionaries"
   end
 
@@ -33,17 +26,12 @@ class CompressionDictionarySeeder
         next
       end
 
-      klass = case spec[:db]
-              when :issues_events      then IssuesEventsDict
-              when :transactions_spans then TransactionsSpansDict
-              end
-
-      if klass.exists?(segment: spec[:segment], version: 1)
+      if IssuesEventsDict.exists?(segment: spec[:segment], version: 1)
         Rails.logger.info "[seeds:compression_dictionaries] #{spec[:segment]} v1 already present — skipping"
         next
       end
 
-      klass.create!(
+      IssuesEventsDict.create!(
         segment:      spec[:segment],
         version:      1,
         dict:         File.binread(path),

@@ -70,12 +70,20 @@ module TransactionAnalytics
         "count"            => cnt.to_i,
         "max_duration"     => mx.to_i,
         "min_duration"     => mn.to_i,
+        # release isn't a dimension on transaction_histograms (high-cardinality;
+        # every deploy adds a row per env/endpoint/bucket). When a release filter
+        # is set we'd need a raw-row scan to honor it; for now we fall back to the
+        # env-only histogram, since release filtering is mainly used by
+        # compare_endpoint_performance which already pluck-sorts raw durations.
         "p50_duration"     => histogram_percentile(project_id: project_id, transaction_name: name,
-                                                   quantile: 0.50, since: time_range.begin, until_time: time_range.end),
+                                                   environment: environment, quantile: 0.50,
+                                                   since: time_range.begin, until_time: time_range.end),
         "p95_duration"     => histogram_percentile(project_id: project_id, transaction_name: name,
-                                                   quantile: 0.95, since: time_range.begin, until_time: time_range.end),
+                                                   environment: environment, quantile: 0.95,
+                                                   since: time_range.begin, until_time: time_range.end),
         "p99_duration"     => histogram_percentile(project_id: project_id, transaction_name: name,
-                                                   quantile: 0.99, since: time_range.begin, until_time: time_range.end)
+                                                   environment: environment, quantile: 0.99,
+                                                   since: time_range.begin, until_time: time_range.end)
       }
     end
 
@@ -142,9 +150,15 @@ module TransactionAnalytics
       scope = scope.where(environment: environment)           if environment.present?
       scope = scope.where(http_status: http_status)           if http_status.present?
       scope = scope.where(transaction_name: transaction_name) if transaction_name.present?
-      scope = scope.order(duration: :desc).limit(limit)
-      rows = scope.to_a
-      tags.present? ? rows.select { |r| tags.all? { |k, v| r.tag(k.to_s) == v } } : rows
+      # Push tag predicates into SQL via json_extract so LIMIT applies to
+      # the post-filter set. Key allowlist is enforced upstream
+      # (mcp_controller#search_slow_transactions); we still bind the value.
+      if tags.present?
+        tags.each do |k, v|
+          scope = scope.where("json_extract(tags, ?) = ?", "$.#{k}", v.to_s)
+        end
+      end
+      scope.order(duration: :desc).limit(limit).to_a
     end
 
     # ---- Bucketed time series (for sparklines + charts). ----
@@ -240,12 +254,14 @@ module TransactionAnalytics
       # merge histograms across all endpoint names, union the live hour.
       hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
       until_hour = Analytics::Histogram.hour_bucket(time_range.end)
+      env_filter = environment.present? ? "AND environment = ?" : ""
       sql = <<~SQL
         WITH merged AS (
           SELECT bucket_index, SUM(count) AS c
             FROM transaction_histograms
            WHERE project_id = COALESCE(?, project_id)
              AND hour_bucket >= ? AND hour_bucket < ?
+             #{env_filter}
            GROUP BY bucket_index
           UNION ALL
           SELECT CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
@@ -253,7 +269,7 @@ module TransactionAnalytics
             FROM transactions
            WHERE project_id = COALESCE(?, project_id)
              AND timestamp >= ? AND timestamp < ?
-             #{environment.present? ? "AND environment = ?" : ""}
+             #{env_filter}
            GROUP BY 1
         ), reduced AS (
           SELECT bucket_index, SUM(c) AS c FROM merged GROUP BY bucket_index
@@ -268,8 +284,12 @@ module TransactionAnalytics
          ORDER BY bucket_index
          LIMIT 1
       SQL
-      binds = [project_id, hour_start, until_hour,
-               Analytics::Histogram::GAMMA, project_id, until_hour, time_range.end]
+      # See Transaction.histogram_percentile: clamp raw-branch lower bound so
+      # a sub-hour window doesn't pull rows from before time_range.begin.
+      raw_lower = [time_range.begin, until_hour].max
+      binds = [project_id, hour_start, until_hour]
+      binds << environment if environment.present?
+      binds.push(Analytics::Histogram::GAMMA, project_id, raw_lower, time_range.end)
       binds << environment if environment.present?
       binds << q
 

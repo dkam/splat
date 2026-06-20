@@ -2,9 +2,6 @@
 
 class Transaction < TransactionsSpansRecord
   include TransactionAnalytics
-  include Compression::CompressedJson
-  # Single payload blob holds { "tags" => ..., "measurements" => ... }.
-  compressed_json :payload, db: :transactions_spans, table: "transactions"
 
   # Spans beyond this cap are dropped at ingest.
   SPAN_CAP = 1000
@@ -76,7 +73,8 @@ class Transaction < TransactionsSpansRecord
       http_method: request_data["method"],
       http_status: response_data["status_code"],
       http_url: request_data["url"],
-      payload: { "tags" => payload["tags"], "measurements" => enhanced_measurements },
+      tags: payload["tags"] || {},
+      measurements: enhanced_measurements,
       query_count: query_count,
       has_n_plus_one: has_n_plus_one,
       spans_truncated: payload["spans"].is_a?(Array) && payload["spans"].size > SPAN_CAP
@@ -99,15 +97,20 @@ class Transaction < TransactionsSpansRecord
   # quantile (0..1). Returns nil if no histogram rows fall in the window.
   # Pre-computed hours come from transaction_histograms; the in-progress
   # hour is unioned in from raw rows so live data is included.
-  def self.histogram_percentile(project_id:, transaction_name:, quantile:, since:, until_time: Time.current)
+  # When environment is given, both arms filter to that env (transaction_histograms
+  # stores env as '' when the source row was NULL, so an explicit env filter
+  # never matches the no-env bucket).
+  def self.histogram_percentile(project_id:, transaction_name:, quantile:, since:, until_time: Time.current, environment: nil)
     hour_start = Analytics::Histogram.hour_bucket(since)
     until_hour = Analytics::Histogram.hour_bucket(until_time)
+    env_filter = environment.present? ? "AND environment = ?" : ""
     sql = <<~SQL
       WITH merged AS (
         SELECT bucket_index, SUM(count) AS c
           FROM transaction_histograms
          WHERE project_id = ? AND transaction_name = ?
            AND hour_bucket >= ? AND hour_bucket < ?
+           #{env_filter}
          GROUP BY bucket_index
         UNION ALL
         SELECT CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
@@ -115,6 +118,7 @@ class Transaction < TransactionsSpansRecord
           FROM transactions
          WHERE project_id = ? AND transaction_name = ?
            AND timestamp >= ? AND timestamp < ?
+           #{env_filter}
          GROUP BY 1
       ), reduced AS (
         SELECT bucket_index, SUM(c) AS c FROM merged GROUP BY bucket_index
@@ -129,14 +133,16 @@ class Transaction < TransactionsSpansRecord
        ORDER BY bucket_index
        LIMIT 1
     SQL
-    bucket = connection.select_value(
-      sanitize_sql_array([
-        sql,
-        project_id, transaction_name, hour_start, until_hour,
-        Analytics::Histogram::GAMMA, project_id, transaction_name, until_hour, until_time,
-        quantile
-      ])
-    )
+    # Raw-branch lower bound is the later of `since` and `until_hour`: if both
+    # `since` and `until_time` land in the same hour, `until_hour` < `since`
+    # and the raw window would otherwise widen to the start of the hour.
+    raw_lower = [since, until_hour].max
+    binds = [project_id, transaction_name, hour_start, until_hour]
+    binds << environment if environment.present?
+    binds.push(Analytics::Histogram::GAMMA, project_id, transaction_name, raw_lower, until_time)
+    binds << environment if environment.present?
+    binds << quantile
+    bucket = connection.select_value(sanitize_sql_array([sql, *binds]))
     return nil if bucket.nil?
     Analytics::Histogram.index_to_ms(bucket.to_i)
   end
@@ -152,9 +158,10 @@ class Transaction < TransactionsSpansRecord
     nil
   end
 
-  # ---- Accessors that read out of the compressed payload. ----
-  def tags         = payload&.dig("tags") || {}
-  def measurements = payload&.dig("measurements") || {}
+  # ---- Accessors over the plain JSON columns. self[] bypasses any
+  # overridden reader and tolerates NULL → {}. ----
+  def tags         = self[:tags] || {}
+  def measurements = self[:measurements] || {}
   def tag(key)         = tags[key]
   def measurement(key) = measurements.dig(key, "value")
   def query_analysis   = measurements["query_analysis"] || {}

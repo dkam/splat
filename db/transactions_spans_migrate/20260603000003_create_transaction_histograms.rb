@@ -3,6 +3,9 @@ class CreateTransactionHistograms < ActiveRecord::Migration[8.1]
     create_table :transaction_histograms do |t|
       t.bigint :project_id, null: false
       t.string :transaction_name, null: false
+      # Empty string for transactions with no environment so the unique
+      # index treats them as a single bucket (SQLite makes NULLs distinct).
+      t.string :environment, null: false, default: ""
       t.datetime :hour_bucket, null: false
       t.integer :bucket_index, null: false
       t.integer :count, null: false
@@ -11,7 +14,7 @@ class CreateTransactionHistograms < ActiveRecord::Migration[8.1]
     # ON CONFLICT target for the hourly rollup INSERT … SELECT … GROUP BY.
     # Rebuilding the same hour overwrites the row.
     add_index :transaction_histograms,
-              [:project_id, :transaction_name, :hour_bucket, :bucket_index],
+              [:project_id, :transaction_name, :environment, :hour_bucket, :bucket_index],
               unique: true,
               name: "index_transaction_histograms_unique"
 

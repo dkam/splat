@@ -23,7 +23,7 @@ module Compression
       # Returns nil if no active dict exists for that segment.
       def active_id(db, segment)
         active_by_segment(db).compute_if_absent(segment) do
-          model(db).where(segment: segment, active: true).limit(1).pick(:id) || :missing
+          model(db).where(segment: segment, active: true).order(version: :desc).limit(1).pick(:id) || :missing
         end.then { |v| v == :missing ? nil : v }
       end
 
@@ -43,9 +43,8 @@ module Compression
 
       def model(db)
         case db
-        when :issues_events      then IssuesEventsDict
-        when :transactions_spans then TransactionsSpansDict
-        else raise ArgumentError, "unknown db #{db.inspect}"
+        when :issues_events then IssuesEventsDict
+        else raise ArgumentError, "unknown db #{db.inspect} — compression is events-only"
         end
       end
 

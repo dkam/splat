@@ -22,7 +22,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_000004) do
     t.datetime "updated_at", null: false
     t.integer "version", null: false
     t.index ["segment", "version"], name: "index_compression_dictionaries_on_segment_and_version", unique: true
-    t.index ["segment"], name: "index_compression_dictionaries_on_active_segment", where: "active = 1"
+    t.index ["segment"], name: "index_compression_dictionaries_on_active_segment", unique: true, where: "active = 1"
   end
 
   create_table "dictionary_training_runs", force: :cascade do |t|

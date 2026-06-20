@@ -1,5 +1,5 @@
 module Compression
-  # Tiered chooser for the dict to use when writing a row.
+  # Tiered chooser for the dict to use when writing an events row.
   #
   # Tiers (first hit wins):
   #   1. project-specific dict, e.g. "events:project:42"
@@ -7,9 +7,8 @@ module Compression
   #   3. table-wide seed dict, e.g. "events"  (always present after db:seed)
   #   4. plain zstd (returns nil)
   #
-  # `db` selects which compression_dictionaries table to consult; `table` is
-  # the data table name (events / transactions / spans) — same value the seed
-  # uses for the segment key.
+  # `db` is always :issues_events — transactions/spans store tags/data/
+  # measurements as plain JSON columns and don't need a dict.
   class DictChooser
     class << self
       def choose(db:, table:, project_id: nil, platform: nil)

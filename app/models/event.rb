@@ -10,9 +10,12 @@ class Event < IssuesEventsRecord
   belongs_to :project
   belongs_to :issue, optional: true, counter_cache: :count
 
-  # Scope to project_id so the validator's lookup uses the
-  # index_events_on_project_id_and_event_id unique index instead of full-scanning.
-  validates :event_id, presence: true, uniqueness: { scope: :project_id }
+  # Uniqueness of (project_id, event_id) is enforced solely by the
+  # index_events_on_project_id_and_event_id unique index. A model-level
+  # uniqueness validator would raise RecordInvalid on redelivery (and run a
+  # SELECT on every insert); EventConsumer rescues the DB's RecordNotUnique
+  # instead, so a redelivered job is a clean no-op.
+  validates :event_id, presence: true
   validates :timestamp, presence: true
 
   # Per-event broadcasts are throttled to avoid swamping during error bursts.
@@ -147,7 +150,6 @@ class Event < IssuesEventsRecord
   def request         = payload&.dig("request") || {}
   def contexts        = payload&.dig("contexts") || {}
   def breadcrumbs     = payload&.dig("breadcrumbs", "values") || []
-  def fingerprint     = payload&.dig("fingerprint") || []
 
   private
 
@@ -175,7 +177,7 @@ class Event < IssuesEventsRecord
     self.exception_value = exception_data["value"]
 
     if payload["fingerprint"].present?
-      self[:fingerprint] = payload["fingerprint"].to_s
+      self[:fingerprint] = Array.wrap(payload["fingerprint"]).join("::")
     end
   end
 end

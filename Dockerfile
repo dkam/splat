@@ -17,7 +17,7 @@ WORKDIR /rails
 # Install base packages and DuckDB library
 ARG TARGETPLATFORM
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y curl libjemalloc2 sqlite3 wget unzip && \
+    apt-get install --no-install-recommends -y curl libjemalloc2 sqlite3 wget unzip zstd && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \

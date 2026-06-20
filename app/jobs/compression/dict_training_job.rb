@@ -3,28 +3,31 @@ require "open3"
 require "tmpdir"
 
 module Compression
-  # Trains a candidate zstd dictionary for one segment and promotes it if
-  # it beats the current active dict by more than GAIN_THRESHOLD.
+  # Trains a candidate zstd dictionary for one events segment and promotes
+  # it if it beats the current active dict by more than GAIN_THRESHOLD.
   #
-  # Segments map to (db, table) like this:
-  #   "events"                    → :issues_events       events
-  #   "events:platform:python"    → :issues_events       events
-  #   "events:project:42"         → :issues_events       events
-  #   "transactions"              → :transactions_spans  transactions
-  #   "spans"                     → :transactions_spans  spans
+  # Segments all live on the issues_events DB and always target the events
+  # table; the qualifier picks the specialisation:
+  #   "events"                    → events                (table-wide)
+  #   "events:platform:python"    → events WHERE platform=python
+  #   "events:project:42"         → events WHERE project_id=42
   #
   # Promotion threshold is intentionally conservative — we want fewer,
   # better versions, not version churn.
   class DictTrainingJob
+    DB                = :issues_events
+    TABLE             = "events"
     SAMPLES           = 10_000
     LOOKBACK_DAYS     = 7
     DICT_MAX_BYTES    = 112_640      # zstd default
     GAIN_THRESHOLD    = 0.10          # 10% — bottom of the user-stated range
 
     def perform(segment)
-      table = segment.to_s.split(":").first
-      db    = db_for(table)
-      Rails.logger.info "[DictTrainingJob] training #{segment} (db=#{db}, table=#{table})"
+      db    = DB
+      table = TABLE
+      raise ArgumentError, "DictTrainingJob: segment must start with 'events:'" \
+        unless segment.to_s == table || segment.to_s.start_with?("#{table}:")
+      Rails.logger.info "[DictTrainingJob] training #{segment}"
 
       samples = sample_payloads(db: db, table: table, segment: segment, n: SAMPLES)
       if samples.size < 100
@@ -59,30 +62,42 @@ module Compression
 
     private
 
-    def db_for(table)
-      case table
-      when "events" then :issues_events
-      when "transactions", "spans" then :transactions_spans
-      else raise ArgumentError, "DictTrainingJob: unknown table #{table.inspect}"
-      end
-    end
-
     def sample_payloads(db:, table:, segment:, n:)
-      base = Compression::IssuesEventsDict.then { db == :issues_events ? IssuesEventsRecord : TransactionsSpansRecord }
-      conn = base.connection
+      conn = IssuesEventsRecord.connection
       since = LOOKBACK_DAYS.days.ago
 
-      rows = conn.exec_query(<<~SQL.squish, "DictTrainingJob sample", [since])
+      qualifier_sql, qualifier_bind = segment_qualifier(table, segment)
+      binds = [since]
+      binds << qualifier_bind if qualifier_bind
+
+      rows = conn.exec_query(<<~SQL.squish, "DictTrainingJob sample", binds)
         SELECT payload_blob, dict_id
           FROM #{table}
          WHERE timestamp >= ?
            AND payload_blob IS NOT NULL
+           #{qualifier_sql}
          ORDER BY RANDOM()
          LIMIT #{n.to_i}
       SQL
       rows.rows.map do |(blob, dict_id)|
         Compression::Codec.decode(blob, db: db, dict_id: dict_id)
       end.compact
+    end
+
+    # Translate a segment qualifier into a SQL fragment + bind.
+    #   "events"                  → ["", nil]
+    #   "events:platform:python"  → ["AND platform = ?", "python"]
+    #   "events:project:42"       → ["AND project_id = ?", 42]
+    def segment_qualifier(table, segment)
+      return ["", nil] if segment.to_s == table
+      _, kind, *value_parts = segment.to_s.split(":")
+      value = value_parts.join(":")
+      case kind
+      when "platform" then ["AND platform = ?", value]
+      when "project"  then ["AND project_id = ?", Integer(value)]
+      else
+        raise ArgumentError, "DictTrainingJob: unknown segment qualifier #{kind.inspect} in #{segment.inspect}"
+      end
     end
 
     # Disjoint 80/20 train/eval split, randomised.
@@ -118,7 +133,7 @@ module Compression
     end
 
     def promote!(db:, segment:, bytes:, baseline_ratio:)
-      klass = db == :issues_events ? Compression::IssuesEventsDict : Compression::TransactionsSpansDict
+      klass = Compression::IssuesEventsDict
       klass.transaction do
         klass.where(segment: segment, active: true).update_all(active: false)
         next_version = (klass.where(segment: segment).maximum(:version) || 0) + 1
@@ -138,8 +153,7 @@ module Compression
 
     def log_run(db:, segment:, samples:, current_ratio: nil, candidate_ratio: nil, gain: nil,
                 promoted: false, promoted_to_version: nil, notes: nil)
-      klass = db == :issues_events ? Compression::IssuesEventsDict : Compression::TransactionsSpansDict
-      klass.connection.exec_insert(
+      Compression::IssuesEventsDict.connection.exec_insert(
         <<~SQL,
           INSERT INTO dictionary_training_runs
             (segment, ran_at, samples, current_ratio, candidate_ratio, gain, promoted, promoted_to_version, notes)

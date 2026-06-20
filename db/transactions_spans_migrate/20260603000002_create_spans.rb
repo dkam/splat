@@ -14,9 +14,11 @@ class CreateSpans < ActiveRecord::Migration[8.1]
       t.integer :depth, default: 0, null: false
       t.integer :sequence, default: 0, null: false
 
-      # Compressed { tags: ..., data: ... } JSON.
-      t.binary :payload_blob
-      t.bigint :dict_id
+      # Span tags + data as plain JSON. Typical span carries <300 bytes here;
+      # compression overhead exceeded the savings and forced a decode on
+      # every read. json_extract works fine for filtering.
+      t.json :tags
+      t.json :data
 
       t.datetime :created_at, null: false
     end
