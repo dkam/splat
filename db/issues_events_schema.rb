@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_03_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_20_000001) do
   create_table "compression_dictionaries", force: :cascade do |t|
     t.boolean "active", default: false, null: false
     t.float "baseline_ratio"
@@ -74,6 +74,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_000004) do
     t.string "fingerprint", null: false
     t.datetime "first_seen", null: false
     t.string "first_seen_release"
+    t.datetime "last_burst_at"
+    t.integer "last_burst_rate"
     t.datetime "last_seen", null: false
     t.string "last_seen_release"
     t.integer "project_id", null: false

@@ -54,6 +54,12 @@
                 <% elsif issue.ignored? %>
                   <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 rounded">Ignored</span>
                 <% end %>
+                <% if issue.bursting? %>
+                  <% very_hot = issue.last_burst_rate.to_i >= @burst_threshold * 2 %>
+                  <span class="px-2 py-1 text-xs font-medium <%= very_hot ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' %> rounded" title="Bursting — events/hour at last check vs threshold">
+                    <%= very_hot ? "🚨" : "🔥" %> <%= number_to_human(issue.last_burst_rate.to_i, units: { thousand: "k", million: "M" }, precision: 2, strip_insignificant_zeros: true) %>/hr
+                  </span>
+                <% end %>
               </div>
 
               <div class="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 mb-3">

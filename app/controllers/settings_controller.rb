@@ -26,7 +26,11 @@ class SettingsController < ApplicationController
       :events_data_retention_days,
       :transactions_data_retention_days,
       :spans_data_retention_days,
-      :histograms_retention_days
+      :histograms_retention_days,
+      :burst_threshold,
+      :ntfy_url,
+      :ntfy_token,
+      :ntfy_priority
     )
   end
 end

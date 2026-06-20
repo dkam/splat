@@ -60,6 +60,9 @@ class Event < IssuesEventsRecord
          .where("last_seen < ?", event.timestamp)
          .update_all(last_seen: event.timestamp, updated_at: Time.current)
 
+    # Best-effort spike alert; throttled per issue and never raises into ingest.
+    issue.maybe_alert_burst!
+
     event
   end
 

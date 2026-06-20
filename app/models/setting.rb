@@ -27,11 +27,18 @@ class Setting < ApplicationRecord
     forward_dsn.present?
   end
 
+  def ntfy_configured?
+    ntfy_url.present?
+  end
+
   validates :events_data_retention_days,       numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :transactions_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :spans_data_retention_days,        numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
   validates :histograms_retention_days,        numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
+  validates :burst_threshold,                  numericality: { greater_than: 0, less_than_or_equal_to: 1_000_000 }
+  validates :ntfy_priority, inclusion: { in: NtfyNotifier::VALID_PRIORITIES }, allow_blank: true
   validate :forward_dsn_parseable
+  validate :ntfy_url_parseable
 
   private
 
@@ -41,5 +48,13 @@ class Setting < ApplicationRecord
     EnvelopeForwarder.parse_dsn(forward_dsn)
   rescue EnvelopeForwarder::InvalidDsn => e
     errors.add(:forward_dsn, e.message)
+  end
+
+  def ntfy_url_parseable
+    return if ntfy_url.blank?
+
+    NtfyNotifier.parse_url(ntfy_url)
+  rescue NtfyNotifier::InvalidUrl => e
+    errors.add(:ntfy_url, e.message)
   end
 end

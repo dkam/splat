@@ -18,6 +18,7 @@ class IssuesController < ApplicationController
     end.recent
 
     @pagy, @issues = pagy(issues, limit: 25)
+    @burst_threshold = Setting.instance.burst_threshold
 
     counts_by_status = Rails.cache.fetch("project_#{@project.id}_issue_counts", expires_in: 30.seconds) do
       @project.issues.group(:status).count

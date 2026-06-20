@@ -1,0 +1,17 @@
+🔥 Issue Burst Detected
+
+Issue: <%= @issue.title %>
+
+Rate: <%= number_with_delimiter(@rate) %> events/hour (threshold: <%= number_with_delimiter(@threshold) %>/hour)
+
+Details:
+- Exception Type: <%= @issue.exception_type || 'Unknown' %>
+- Project: <%= @project.name %>
+
+This issue is emitting events well above its normal rate. It's still being tracked — open it to investigate or resolve.
+
+View Issue: <%= @url %>
+
+---
+This notification was sent by Splat - your lightweight error tracker.
+Burst alerts are deduped to one per issue per hour.

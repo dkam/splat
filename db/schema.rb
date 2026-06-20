@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_03_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_20_000001) do
   create_table "oidc_sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "expires_at", null: false
@@ -52,8 +52,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_100000) do
   end
 
   create_table "settings", force: :cascade do |t|
-    t.boolean "auto_ignore_enabled", default: false, null: false
-    t.integer "auto_ignore_threshold", default: 1000, null: false
+    t.integer "burst_threshold", default: 1000, null: false
     t.datetime "created_at", null: false
     t.integer "events_data_retention_days", default: 30, null: false
     t.string "forward_dsn"
