@@ -95,67 +95,10 @@ class Transaction < TransactionsSpansRecord
     raise
   end
 
-  # Histogram-merge percentile reader. Returns ms for the requested
-  # quantile (0..1). Returns nil if no histogram rows fall in the window.
-  # Pre-computed hours come from transaction_histograms; the in-progress
-  # hour is unioned in from raw rows so live data is included.
-  # When environment is given, both arms filter to that env (transaction_histograms
-  # stores env as '' when the source row was NULL, so an explicit env filter
-  # never matches the no-env bucket).
-  def self.histogram_percentile(project_id:, transaction_name:, quantile:, since:, until_time: Time.current, environment: nil)
-    hour_start = Analytics::Histogram.hour_bucket(since)
-    until_hour = Analytics::Histogram.hour_bucket(until_time)
-    # project_id is bound only when present: `project_id = NULL` matches no
-    # rows, so a nil (= "all projects") caller would otherwise get 0ms back.
-    proj_filter = project_id.present? ? "AND project_id = ?" : ""
-    env_filter  = environment.present? ? "AND environment = ?" : ""
-    sql = <<~SQL
-      WITH merged AS (
-        SELECT bucket_index, SUM(count) AS c
-          FROM transaction_histograms
-         WHERE transaction_name = ?
-           AND hour_bucket >= ? AND hour_bucket < ?
-           #{proj_filter}
-           #{env_filter}
-         GROUP BY bucket_index
-        UNION ALL
-        SELECT CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
-               COUNT(*) AS c
-          FROM transactions
-         WHERE transaction_name = ?
-           AND timestamp >= ? AND timestamp < ?
-           #{proj_filter}
-           #{env_filter}
-         GROUP BY 1
-      ), reduced AS (
-        SELECT bucket_index, SUM(c) AS c FROM merged GROUP BY bucket_index
-      ), running AS (
-        SELECT bucket_index, c,
-               SUM(c) OVER (ORDER BY bucket_index) AS cum,
-               SUM(c) OVER () AS total
-          FROM reduced
-      )
-      SELECT bucket_index FROM running
-       WHERE cum >= ? * total
-       ORDER BY bucket_index
-       LIMIT 1
-    SQL
-    # Raw-branch lower bound is the later of `since` and `until_hour`: if both
-    # `since` and `until_time` land in the same hour, `until_hour` < `since`
-    # and the raw window would otherwise widen to the start of the hour.
-    raw_lower = [since, until_hour].max
-    binds = [transaction_name, hour_start, until_hour]
-    binds << project_id  if project_id.present?
-    binds << environment if environment.present?
-    binds << Analytics::Histogram::GAMMA
-    binds.push(transaction_name, raw_lower, until_time)
-    binds << project_id  if project_id.present?
-    binds << environment if environment.present?
-    binds << quantile
-    bucket = connection.select_value(sanitize_sql_array([sql, *binds]))
-    return nil if bucket.nil?
-    Analytics::Histogram.index_to_ms(bucket.to_i)
-  end
+  # The histogram-merge percentile reader lives in TransactionAnalytics as the
+  # single parameterized #merged_percentiles (used for project-wide, substring,
+  # and exact-endpoint percentiles). Kept there so writer (rollup) and reader
+  # share one bucket formula via Analytics::Histogram.bucket_index_sql.
 
   def self.parse_timestamp(timestamp)
     case timestamp

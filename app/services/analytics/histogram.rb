@@ -1,6 +1,7 @@
 module Analytics
   # Log-bucketing math for the DDSketch-style mergeable percentile path.
-  # GAMMA = 1.02 gives ~2% relative error, which is plenty for latency views.
+  # GAMMA = 1.02 buckets are ~2% wide; reconstructing at the bucket midpoint
+  # (see index_to_ms) gives a centered ±1% relative error for latency views.
   module Histogram
     GAMMA = 1.02
     LN_GAMMA = Math.log(GAMMA)
@@ -14,8 +15,27 @@ module Analytics
       (Math.log(d) / LN_GAMMA).floor
     end
 
+    # Bucket `index` covers durations [GAMMA**index, GAMMA**(index+1)) because
+    # bucket_index floors. Reconstruct at the geometric midpoint so the error is
+    # centered (±~1%) instead of biased low by up to GAMMA-1 (~2%) — returning
+    # the lower edge would report every percentile ~1% faster than reality.
     def index_to_ms(index)
-      GAMMA**index
+      GAMMA**(index + 0.5)
+    end
+
+    # SQL counterpart of bucket_index: the integer DDSketch bucket for a duration
+    # column. GAMMA is a constant, inlined as a literal (no bind). This is the one
+    # place the writer (rollup) and reader (percentile queries) share the formula,
+    # so they can't drift.
+    def bucket_index_sql(duration_column = "duration")
+      "CAST(FLOOR(LN(MAX(#{duration_column}, 1)) / LN(#{GAMMA})) AS INTEGER)"
+    end
+
+    # SQL bucketing a timestamp column into integer indices over a window:
+    # floor((epoch(column) - origin) / bucket_seconds). origin_epoch and
+    # bucket_seconds are integers computed in Ruby (safe to interpolate).
+    def time_bucket_sql(origin_epoch:, bucket_seconds:, column: "timestamp")
+      "CAST((strftime('%s', #{column}) - #{origin_epoch.to_i}) / #{bucket_seconds.to_i} AS INTEGER)"
     end
 
     # Hour-aligned UTC datetime for a timestamp. Used as hour_bucket value.

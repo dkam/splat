@@ -101,7 +101,7 @@ class Event < IssuesEventsRecord
     scope = scope.where(project_id: project_id) if project_id
     rows = scope
            .group(:issue_id)
-           .group(Arel.sql("CAST((strftime('%s', timestamp) - #{range_start.to_i}) / #{bucket_seconds} AS INTEGER)"))
+           .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
            .count
 
     result = issue_ids.each_with_object({}) { |id, h| h[id] = Array.new(buckets, 0) }
@@ -122,7 +122,7 @@ class Event < IssuesEventsRecord
 
     rows = where(project_id: project_id)
            .where(timestamp: time_range)
-           .group(Arel.sql("CAST((strftime('%s', timestamp) - #{range_start.to_i}) / #{bucket_seconds} AS INTEGER)"))
+           .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
            .count
 
     Array.new(buckets, 0).tap do |result|

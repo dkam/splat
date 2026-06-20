@@ -11,12 +11,9 @@ class CompressionDictionarySeeder
     { segment: "events", file: "events.dict" }
   ].freeze
 
-  # Internal AR model scoped to the issues_events DB so the :binary type
-  # handles ASCII-8BIT dict bytes correctly (raw exec_insert tries to
-  # UTF-8-encode the blob).
-  class IssuesEventsDict < IssuesEventsRecord
-    self.table_name = "compression_dictionaries"
-  end
+  # Compression::IssuesEventsDict is scoped to the issues_events DB so the
+  # :binary type handles ASCII-8BIT dict bytes correctly (a raw exec_insert
+  # would try to UTF-8-encode the blob).
 
   def self.run!
     DICTS.each do |spec|
@@ -26,12 +23,12 @@ class CompressionDictionarySeeder
         next
       end
 
-      if IssuesEventsDict.exists?(segment: spec[:segment], version: 1)
+      if Compression::IssuesEventsDict.exists?(segment: spec[:segment], version: 1)
         Rails.logger.info "[seeds:compression_dictionaries] #{spec[:segment]} v1 already present — skipping"
         next
       end
 
-      IssuesEventsDict.create!(
+      Compression::IssuesEventsDict.create!(
         segment:      spec[:segment],
         version:      1,
         dict:         File.binread(path),

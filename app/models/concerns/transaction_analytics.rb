@@ -37,7 +37,7 @@ module TransactionAnalytics
         Arel.sql("COUNT(*)")
       ) || [nil, nil, nil, 0]
 
-      pcts = global_percentiles(project_id: project_id, environment: environment, time_range: time_range, name_query: name_query)
+      pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
       {
         avg:   avg.to_f.round(1),
         max:   mx.to_i,
@@ -64,6 +64,13 @@ module TransactionAnalytics
         Arel.sql("MIN(duration)")
       ) || [nil, nil, nil, 0, nil, nil]
 
+      # release isn't a dimension on transaction_histograms (high-cardinality;
+      # every deploy adds a row per env/endpoint/bucket). When a release filter
+      # is set we'd need a raw-row scan to honor it; for now we fall back to the
+      # env-only histogram, since release filtering is mainly used by
+      # compare_endpoint_performance which already pluck-sorts raw durations.
+      pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, transaction_name: name)
+
       {
         "transaction_name" => name,
         "avg_duration"     => avg_d.to_f.round(1),
@@ -72,20 +79,9 @@ module TransactionAnalytics
         "count"            => cnt.to_i,
         "max_duration"     => mx.to_i,
         "min_duration"     => mn.to_i,
-        # release isn't a dimension on transaction_histograms (high-cardinality;
-        # every deploy adds a row per env/endpoint/bucket). When a release filter
-        # is set we'd need a raw-row scan to honor it; for now we fall back to the
-        # env-only histogram, since release filtering is mainly used by
-        # compare_endpoint_performance which already pluck-sorts raw durations.
-        "p50_duration"     => histogram_percentile(project_id: project_id, transaction_name: name,
-                                                   environment: environment, quantile: 0.50,
-                                                   since: time_range.begin, until_time: time_range.end),
-        "p95_duration"     => histogram_percentile(project_id: project_id, transaction_name: name,
-                                                   environment: environment, quantile: 0.95,
-                                                   since: time_range.begin, until_time: time_range.end),
-        "p99_duration"     => histogram_percentile(project_id: project_id, transaction_name: name,
-                                                   environment: environment, quantile: 0.99,
-                                                   since: time_range.begin, until_time: time_range.end)
+        "p50_duration"     => pcts[:p50],
+        "p95_duration"     => pcts[:p95],
+        "p99_duration"     => pcts[:p99]
       }
     end
 
@@ -216,7 +212,7 @@ module TransactionAnalytics
       rows = rows.where(project_id: project_id)   if project_id
       rows = rows.where(environment: environment) if environment.present?
       rows = rows.pluck(:transaction_name,
-                        Arel.sql("CAST((strftime('%s', timestamp) - #{time_range.begin.to_i}) / #{bucket_seconds} AS INTEGER)"),
+                        Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: time_range.begin.to_i, bucket_seconds: bucket_seconds)),
                         :duration)
 
       grouped = rows.group_by { |name, idx, _| [name, idx] }
@@ -241,7 +237,7 @@ module TransactionAnalytics
       rows = rows.where(project_id: project_id)   if project_id
       rows = rows.where(environment: environment) if environment.present?
 
-      counts = rows.group(Arel.sql("CAST((strftime('%s', timestamp) - #{time_range.begin.to_i}) / #{bucket_seconds} AS INTEGER)")).count
+      counts = rows.group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: time_range.begin.to_i, bucket_seconds: bucket_seconds))).count
 
       Array.new(buckets, 0).tap do |result|
         counts.each do |idx, c|
@@ -261,7 +257,7 @@ module TransactionAnalytics
       scope = scope.where(release: release)         if release.present?
 
       rows = scope.pluck(
-        Arel.sql("CAST((strftime('%s', timestamp) - #{time_range.begin.to_i}) / #{bucket_seconds} AS INTEGER)"),
+        Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: time_range.begin.to_i, bucket_seconds: bucket_seconds)),
         :duration
       )
       grouped = rows.group_by(&:first).transform_values { |entries| entries.map(&:last).sort }
@@ -290,16 +286,11 @@ module TransactionAnalytics
     # Histogram-backed p50/p95/p99 for one endpoint over a window, keyed to
     # match the dashboard/MCP consumers (p50_duration/p95_duration/p99_duration).
     def endpoint_percentiles(name, time_range, project_id:, environment:)
+      pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, transaction_name: name)
       {
-        "p50_duration" => histogram_percentile(project_id: project_id, transaction_name: name,
-                                               environment: environment, quantile: 0.50,
-                                               since: time_range.begin, until_time: time_range.end),
-        "p95_duration" => histogram_percentile(project_id: project_id, transaction_name: name,
-                                               environment: environment, quantile: 0.95,
-                                               since: time_range.begin, until_time: time_range.end),
-        "p99_duration" => histogram_percentile(project_id: project_id, transaction_name: name,
-                                               environment: environment, quantile: 0.99,
-                                               since: time_range.begin, until_time: time_range.end)
+        "p50_duration" => pcts[:p50],
+        "p95_duration" => pcts[:p95],
+        "p99_duration" => pcts[:p99]
       }
     end
 
@@ -309,17 +300,29 @@ module TransactionAnalytics
     # table). project_id/name/env are bound only when present — `project_id = ?`
     # with NULL matches nothing, and a conditional bind is sargable where the old
     # COALESCE(?, project_id) was not.
-    # Returns { p50:, p95:, p99: } in ms (nil where there's no data). All three
-    # quantiles come from ONE pass over the merge CTE — the running cumulative is
-    # built once and each quantile is a scalar subquery over it (the 0.50/0.95/
-    # 0.99 constants are literals, not user input). This replaces three separate
-    # CTE evaluations per call.
-    def global_percentiles(project_id:, environment:, time_range:, name_query: nil)
+    # The single mergeable-percentile reader. Returns { p50:, p95:, p99: } in ms
+    # (nil where there's no data) for the given window, merging pre-computed
+    # transaction_histograms rows with the in-progress hour unioned from raw
+    # transactions. One CTE pass: the running cumulative is built once and each
+    # quantile is a scalar subquery over it (0.50/0.95/0.99 are literals).
+    #
+    # Name scoping: pass transaction_name for an exact endpoint, or name_query
+    # for a substring (LIKE) match across endpoints; omit both for project-wide.
+    # transaction_histograms stores env as '' for NULL-env sources, so an explicit
+    # environment filter never matches the no-env bucket (by design).
+    def merged_percentiles(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil)
       hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
       until_hour = Analytics::Histogram.hour_bucket(time_range.end)
       proj_filter = project_id.present?  ? "AND project_id = ?" : ""
-      name_filter = name_query.present?  ? "AND transaction_name LIKE ?" : ""
       env_filter  = environment.present? ? "AND environment = ?" : ""
+      name_filter =
+        if transaction_name.present? then "AND transaction_name = ?"
+        elsif name_query.present?    then "AND transaction_name LIKE ?"
+        else ""
+        end
+      name_bind = transaction_name.presence || ("%#{name_query}%" if name_query.present?)
+      bucket_sql = Analytics::Histogram.bucket_index_sql
+
       sql = <<~SQL
         WITH merged AS (
           SELECT bucket_index, SUM(count) AS c
@@ -330,8 +333,7 @@ module TransactionAnalytics
              #{env_filter}
            GROUP BY bucket_index
           UNION ALL
-          SELECT CAST(FLOOR(LN(MAX(duration, 1)) / LN(?)) AS INTEGER) AS bucket_index,
-                 COUNT(*) AS c
+          SELECT #{bucket_sql} AS bucket_index, COUNT(*) AS c
             FROM transactions
            WHERE timestamp >= ? AND timestamp < ?
              #{proj_filter}
@@ -351,22 +353,19 @@ module TransactionAnalytics
           (SELECT bucket_index FROM running WHERE cum >= 0.95 * total ORDER BY bucket_index LIMIT 1),
           (SELECT bucket_index FROM running WHERE cum >= 0.99 * total ORDER BY bucket_index LIMIT 1)
       SQL
-      # See Transaction.histogram_percentile: clamp raw-branch lower bound so
-      # a sub-hour window doesn't pull rows from before time_range.begin.
+      # Clamp the raw-branch lower bound to the later of time_range.begin and the
+      # window's last hour so a sub-hour window doesn't pull pre-window rows.
       raw_lower = [time_range.begin, until_hour].max
-      like = "%#{name_query}%" if name_query.present?
       binds = [hour_start, until_hour]
-      binds << project_id  if project_id.present?
-      binds << like        if name_query.present?
+      binds << project_id if project_id.present?
+      binds << name_bind  if name_bind
       binds << environment if environment.present?
-      binds << Analytics::Histogram::GAMMA
       binds.push(raw_lower, time_range.end)
-      binds << project_id  if project_id.present?
-      binds << like        if name_query.present?
+      binds << project_id if project_id.present?
+      binds << name_bind  if name_bind
       binds << environment if environment.present?
 
-      row = connection.select_rows(sanitize_sql_array([sql, *binds])).first || []
-      p50, p95, p99 = row
+      p50, p95, p99 = connection.select_rows(sanitize_sql_array([sql, *binds])).first || []
       {
         p50: p50 && Analytics::Histogram.index_to_ms(p50.to_i),
         p95: p95 && Analytics::Histogram.index_to_ms(p95.to_i),
@@ -381,7 +380,7 @@ module TransactionAnalytics
       scope = scope.where(project_id: project_id) if project_id
 
       rows = scope.pluck(
-        Arel.sql("CAST((strftime('%s', timestamp) - #{time_range.begin.to_i}) / #{bucket_seconds} AS INTEGER)"),
+        Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: time_range.begin.to_i, bucket_seconds: bucket_seconds)),
         :duration
       )
       grouped = rows.group_by(&:first).transform_values { |entries| entries.map(&:last).sort }
