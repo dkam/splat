@@ -21,7 +21,7 @@
     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
       <% spans.each do |s|
            depth   = s["depth"].to_i
-           dur_ms  = s["duration_ms"].to_f
+           dur_ms  = s.duration_ms.to_f
            offset_ms = ((s["timestamp"].to_time - origin_ts) * 1000.0)
            offset_pct = (offset_ms / total_ms * 100).clamp(0, 100)
            width_pct  = (dur_ms / total_ms * 100).clamp(0.25, 100)

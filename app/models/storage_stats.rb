@@ -1,10 +1,33 @@
 class StorageStats
-  PARQUET_LAKE_TABLES = %w[events transactions spans].freeze
+  # Each entry is [label_for_ui, ActiveRecord base class]. The labels match
+  # what the settings page renders as a section header.
+  DBS = [
+    ["Primary",            "ApplicationRecord"],
+    ["Issues + Events",    "IssuesEventsRecord"],
+    ["Transactions + Spans", "TransactionsSpansRecord"]
+  ].freeze
 
   class << self
-    def sqlite_tables
-      conn = ApplicationRecord.connection
+    # Tables across all three SQLite files, grouped by source DB so the
+    # settings page can show them per-cluster. Each table row gives the row
+    # count, table bytes, index bytes, and total bytes.
+    def sqlite_tables_grouped
+      DBS.map do |label, base_name|
+        base = base_name.constantize
+        { name: label, base: base_name, tables: sqlite_tables_for(base) }
+      end
+    end
 
+    # Back-compat single-list view (primary only) — kept for any caller
+    # not yet updated to the grouped form.
+    def sqlite_tables
+      sqlite_tables_for(ApplicationRecord)
+    end
+
+    private
+
+    def sqlite_tables_for(base)
+      conn = base.connection
       byte_map = page_bytes_by_object(conn)
 
       indexes_by_table = Hash.new { |h, k| h[k] = [] }
@@ -33,12 +56,6 @@ class StorageStats
       }.sort_by { |t| -t[:total_bytes] }
     end
 
-    def parquet_lake_tables
-      PARQUET_LAKE_TABLES.map { |table| parquet_lake_table_stats(table) }
-    end
-
-    private
-
     def page_bytes_by_object(conn)
       conn.select_all("SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name").each_with_object({}) do |row, h|
         h[row["name"]] = row["bytes"].to_i
@@ -46,23 +63,6 @@ class StorageStats
     rescue ActiveRecord::StatementInvalid => e
       Rails.logger.warn("StorageStats: dbstat unavailable (#{e.class}: #{e.message}); per-table byte sizes will be 0")
       {}
-    end
-
-    # Walks the on-disk Parquet tree for one table and reports file count + total
-    # bytes. No catalog query — each Parquet file is independent on disk.
-    def parquet_lake_table_stats(table)
-      pattern = File.join(ParquetLake::Connection.data_path, table, "**", "*.parquet")
-      files = Dir.glob(pattern)
-      sizes = files.map { |f| File.size(f) rescue 0 }
-      {
-        name: table,
-        file_count: files.size,
-        total_bytes: sizes.sum,
-        max_file_bytes: sizes.max || 0
-      }
-    rescue => e
-      Rails.logger.warn("StorageStats: parquet walk failed for #{table}: #{e.class} #{e.message}")
-      {name: table, file_count: 0, total_bytes: 0, max_file_bytes: 0}
     end
   end
 end

@@ -95,5 +95,3 @@ group :test do
 end
 
 gem "sentry-rails"
-
-gem "duckdb", "~> 1.4"

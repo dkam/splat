@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
-class Issue < ApplicationRecord
+class Issue < IssuesEventsRecord
+  # project lives on the primary DB; AR can't JOIN across DBs but
+  # `issue.project` is fine (one extra SELECT against primary).
   belongs_to :project
   has_many :events, dependent: :nullify
 
@@ -12,7 +14,12 @@ class Issue < ApplicationRecord
   scope :recent, -> { order(last_seen: :desc) }
   scope :by_frequency, -> { order(count: :desc) }
 
-  # Callbacks for notifications (email + ntfy)
+  # Burst alerting: how often we recompute an issue's rate, and how long an
+  # alert suppresses follow-ups for the same issue (one alert per hour).
+  BURST_CHECK_INTERVAL = 30.seconds
+  BURST_ALERT_DEDUP_WINDOW = 1.hour
+
+  # Callbacks for email + ntfy notifications
   after_create :notify_new_issue, if: :should_notify_new_issue?
   after_update :notify_issue_reopened, if: :was_reopened?
 
@@ -87,62 +94,46 @@ class Issue < ApplicationRecord
     )
   end
 
-  # How often to recompute the hourly rate per issue. Cache marker keeps
-  # subsequent calls within the interval out of the (DB-touching) block.
-  BURST_CHECK_INTERVAL = 30.seconds
-
-  # How long to suppress duplicate spike alerts for the same issue. Detection
-  # may fire many times during a sustained spike; we only want one email +
-  # ntfy notification per spike-episode.
-  BURST_ALERT_DEDUP_WINDOW = 1.hour
-
+  # Fire a burst alert (email + ntfy) when an open issue's event rate over the
+  # last hour crosses the configured threshold. Throttled per issue so a flood
+  # of events doesn't recompute the rate on every ingest. Called from
+  # Event.create_from_sentry_payload! after the event is persisted.
   def maybe_alert_burst!
     return unless open?
 
     Rails.cache.fetch("burst_check:#{id}", expires_in: BURST_CHECK_INTERVAL) do
       setting = Setting.instance
       rate = events.where("timestamp >= ?", 1.hour.ago).count
-      if rate >= setting.auto_ignore_threshold
-        alert_burst!(rate: rate, setting: setting)
-        auto_ignore_for_burst!(rate: rate) if setting.auto_ignore_enabled
-      end
+      alert_burst!(rate: rate, setting: setting) if rate >= setting.burst_threshold
       true
     end
+  rescue StandardError => e
+    # Best-effort: an alerting hiccup must never fail (and retry) ingest.
+    Rails.logger.warn("Issue#maybe_alert_burst! failed for issue=#{id}: #{e.class} #{e.message}")
   end
 
-  def to_ducklake_row
-    {
-      id: id,
-      project_id: project_id,
-      fingerprint: fingerprint,
-      title: title,
-      exception_type: exception_type,
-      status: Issue.statuses[status],
-      count: count,
-      first_seen: first_seen,
-      last_seen: last_seen,
-      created_at: created_at,
-      updated_at: updated_at
-    }
+  # True while the issue is open and its most recent burst alert is still within
+  # the dedup window — drives the index badge and the show-page banner.
+  def bursting?
+    open? && last_burst_at.present? && last_burst_at > BURST_ALERT_DEDUP_WINDOW.ago
   end
 
   private
 
   def alert_burst!(rate:, setting:)
-    # write(unless_exist: true) is an atomic set-on-miss — returns false if
-    # the key already exists, so concurrent workers don't double-fire.
+    # write(unless_exist: true) is an atomic set-on-miss — returns false if the
+    # key already exists, so concurrent workers don't double-fire within the
+    # dedup window.
     return unless Rails.cache.write(
       "burst_alerted:#{id}", true,
       expires_in: BURST_ALERT_DEDUP_WINDOW, unless_exist: true
     )
 
-    update_columns(auto_ignore_rate: rate)
-    IssueMailer.burst_detected(self, rate).deliver_later
+    # update_columns skips callbacks/validations so this doesn't trigger the
+    # status broadcast or touch updated_at semantics.
+    update_columns(last_burst_at: Time.current, last_burst_rate: rate)
+    IssueMailer.burst_detected(self, rate).deliver_later if email_notifications_enabled?
     NtfyNotificationJob.perform_later(id, "issue_burst") if setting.ntfy_configured?
-  end
-
-  def auto_ignore_for_burst!(rate:)
-    update!(status: :ignored, auto_ignored_at: Time.current, auto_ignore_rate: rate)
   end
 
   def notify_new_issue
@@ -155,14 +146,12 @@ class Issue < ApplicationRecord
     NtfyNotificationJob.perform_later(id, "issue_reopened") if Setting.instance.ntfy_configured?
   end
 
-  # Fire the new-issue callback whenever email *or* ntfy wants it; each
-  # channel re-checks its own gate inside #notify_new_issue.
   def should_notify_new_issue?
     email_notifications_enabled? || Setting.instance.ntfy_configured?
   end
 
   def email_notifications_enabled?
-    # Only notify for new issues in production environment or if explicitly enabled
+    # Only send email in production, or when explicitly enabled elsewhere.
     Rails.env.production? || ENV['SPLAT_EMAIL_NOTIFICATIONS'] == 'true'
   end
 

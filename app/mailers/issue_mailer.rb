@@ -30,15 +30,12 @@ class IssueMailer < ApplicationMailer
     @project = issue.project
     @url = generate_issue_url(issue)
     @rate = rate
-    @threshold = Setting.instance.auto_ignore_threshold
-    @auto_ignored = issue.ignored? && issue.auto_ignored_at.present?
-
-    subject_prefix = @auto_ignored ? "Auto-ignored noisy issue" : "Issue burst detected"
+    @threshold = Setting.instance.burst_threshold
 
     mail(
       from: ENV.fetch('SPLAT_EMAIL_FROM', 'splat@example.com'),
       to: admin_emails,
-      subject: "[Splat] #{subject_prefix}: #{issue.title}"
+      subject: "[Splat] Issue burst detected: #{issue.title}"
     )
   end
 
@@ -57,9 +54,10 @@ class IssueMailer < ApplicationMailer
   end
 
   def generate_issue_url(issue)
-    # Handle preview objects without IDs
+    # Handle preview objects without IDs. Routes nest issues under projects with
+    # `param: :slug` and Project doesn't override to_param, so pass the slug.
     if issue.persisted? && issue.project&.persisted?
-      project_issue_url(issue.project, issue, host: mailer_host)
+      project_issue_url(issue.project.slug, issue, host: mailer_host)
     else
       # Generate a placeholder URL for previews
       "#{mailer_host}/projects/#{issue.project&.slug || 'preview-project'}/issues/#{issue.id || 'preview-issue'}"

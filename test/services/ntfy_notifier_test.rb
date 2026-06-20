@@ -72,13 +72,13 @@ class NtfyNotifierTest < ActiveSupport::TestCase
     assert_equal "[Splat] Issue Reopened: Boom", req[:headers]["Title"]
   end
 
-  test "outbound_request builds auto-ignored variant with rate in body" do
-    @issue.update!(auto_ignore_rate: 1500, auto_ignored_at: Time.current)
+  test "outbound_request builds burst variant with rate in body" do
+    @issue.update!(last_burst_rate: 1500)
     setting = build_setting(ntfy_url: "https://ntfy.sh/splat-test")
 
-    req = NtfyNotifier.outbound_request(@issue, "issue_auto_ignored", setting: setting)
+    req = NtfyNotifier.outbound_request(@issue, "issue_burst", setting: setting)
 
-    assert_equal "[Splat] Auto-ignored Issue: Boom", req[:headers]["Title"]
+    assert_equal "[Splat] Issue Burst: Boom", req[:headers]["Title"]
     assert_includes req[:body], "1500 events/hr"
   end
 

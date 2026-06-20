@@ -3,10 +3,8 @@ class SettingsController < ApplicationController
 
   def index
     @setting = Setting.instance
-    @sqlite_tables = StorageStats.sqlite_tables
-    @parquet_lake_tables = StorageStats.parquet_lake_tables
-    @sqlite_total = @sqlite_tables.sum { |t| t[:total_bytes] }
-    @parquet_lake_total = @parquet_lake_tables.sum { |t| t[:total_bytes] }
+    @sqlite_groups = StorageStats.sqlite_tables_grouped
+    @sqlite_total  = @sqlite_groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
   end
 
   def update
@@ -25,16 +23,11 @@ class SettingsController < ApplicationController
 
   def setting_params
     params.require(:setting).permit(
-      :event_payloads_retention_days,
       :events_data_retention_days,
-      :transaction_measurements_retention_days,
       :transactions_data_retention_days,
-      :ducklake_events_retention_days,
-      :ducklake_transactions_retention_days,
-      :ducklake_issues_retention_days,
-      :ducklake_spans_retention_days,
-      :auto_ignore_enabled,
-      :auto_ignore_threshold,
+      :spans_data_retention_days,
+      :histograms_retention_days,
+      :burst_threshold,
       :ntfy_url,
       :ntfy_token,
       :ntfy_priority

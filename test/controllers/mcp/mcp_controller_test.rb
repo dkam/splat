@@ -13,7 +13,7 @@ module Mcp
       ENV.delete("MCP_AUTH_TOKEN")
     end
 
-    test "search_slow_transactions passes valid tags hash through to DuckLake" do
+    test "search_slow_transactions passes valid tags hash through to Transaction.slow" do
       with_slow_stub do |captured|
         call_tool("search_slow_transactions", { "tags" => { "user_id" => "123", "feature" => "x" } })
         assert_response :success
@@ -29,11 +29,11 @@ module Mcp
       end
     end
 
-    test "search_slow_transactions rejects invalid tag key without hitting DuckLake" do
+    test "search_slow_transactions rejects invalid tag key without hitting Transaction.slow" do
       with_slow_stub do |captured|
         call_tool("search_slow_transactions", { "tags" => { "bad key" => "x" } })
         assert_response :success
-        refute captured[:called], "DuckLake::Transaction.slow should not be called for invalid tag keys"
+        refute captured[:called], "Transaction.slow should not be called for invalid tag keys"
         body = JSON.parse(response.body)
         text = body.dig("result", "content", 0, "text").to_s
         assert_match(/Invalid tag key/, text)
@@ -102,12 +102,12 @@ module Mcp
            }
     end
 
-    # Swap DuckLake::Transaction.slow for a recording stub for the block.
+    # Swap Transaction.slow for a recording stub for the block.
     # Captured hash exposes { called:, kwargs: } so tests can assert on inputs.
     def with_slow_stub
       captured = { called: false, kwargs: nil }
-      klass = DuckLake::Transaction.singleton_class
-      original = DuckLake::Transaction.method(:slow)
+      klass = Transaction.singleton_class
+      original = Transaction.method(:slow)
       klass.send(:define_method, :slow) do |**kwargs|
         captured[:called] = true
         captured[:kwargs] = kwargs

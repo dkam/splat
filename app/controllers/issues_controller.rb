@@ -18,6 +18,7 @@ class IssuesController < ApplicationController
     end.recent
 
     @pagy, @issues = pagy(issues, limit: 25)
+    @burst_threshold = Setting.instance.burst_threshold
 
     counts_by_status = Rails.cache.fetch("project_#{@project.id}_issue_counts", expires_in: 30.seconds) do
       @project.issues.group(:status).count
@@ -28,7 +29,7 @@ class IssuesController < ApplicationController
 
     @sparkline_buckets = 24
     @sparkline_range = 24.hours.ago..Time.current
-    @sparklines = DuckLake::Event.event_counts_by_bucket(
+    @sparklines = Event.event_counts_by_bucket(
       issue_ids: @issues.map(&:id),
       time_range: @sparkline_range,
       buckets: @sparkline_buckets,
@@ -37,8 +38,6 @@ class IssuesController < ApplicationController
     @deploy_markers = @project.releases
       .where(first_seen_at: @sparkline_range)
       .pluck(:first_seen_at)
-
-    @burst_threshold = Setting.instance.auto_ignore_threshold
   end
 
   def show
@@ -46,7 +45,7 @@ class IssuesController < ApplicationController
 
     @spark_range = 7.days.ago..Time.current
     @spark_buckets = 168
-    @spark_counts = DuckLake::Event.event_counts_by_bucket(
+    @spark_counts = Event.event_counts_by_bucket(
       issue_ids: [@issue.id],
       time_range: @spark_range,
       buckets: @spark_buckets,
@@ -68,7 +67,7 @@ class IssuesController < ApplicationController
   end
 
   def reopen
-    @issue.update!(status: :open, auto_ignored_at: nil, auto_ignore_rate: nil)
+    @issue.open!
     redirect_to project_issue_path(@project.slug, @issue), notice: "Issue reopened"
   end
 

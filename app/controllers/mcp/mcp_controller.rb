@@ -663,29 +663,22 @@ module Mcp
       time_range = time_range_hours.hours.ago..Time.current
 
       if endpoint.present?
-        percentiles = DuckLake::Transaction.percentiles_for_endpoint(endpoint, time_range)
-        # Map endpoint-summary shape onto the percentiles formatter shape.
+        ep_stats = Transaction.percentiles_for_endpoint(endpoint, time_range)
         percentiles = {
-          avg: percentiles["avg_duration"]&.to_f || 0,
-          p50: percentiles["p50_duration"]&.to_f || 0,
-          p95: percentiles["p95_duration"]&.to_f || 0,
-          p99: percentiles["p99_duration"]&.to_f || 0,
-          min: percentiles["min_duration"]&.to_f || 0,
-          max: percentiles["max_duration"]&.to_f || 0
+          avg: ep_stats["avg_duration"]&.to_f || 0,
+          p50: ep_stats["p50_duration"]&.to_f || 0,
+          p95: ep_stats["p95_duration"]&.to_f || 0,
+          p99: ep_stats["p99_duration"]&.to_f || 0,
+          min: ep_stats["min_duration"]&.to_f || 0,
+          max: ep_stats["max_duration"]&.to_f || 0
         }
-        total_count = DuckLake::Transaction.query(
-          "SELECT COUNT(*) AS n FROM #{DuckLake::Transaction.from_clause} WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?",
-          endpoint, time_range.begin, time_range.end
-        ).first["n"]
+        total_count = Transaction.where(transaction_name: endpoint, timestamp: time_range).count
       else
-        percentiles = DuckLake::Transaction.percentiles(time_range)
-        total_count = DuckLake::Transaction.query(
-          "SELECT COUNT(*) AS n FROM #{DuckLake::Transaction.from_clause} WHERE timestamp BETWEEN ? AND ?",
-          time_range.begin, time_range.end
-        ).first["n"]
+        percentiles = Transaction.percentiles(time_range)
+        total_count = Transaction.where(timestamp: time_range).count
       end
 
-      top_endpoints = DuckLake::Transaction.stats_by_endpoint_with_impact(time_range, limit: limit)
+      top_endpoints = Transaction.stats_by_endpoint_with_impact(time_range, limit: limit)
 
       text = format_transaction_stats(percentiles, top_endpoints, total_count, time_range_hours, endpoint)
 
@@ -709,10 +702,10 @@ module Mcp
         tags = tags.transform_values(&:to_s)
       end
 
-      rows = DuckLake::Transaction.slow(
-        min_duration_ms: min_duration_ms,
+      rows = Transaction.slow(
+        threshold_ms: min_duration_ms,
         time_range: time_range_hours.hours.ago..Time.current,
-        endpoint: endpoint,
+        transaction_name: endpoint,
         http_status: http_status,
         http_method: http_method,
         environment: environment,
@@ -720,8 +713,12 @@ module Mcp
         limit: limit
       )
 
-      project_names = Project.where(id: rows.map { |r| r["project_id"] }.compact.uniq).pluck(:id, :name).to_h
-      rows.each { |r| r["project_name"] = project_names[r["project_id"]] }
+      project_names = Project.where(id: rows.map(&:project_id).compact.uniq).pluck(:id, :name).to_h
+      rows = rows.map do |r|
+        h = r.attributes
+        h["project_name"] = project_names[r.project_id]
+        h
+      end
 
       text = format_slow_transactions(rows, min_duration_ms, time_range_hours)
 
@@ -738,11 +735,13 @@ module Mcp
       op_filter = args["op_filter"].to_s.strip
       limit = [[args["limit"]&.to_i || 100, 1].max, 1000].min
 
-      all_spans = DuckLake::Span.for_transaction(
+      # Materialize a hash per span; duration_ms is a computed method, not
+      # a column, so .attributes alone would miss it.
+      all_spans = Span.for_transaction(
         transaction.transaction_id,
         project_id: transaction.project_id,
         near_timestamp: transaction.timestamp
-      )
+      ).map { |s| s.attributes.merge("duration_ms" => s.duration_ms) }
 
       filtered = op_filter.present? ? all_spans.select { |s| s["op"].to_s.start_with?(op_filter) } : all_spans
 
@@ -765,7 +764,7 @@ module Mcp
       release = args["release"]
       time_range = hours.hours.ago..Time.current
 
-      stats = DuckLake::Transaction.percentiles_for_endpoint(
+      stats = Transaction.percentiles_for_endpoint(
         endpoint, time_range, environment: environment, release: release
       )
       total_count = stats["count"].to_i
@@ -806,7 +805,7 @@ module Mcp
       limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
       time_range = time_range_hours.hours.ago..Time.current
 
-      rows = DuckLake::Transaction.endpoints_by_n_plus_one(
+      rows = Transaction.endpoints_by_n_plus_one(
         time_range, environment: environment, limit: limit
       )
 
@@ -823,33 +822,23 @@ module Mcp
       release = args["release"]
       time_range = hours.hours.ago..Time.current
 
-      series = DuckLake::Transaction.time_series_for_endpoint(
+      series = Transaction.time_series_for_endpoint(
         endpoint, time_range,
         bucket_count: buckets, environment: environment, release: release
       )
 
-      text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
+      text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release, time_range.begin)
 
       render_text(text)
     end
 
     def endpoint_extreme_row(endpoint, time_range, environment, release, direction)
-      sql = +<<~SQL
-        SELECT id, duration, db_time, view_time, timestamp
-        FROM #{DuckLake::Transaction.from_clause}
-        WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?
-      SQL
-      binds = [endpoint, time_range.begin, time_range.end]
-      if environment.present?
-        sql << " AND environment = ?"
-        binds << environment
-      end
-      if release.present?
-        sql << " AND release = ?"
-        binds << release
-      end
-      sql << " ORDER BY duration #{direction == :desc ? 'DESC' : 'ASC'} LIMIT 1"
-      DuckLake::Transaction.query(sql, *binds).first
+      scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
+      scope = scope.where(environment: environment) if environment.present?
+      scope = scope.where(release: release)         if release.present?
+      row = scope.order(duration: direction == :desc ? :desc : :asc).limit(1).first
+      row && { "id" => row.id, "duration" => row.duration, "db_time" => row.db_time,
+               "view_time" => row.view_time, "timestamp" => row.timestamp }
     end
 
     def get_transactions_by_endpoint(args)
@@ -962,17 +951,10 @@ module Mcp
     end
 
     def durations_for(endpoint, time_range, environment: nil, release: nil)
-      sql = +"SELECT duration FROM #{DuckLake::Transaction.from_clause} WHERE transaction_name = ? AND timestamp BETWEEN ? AND ?"
-      binds = [endpoint, time_range.begin, time_range.end]
-      if environment.present?
-        sql << " AND environment = ?"
-        binds << environment
-      end
-      if release.present?
-        sql << " AND release = ?"
-        binds << release
-      end
-      DuckLake::Transaction.query(sql, *binds).map { |r| r["duration"] }.sort
+      scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
+      scope = scope.where(environment: environment) if environment.present?
+      scope = scope.where(release: release)         if release.present?
+      scope.pluck(:duration).sort
     end
 
     def render_text(text)
@@ -1447,8 +1429,9 @@ module Mcp
       header
     end
 
-    def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release)
-      bucket_minutes = (hours * 60.0 / buckets).round
+    def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release, start_time)
+      bucket_seconds = hours * 3600.0 / buckets
+      bucket_minutes = (bucket_seconds / 60.0).round
 
       header = "## Endpoint Time Series: #{endpoint}\n\n"
       header += "**Time Range:** Last #{hours} hour(s)\n"
@@ -1457,20 +1440,22 @@ module Mcp
       header += "**Release:** #{release}\n" if release.present?
       header += "\n"
 
-      if series.all? { |b| b[:count].zero? }
+      # time_series_for_endpoint returns string-keyed buckets: an integer
+      # "bucket" index plus "count" and "p50"/"p95"/"p99" (no avg/max). Derive
+      # each bucket's wall-clock start from its index and the window origin.
+      if series.all? { |b| b["count"].zero? }
         return header + "No requests in this window.\n"
       end
 
-      header += "| Bucket Start | Count | Avg | P50 | P95 | P99 | Max |\n"
-      header += "|---|---:|---:|---:|---:|---:|---:|\n"
+      header += "| Bucket Start | Count | P50 | P95 | P99 |\n"
+      header += "|---|---:|---:|---:|---:|\n"
       series.each do |b|
-        header += "| #{b[:bucket_start].strftime('%Y-%m-%d %H:%M')} " \
-                 "| #{b[:count]} " \
-                 "| #{format_ms(b[:avg_duration])} " \
-                 "| #{format_ms(b[:p50_duration])} " \
-                 "| #{format_ms(b[:p95_duration])} " \
-                 "| #{format_ms(b[:p99_duration])} " \
-                 "| #{format_ms(b[:max_duration])} |\n"
+        bucket_start = start_time + (b["bucket"] * bucket_seconds)
+        header += "| #{bucket_start.strftime('%Y-%m-%d %H:%M')} " \
+                 "| #{b["count"]} " \
+                 "| #{format_ms(b["p50"])} " \
+                 "| #{format_ms(b["p95"])} " \
+                 "| #{format_ms(b["p99"])} |\n"
       end
       header
     end

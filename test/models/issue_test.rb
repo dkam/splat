@@ -4,8 +4,12 @@ require "test_helper"
 
 class IssueTest < ActiveSupport::TestCase
   include ActionMailer::TestHelper
+  include ActiveJob::TestHelper
   def setup
     @project = projects(:one)
+    # memory_store persists across tests; rolled-back issue IDs repeat, so burst
+    # cache keys (burst_check/burst_alerted:<id>) would leak between tests.
+    Rails.cache.clear
   end
 
   test "sends new issue email when created with notifications enabled" do
@@ -123,130 +127,6 @@ class IssueTest < ActiveSupport::TestCase
     end
   end
 
-  test "maybe_alert_burst! sends spike alert without ignoring when auto_ignore disabled" do
-    Rails.cache.clear
-    Setting.instance.update!(auto_ignore_enabled: false, auto_ignore_threshold: 3)
-
-    issue = Issue.create!(
-      title: "Noisy",
-      fingerprint: "noisy::test::fingerprint",
-      project: @project,
-      status: :open,
-      first_seen: Time.current,
-      last_seen: Time.current
-    )
-
-    3.times do |i|
-      Event.create!(
-        project: @project,
-        issue: issue,
-        event_id: "evt-#{i}-#{SecureRandom.hex(4)}",
-        timestamp: 10.minutes.ago,
-        payload: { "message" => "boom" }
-      )
-    end
-
-    assert_emails 1 do
-      issue.maybe_alert_burst!
-    end
-
-    issue.reload
-    assert issue.open?, "issue should stay open when auto_ignore_enabled is false"
-    assert_nil issue.auto_ignored_at
-    assert_equal 3, issue.auto_ignore_rate
-  end
-
-  test "maybe_alert_burst! flips to ignored when auto_ignore_enabled" do
-    Rails.cache.clear
-    Setting.instance.update!(auto_ignore_enabled: true, auto_ignore_threshold: 3)
-
-    issue = Issue.create!(
-      title: "Noisy auto-ignored",
-      fingerprint: "noisy::ai::fingerprint",
-      project: @project,
-      status: :open,
-      first_seen: Time.current,
-      last_seen: Time.current
-    )
-
-    3.times do |i|
-      Event.create!(
-        project: @project,
-        issue: issue,
-        event_id: "evt-#{i}-#{SecureRandom.hex(4)}",
-        timestamp: 10.minutes.ago,
-        payload: { "message" => "boom" }
-      )
-    end
-
-    assert_emails 1 do
-      issue.maybe_alert_burst!
-    end
-
-    issue.reload
-    assert issue.ignored?
-    assert_not_nil issue.auto_ignored_at
-    assert_equal 3, issue.auto_ignore_rate
-  end
-
-  test "maybe_alert_burst! is a no-op when rate is under threshold" do
-    Rails.cache.clear
-    Setting.instance.update!(auto_ignore_enabled: false, auto_ignore_threshold: 100)
-
-    issue = Issue.create!(
-      title: "Calm",
-      fingerprint: "calm::test::fingerprint",
-      project: @project,
-      status: :open,
-      first_seen: Time.current,
-      last_seen: Time.current
-    )
-
-    Event.create!(
-      project: @project,
-      issue: issue,
-      event_id: "evt-#{SecureRandom.hex(4)}",
-      timestamp: 5.minutes.ago,
-      payload: { "message" => "calm" }
-    )
-
-    assert_emails 0 do
-      issue.maybe_alert_burst!
-    end
-    assert issue.reload.open?
-    assert_nil issue.auto_ignored_at
-  end
-
-  test "maybe_alert_burst! dedupes alerts within the dedup window" do
-    Rails.cache.clear
-    Setting.instance.update!(auto_ignore_enabled: false, auto_ignore_threshold: 1)
-
-    issue = Issue.create!(
-      title: "Repeated bursts",
-      fingerprint: "burst::dedup::fingerprint",
-      project: @project,
-      status: :open,
-      first_seen: Time.current,
-      last_seen: Time.current
-    )
-
-    Event.create!(
-      project: @project,
-      issue: issue,
-      event_id: "evt-#{SecureRandom.hex(4)}",
-      timestamp: 5.minutes.ago,
-      payload: { "message" => "boom" }
-    )
-
-    assert_emails 1 do
-      issue.maybe_alert_burst!
-      # Clear only the per-check throttle to force re-evaluation; the
-      # per-issue dedup marker should still suppress the second alert.
-      Rails.cache.delete("burst_check:#{issue.id}")
-      issue.maybe_alert_burst!
-    end
-  end
-
   test "sends email in production environment" do
     # Mock production environment
     original_env = Rails.env
@@ -264,5 +144,85 @@ class IssueTest < ActiveSupport::TestCase
     end
   ensure
     Rails.env = original_env
+  end
+
+  # ---- Burst alerting (alert-only) ----
+
+  test "maybe_alert_burst! alerts, records rate, and stays open when over threshold" do
+    Setting.instance.update!(burst_threshold: 3)
+    issue = create_open_issue("burst::over")
+    3.times { |i| create_event(issue, i) }
+
+    ENV["SPLAT_EMAIL_NOTIFICATIONS"] = "true"
+    assert_emails 1 do
+      issue.maybe_alert_burst!
+    end
+
+    issue.reload
+    assert issue.open?, "alert-only must not change status"
+    assert_equal 3, issue.last_burst_rate
+    assert issue.bursting?
+  ensure
+    ENV.delete("SPLAT_EMAIL_NOTIFICATIONS")
+  end
+
+  test "maybe_alert_burst! does nothing under threshold" do
+    Setting.instance.update!(burst_threshold: 100)
+    issue = create_open_issue("burst::under")
+    2.times { |i| create_event(issue, i) }
+
+    ENV["SPLAT_EMAIL_NOTIFICATIONS"] = "true"
+    assert_no_emails do
+      issue.maybe_alert_burst!
+    end
+
+    issue.reload
+    assert_nil issue.last_burst_rate
+    refute issue.bursting?
+  ensure
+    ENV.delete("SPLAT_EMAIL_NOTIFICATIONS")
+  end
+
+  test "maybe_alert_burst! dedups alerts within the window" do
+    Setting.instance.update!(burst_threshold: 3)
+    issue = create_open_issue("burst::dedup")
+    3.times { |i| create_event(issue, i) }
+
+    ENV["SPLAT_EMAIL_NOTIFICATIONS"] = "true"
+    assert_emails 1 do
+      issue.maybe_alert_burst!
+      # Bypass the 30s per-issue throttle so the second call re-checks; the
+      # 1h burst_alerted dedup must still suppress a second alert.
+      Rails.cache.delete("burst_check:#{issue.id}")
+      issue.maybe_alert_burst!
+    end
+  ensure
+    ENV.delete("SPLAT_EMAIL_NOTIFICATIONS")
+  end
+
+  test "maybe_alert_burst! enqueues an ntfy burst job when ntfy configured" do
+    Setting.instance.update!(burst_threshold: 3, ntfy_url: "https://ntfy.sh/splat-test")
+    issue = create_open_issue("burst::ntfy")
+    3.times { |i| create_event(issue, i) }
+
+    assert_enqueued_with(job: NtfyNotificationJob, args: [issue.id, "issue_burst"]) do
+      issue.maybe_alert_burst!
+    end
+  end
+
+  private
+
+  def create_open_issue(fingerprint)
+    Issue.create!(
+      title: "Burst", fingerprint: fingerprint, project: @project,
+      status: :open, first_seen: Time.current, last_seen: Time.current
+    )
+  end
+
+  def create_event(issue, idx)
+    issue.events.create!(
+      project: @project, event_id: "evt-#{issue.id}-#{idx}",
+      timestamp: Time.current
+    )
   end
 end

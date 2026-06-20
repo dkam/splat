@@ -14,27 +14,12 @@ FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 # Rails app lives here
 WORKDIR /rails
 
-# Install base packages and DuckDB library
-ARG TARGETPLATFORM
+# Install base packages. zstd is used by Compression::DictTrainingJob (zstd --train).
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y curl libjemalloc2 sqlite3 wget unzip && \
+    apt-get install --no-install-recommends -y curl libjemalloc2 sqlite3 zstd && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives && \
-    ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
-    case "$TARGETPLATFORM" in \
-      "linux/amd64") \
-        DUCKDB_ARCH="amd64" ;; \
-      "linux/arm64") \
-        DUCKDB_ARCH="arm64" ;; \
-      *) \
-        echo "Unsupported platform: $TARGETPLATFORM" && exit 1 ;; \
-    esac && \
-    wget "https://github.com/duckdb/duckdb/releases/download/v1.5.1/libduckdb-linux-${DUCKDB_ARCH}.zip" -O /tmp/libduckdb.zip && \
-    unzip /tmp/libduckdb.zip -d /tmp/duckdb && \
-    cp /tmp/duckdb/duckdb.h /tmp/duckdb/duckdb.hpp /usr/local/include/ && \
-    cp /tmp/duckdb/libduckdb.so /usr/local/lib/ && \
-    ldconfig && \
-    rm -rf /tmp/libduckdb.zip /tmp/duckdb
+    ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so
 
 # Set production environment variables and enable jemalloc for reduced memory usage and latency.
 ENV RAILS_ENV="production" \

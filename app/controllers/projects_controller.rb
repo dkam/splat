@@ -59,16 +59,16 @@ class ProjectsController < ApplicationController
         # multiple times in the view (it was previously called 3x in
         # show.html.erb's CSS-class ternary).
         error_rate: @project.error_rate,
-        endpoint_sparklines: DuckLake::Transaction.p95_by_bucket(
+        endpoint_sparklines: Transaction.p95_by_bucket(
           transaction_names: top_endpoints.map { |e| e["transaction_name"] },
           time_range: @sparkline_range, buckets: @sparkline_buckets,
           project_id: @project.id
         ),
-        events_by_hour: DuckLake::Event.volume_by_bucket(
+        events_by_hour: Event.volume_by_bucket(
           time_range: @sparkline_range, buckets: @sparkline_buckets,
           project_id: @project.id
         ),
-        transactions_by_hour: DuckLake::Transaction.volume_by_bucket(
+        transactions_by_hour: Transaction.volume_by_bucket(
           time_range: @sparkline_range, buckets: @sparkline_buckets,
           project_id: @project.id
         )
@@ -91,7 +91,7 @@ class ProjectsController < ApplicationController
       "project_#{@project.id}_issue_sparklines/#{issue_ids.sort.join(',')}",
       expires_in: SHOW_METRICS_TTL
     ) do
-      DuckLake::Event.event_counts_by_bucket(
+      Event.event_counts_by_bucket(
         issue_ids: issue_ids,
         time_range: @sparkline_range,
         buckets: @sparkline_buckets,

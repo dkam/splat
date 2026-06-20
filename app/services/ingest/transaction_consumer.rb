@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module Ingest
-  # Stage 1 transactions: drain splat.transactions, run AR
-  # create_from_sentry_payload! per row, then push hydrated transaction +
-  # span rows downstream as one packed body per tube per batch.
+  # Drains splat.transactions: runs AR create_from_sentry_payload!, extracts
+  # spans into the same DB via insert_all!, and bumps the live-hour
+  # transaction_histograms counters in one batched ON CONFLICT INSERT.
   class TransactionConsumer < TubeConsumer
     def initialize(batch_size: DEFAULT_BATCH_SIZE)
       super(tube: Tuber::TRANSACTIONS_TUBE, batch_size: batch_size)
@@ -12,8 +12,6 @@ module Ingest
     private
 
     def process_batch(jobs)
-      transactions = []
-      span_rows = []
       outcomes = []
 
       jobs.each do |job|
@@ -25,14 +23,34 @@ module Ingest
           next
         end
 
-        transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
-        if transaction.release.present?
+        # One TransactionsSpansRecord transaction per job: the parent row,
+        # its spans, and the histogram bump commit together or not at all.
+        # On rollback the rescue below marks the job :retry so beanstalkd
+        # redelivers it. create_from_sentry_payload! is idempotent on
+        # (project_id, transaction_id): a redelivery finds the existing row
+        # and skips the save, leaving previously_new_record? false. We gate
+        # spans + the histogram bump on that so redelivery can't insert
+        # duplicate spans (no unique index) or double-count the live hour.
+        transaction = nil
+        TransactionsSpansRecord.transaction do
+          transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
+          if transaction.previously_new_record?
+            span_rows = build_span_rows(transaction, args["payload"])
+            Span.insert_all!(span_rows) if span_rows.any?
+            Analytics::Histogram.bump_many!([
+              [transaction.project_id, transaction.transaction_name, transaction.environment,
+               transaction.timestamp, transaction.duration]
+            ])
+          end
+        end
+
+        # Release lives on the primary DB, so it can't share the inner txn.
+        # record_sighting! is idempotent; safe to run after the inner commit.
+        if transaction&.release.present?
           Release.record_sighting!(project: project, version: transaction.release,
                                    timestamp: transaction.timestamp, kind: :transaction)
         end
 
-        transactions << transaction
-        span_rows.concat(build_span_rows(transaction, args["payload"]))
         outcomes << [job, :ok]
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
@@ -41,21 +59,7 @@ module Ingest
         outcomes << [job, :retry]
       end
 
-      forward_to_mirror(transactions, span_rows)
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
-    end
-
-    def forward_to_mirror(transactions, span_rows)
-      if transactions.any?
-        Tuber.put(Tuber::DUCKLAKE_TRANSACTIONS_TUBE,
-                  { table: "transactions", rows: transactions.map(&:to_ducklake_row) })
-      end
-      if span_rows.any?
-        Tuber.put(Tuber::DUCKLAKE_SPANS_TUBE,
-                  { table: "spans", rows: span_rows })
-      end
-    rescue => e
-      log_exception("[#{self.class.name}] mirror forward failed", e)
     end
 
     def build_span_rows(transaction, payload)
@@ -108,6 +112,10 @@ module Ingest
       rows
     end
 
+    # Row for Span.insert_all!. tags/data are :json columns — pass the raw
+    # Hash and let the column type serialize it once. Pre-encoding with
+    # .to_json double-encodes (Rails re-serializes through the json type),
+    # so Span#tags/#data would read back a JSON String instead of a Hash.
     def build_span_row(project_id:, trace_id:, transaction_id:, span_id:, parent_span_id:,
                        start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
       {
@@ -121,16 +129,14 @@ module Ingest
         op: op,
         status: status,
         description: Transaction::SqlNormalizer.normalize(description),
-        tags: tags,
-        data: data,
+        tags: tags || {},
+        data: data || {},
         depth: depth.to_i,
         sequence: sequence.to_i,
         created_at: Time.current
       }
     end
 
-    # Always return UTC. JSON-serializing a non-UTC Time produces a string
-    # with offset, which DuckDB's TIMESTAMP type rejects.
     def parse_ts(value)
       t = case value
           when Numeric then Time.at(value)

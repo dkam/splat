@@ -310,7 +310,7 @@ class TransactionTest < ActiveSupport::TestCase
     assert_not_includes Transaction.by_server("web-1"), post_transaction
   end
 
-  test "slow scope returns only slow transactions" do
+  test "slow returns only transactions over the threshold" do
     slow_txn = @project.transactions.create!(
       transaction_id: "slow-scope",
       transaction_name: "Slow",
@@ -325,7 +325,7 @@ class TransactionTest < ActiveSupport::TestCase
       duration: 500
     )
 
-    slow_transactions = Transaction.slow
+    slow_transactions = Transaction.slow(time_range: 1.hour.ago..Time.current, threshold_ms: 1000)
 
     assert_includes slow_transactions, slow_txn
     assert_not_includes slow_transactions, fast_txn

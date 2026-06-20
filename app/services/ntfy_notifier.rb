@@ -16,9 +16,9 @@ class NtfyNotifier
   VALID_PRIORITIES = %w[min low default high max].freeze
 
   EVENTS = {
-    "new_issue"      => { subject: "New Issue",          tags: %w[boom warning] },
-    "issue_reopened" => { subject: "Issue Reopened",     tags: %w[recycle warning] },
-    "issue_burst"    => { subject: "Issue Burst",        tags: %w[fire warning] }
+    "new_issue"      => { subject: "New Issue",      tags: %w[boom warning] },
+    "issue_reopened" => { subject: "Issue Reopened", tags: %w[recycle warning] },
+    "issue_burst"    => { subject: "Issue Burst",    tags: %w[fire warning] }
   }.freeze
 
   class << self
@@ -101,9 +101,7 @@ class NtfyNotifier
       header =
         case event_key
         when "issue_reopened" then "Reopened (#{issue.count} events total)"
-        when "issue_burst"
-          ignored_suffix = issue.ignored? && issue.auto_ignored_at.present? ? " — auto-ignored" : ""
-          "Bursting at #{issue.auto_ignore_rate.to_i} events/hr#{ignored_suffix}"
+        when "issue_burst"    then "Bursting at #{issue.last_burst_rate.to_i} events/hr"
         else "New issue"
         end
 
@@ -120,8 +118,10 @@ class NtfyNotifier
 
       host = ENV.fetch("SPLAT_HOST", "localhost:3000")
       scheme = host.include?("localhost") ? "http" : "https"
+      # Routes nest issues under projects with `param: :slug`, and Project doesn't
+      # override to_param — pass the slug explicitly so the URL is routable.
       Rails.application.routes.url_helpers.project_issue_url(
-        issue.project, issue, host: host, protocol: scheme
+        issue.project.slug, issue, host: host, protocol: scheme
       )
     rescue StandardError
       nil

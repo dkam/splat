@@ -44,9 +44,12 @@ class DsnAuthenticationService
 
   # Extract public key from various authentication sources
   def self.extract_public_key(request)
-    # Method 1: Query parameter (highest priority for simplicity)
+    # Method 1: Query parameter (highest priority for simplicity).
+    # GlitchTip SDKs send ?glitchtip_key=; Sentry SDKs send ?sentry_key=.
     if request.GET.key?('sentry_key')
       return request.GET['sentry_key']
+    elsif request.GET.key?('glitchtip_key')
+      return request.GET['glitchtip_key']
     end
 
     # Method 2: X-Sentry-Auth header

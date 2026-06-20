@@ -7,7 +7,7 @@ class TransactionsController < ApplicationController
   before_action :set_transaction, only: [:show]
 
   def show
-    @spans = DuckLake::Span.for_transaction(
+    @spans = Span.for_transaction(
       @transaction.transaction_id,
       project_id: @project.id,
       near_timestamp: @transaction.timestamp

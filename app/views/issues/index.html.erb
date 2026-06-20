@@ -46,27 +46,18 @@
         <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 dark:hover:bg-gray-800/60 p-6 transition-colors" do %>
           <div class="flex justify-between items-start">
             <div class="flex-1">
-              <div class="flex items-center gap-3 mb-2 flex-wrap">
+              <div class="flex items-center gap-3 mb-2">
                 <span class="text-lg font-mono text-gray-500 dark:text-gray-400 font-medium">#<%= issue.id %></span>
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><%= issue.title %></h2>
                 <% if issue.resolved? %>
                   <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 rounded">Resolved</span>
                 <% elsif issue.ignored? %>
-                  <% if issue.auto_ignored_at.present? %>
-                    <span class="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 rounded" title="Auto-ignored at <%= issue.auto_ignored_at.strftime('%Y-%m-%d %H:%M') %> — was <%= number_with_delimiter(issue.auto_ignore_rate) %>/hr">🤖 Auto-ignored</span>
-                  <% else %>
-                    <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 rounded">Ignored</span>
-                  <% end %>
+                  <span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 rounded">Ignored</span>
                 <% end %>
-                <%
-                  rate_per_hour = (@sparklines[issue.id] || []).last.to_i
-                  hot = rate_per_hour >= @burst_threshold
-                  very_hot = rate_per_hour >= @burst_threshold * 2
-                %>
-                <% if hot %>
-                  <span class="px-2 py-1 text-xs font-medium <%= very_hot ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' %> rounded" title="Events per hour, last hour. Threshold: <%= number_with_delimiter(@burst_threshold) %>/hr">
-                    <%= very_hot ? "🚨" : "🔥" %>
-                    <%= number_to_human(rate_per_hour, units: { thousand: "k", million: "M" }, precision: 2, strip_insignificant_zeros: true) %>/hr
+                <% if issue.bursting? %>
+                  <% very_hot = issue.last_burst_rate.to_i >= @burst_threshold * 2 %>
+                  <span class="px-2 py-1 text-xs font-medium <%= very_hot ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' %> rounded" title="Bursting — events/hour at last check vs threshold">
+                    <%= very_hot ? "🚨" : "🔥" %> <%= number_to_human(issue.last_burst_rate.to_i, units: { thousand: "k", million: "M" }, precision: 2, strip_insignificant_zeros: true) %>/hr
                   </span>
                 <% end %>
               </div>
