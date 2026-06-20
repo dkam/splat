@@ -3,6 +3,12 @@
 # along with issues and the new spans table. The primary DB only retains
 # projects, releases, oidc_sessions, and settings.
 #
+# INTENTIONAL DATA WIPE: dropping these primary-DB tables discards all
+# pre-cutover events / transactions / issues history. This is by design — the
+# new two-DB layout starts empty and there is no backfill (production history
+# was deemed disposable at cutover). This is not an accidental loss; #down is
+# deliberately irreversible.
+#
 # This migration:
 #   1. drops the now-unused events / transactions / issues tables on primary
 #      (issues moved too, even though it shares no name with another DB);
