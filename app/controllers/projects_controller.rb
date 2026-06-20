@@ -6,18 +6,24 @@ class ProjectsController < ApplicationController
   def index
     @projects = Project.all.order(updated_at: :desc)
 
-    # Only the issues-table aggregates here — the issues table is small and indexed.
-    # Event.group(:project_id).count is a full-table scan over the (potentially huge)
-    # events table and was hanging the index page. Per-project event totals and last
-    # activity now come from the issues table (last_seen) which is cheap.
-    counts = Rails.cache.fetch("projects_index_counts/v2", expires_in: 30.seconds, race_condition_ttl: 10.seconds) do
+    # Last error (issues.last_seen) and last transaction (transactions.timestamp)
+    # are surfaced separately so a project sending only performance data still
+    # reads as active. Both queries are cheap: the issues table is small, and the
+    # grouped MAX over transactions rides the (project_id, timestamp) composite
+    # index as a per-project seek, not a scan. (Events are excluded —
+    # Event.group(:project_id) is a full scan over a potentially huge table and
+    # was hanging the page; the issues table covers error recency.) Transactions
+    # live in a separate DB, hence a second query rather than a join.
+    counts = Rails.cache.fetch("projects_index_counts/v3", expires_in: 30.seconds, race_condition_ttl: 10.seconds) do
       {
         open_issues: Issue.open.group(:project_id).count,
-        last_seen: Issue.group(:project_id).maximum(:last_seen)
+        last_error: Issue.group(:project_id).maximum(:last_seen),
+        last_transaction: Transaction.group(:project_id).maximum(:timestamp)
       }
     end
     @open_issue_counts = counts[:open_issues]
-    @last_event_at = counts[:last_seen]
+    @last_error_at = counts[:last_error]
+    @last_transaction_at = counts[:last_transaction]
   end
 
   # Show is a dashboard — six DuckLake aggregates per page load was beating
