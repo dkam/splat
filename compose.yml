@@ -1,15 +1,15 @@
-# Production docker-compose for splat (SQLite flavour) — web + tuber + two
-# worker sidecars (ingest, scheduler). Designed to run alongside the PG
-# flavour on the same host, so volume paths, container names, host ports,
-# and the tuber instance name are all suffixed/offset to avoid collision.
-# Run with:
+# Production docker-compose for Splat (SQLite — the only flavour) — web +
+# tuber + two worker sidecars (ingest, scheduler).
 #
-#   docker compose -f compose.production.yml -p splat-booko-sqlite up -d
+# compose.yml is Compose's default filename, so -f is optional:
 #
-# Required .env vars: HOST, HOST_IP, SECRET_KEY_BASE, SPLAT_HOST,
-# SPLAT_INTERNAL_HOST, SPLAT_ADMIN_EMAILS, SPLAT_EMAIL_FROM, SMTP_*,
-# MCP_AUTH_TOKEN, SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, OIDC_*,
-# SPLAT_ALLOWED_USERS.
+#   docker compose -p splat up -d
+#
+# Volumes are bind-mounted relative to this file (./storage). Point them at a
+# backed-up host path for a real deploy. Required .env vars: HOST_IP,
+# SECRET_KEY_BASE, SPLAT_HOST, SPLAT_INTERNAL_HOST, SPLAT_ADMIN_EMAILS,
+# SPLAT_EMAIL_FROM, SMTP_*, MCP_AUTH_TOKEN, SENTRY_DSN,
+# SENTRY_TRACES_SAMPLE_RATE, OIDC_*, SPLAT_ALLOWED_USERS.
 
 x-common-variables: &common-variables
   RAILS_ENV: production
@@ -35,16 +35,16 @@ x-common-variables: &common-variables
   RAILS_LOG_TO_STDOUT: "true"
 
   # Container-to-container DNS uses the service name on the container port.
-  # 11330 is only the host-side port mapping — irrelevant inside the network.
+  # The host-side port mapping is irrelevant inside the network.
   TUBER_URL: tuber:11300
 
 x-splat-worker: &splat-worker
-  image: reg.tbdb.info/splat:sqlite-latest
+  image: ghcr.io/dkam/splat:latest
   restart: unless-stopped
   depends_on:
     - tuber
   volumes:
-    - /storage/splat-booko-sqlite/storage:/rails/storage
+    - ./storage:/rails/storage
   environment:
     <<: *common-variables
   logging:
@@ -55,7 +55,7 @@ x-splat-worker: &splat-worker
 
 services:
   web:
-    image: reg.tbdb.info/splat:sqlite-latest
+    image: ghcr.io/dkam/splat:latest
     environment:
       <<: *common-variables
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
@@ -65,10 +65,10 @@ services:
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
     volumes:
-      - /storage/splat-booko-sqlite/storage:/rails/storage
-      - /storage/splat-booko-sqlite/logs/web:/rails/log
+      - ./storage:/rails/storage
+      - ./storage/logs/web:/rails/log
     ports:
-      - "${HOST_IP}:3031:3000"
+      - "${HOST_IP}:3030:3000"
     depends_on:
       - tuber
     restart: unless-stopped
@@ -80,20 +80,18 @@ services:
 
   ingest:
     <<: *splat-worker
-    container_name: splat-booko-sqlite-ingest
     command: bin/ingest_worker
     volumes:
-      - /storage/splat-booko-sqlite/storage:/rails/storage
-      - /storage/splat-booko-sqlite/logs/ingest:/rails/log
+      - ./storage:/rails/storage
+      - ./storage/logs/ingest:/rails/log
     mem_limit: 512M
 
   scheduler:
     <<: *splat-worker
-    container_name: splat-booko-sqlite-scheduler
     command: bin/scheduler
     volumes:
-      - /storage/splat-booko-sqlite/storage:/rails/storage
-      - /storage/splat-booko-sqlite/logs/scheduler:/rails/log
+      - ./storage:/rails/storage
+      - ./storage/logs/scheduler:/rails/log
     mem_limit: 128M
 
   tuber:
@@ -102,10 +100,10 @@ services:
     # it prints help and exits. Env vars only populate flag values.
     command: server
     ports:
-      - "${HOST}:11331:11300"           # protocol — distinct host port from the PG-flavour tuber (11330)
-      - "${HOST}:9131:9100"             # metrics — Prometheus / Uptime Kuma reachable here
+      - "${HOST_IP}:11330:11300"           # beanstalkd protocol (point tuber-tui here)
+      - "${HOST_IP}:9130:9100"             # metrics — Prometheus / Uptime Kuma reachable here
     volumes:
-      - /storage/splat-booko-sqlite/storage/tuber:/var/lib/tuber/binlog
+      - ./storage/tuber:/var/lib/tuber/binlog
     restart: unless-stopped
     mem_limit: 1500M
     ulimits:
@@ -113,7 +111,7 @@ services:
         soft: 65536
         hard: 65536
     environment:
-      - TUBER_NAME=splat-booko-sqlite         # distinct from the PG-flavour tuber; shows in metrics + tuber-tui
+      - TUBER_NAME=splat
       - TUBER_LISTEN=0.0.0.0
       - TUBER_PORT=11300
       - TUBER_BINLOG_DIR=/var/lib/tuber/binlog

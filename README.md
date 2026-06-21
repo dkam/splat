@@ -5,11 +5,11 @@ Use use the oauth
 
 Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
 
-This app has zero authentication by default but supports OIDC.
+Splat supports OIDC but defaults to mp authentication.
 
-It has an (awesome) MCP endpoint. You need to set an environment variable `MCP_AUTH_TOKEN` in order to use it. The end point is /mcp.
+It has an MCP endpoint for your LLM Agents to use. Set an environment variable `MCP_AUTH_TOKEN` in order to use it enable it. The end point is /mcp.
 
-A large percentage of it is written with GLM 4.6 and Sonnet 4.5. It was partly an experiement in using SQLite extensively in a write heavy service. It's performed well enough for my use case.
+A large percentage of Splat was written with GLM / Sonnet / Opus. It was initially an experiement in using SQLite extensively in a write heavy service. It's performed well enough for my use case.
 
 I've only used Splat with Rails, but there's no reason it shouldn't work with other systems. Happy to accept pull requests for wider compatibility.
 
@@ -27,10 +27,9 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
 - ✅ **N+1 Query Detection** - Mines `measurements.query_analysis` from the transaction span analyzer, ranks endpoints by N+1 prevalence, exposes a dedicated worklist and an MCP tool
 - ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
-- ✅ **Span Waterfall** - Per-transaction span tree stored in DuckLake (columnar, compressed) and rendered as a tiered timeline on the transaction detail page
-- ✅ **OLTP + OLAP storage** - SQLite for ingestion and OLTP, DuckLake (DuckDB + parquet) for analytics over long retention
+- ✅ **Span Waterfall** - Per-transaction span tree rendered as a tiered timeline on the transaction detail page
 - ✅ **MCP Integration** - Query errors via Claude and AI assistants
-- ✅ **Minimal Dependencies** - Rails + SQLite + DuckDB + Solid Queue
+- ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
 
 ### Why Splat?
@@ -38,7 +37,7 @@ When you need error tracking that:
 - Your code assistant can grab issues and stack traces from
 - Shows errors within seconds
 - Can be understood and modified in one sitting
-- Rails 8 / Ruby 3.4.6 / SQLite (OLTP) + DuckLake (OLAP) + Solid stack (Queue/Cache/Cable)
+- Latest Rails / Ruby on an all-SQLite stack plus the Solid trio (Queue/Cache/Cable). The running versions are shown on the Settings page.
 
 
 ## Screenshots
@@ -64,8 +63,8 @@ When you need error tracking that:
 ## Getting Started
 
 ### Prerequisites
-- Ruby 3.4.6+
-- Rails 8+
+- Ruby (latest — see `.ruby-version`)
+- Rails (latest)
 - SQLite3
 
 ### Installation
@@ -132,18 +131,22 @@ x-common-variables: &common-variables
   # MCP Authentication Token
   MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
 
+  # Tuber work queue — ingestion is enqueued here. Container-to-container
+  # DNS uses the service name on the container port (11300).
+  TUBER_URL: tuber:11300
+
 services:
   splat:
-    image: reg.tbdb.info/splat:latest
+    image: ghcr.io/dkam/splat:latest
     environment:
       <<: *common-variables
-      MISSION_CONTROL_USERNAME: ${MISSION_CONTROL_USERNAME}
-      MISSION_CONTROL_PASSWORD: ${MISSION_CONTROL_PASSWORD}
     volumes:
       - /storage/splat/storage:/rails/storage
       - /storage/splat/logs/web:/rails/log
     ports:
       - "${HOST_IP}:3030:3000"
+    depends_on:
+      - tuber
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -152,7 +155,7 @@ services:
         max-file: "5"
 
   jobs:
-    image: reg.tbdb.info/splat:latest
+    image: ghcr.io/dkam/splat:latest
     environment:
       <<: *common-variables
       SOLID_QUEUE_THREADS: 3
@@ -161,11 +164,43 @@ services:
       - /storage/splat/storage:/rails/storage
       - /storage/splat/logs/jobs:/rails/log
     command: bundle exec bin/jobs
+    depends_on:
+      - tuber
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
+        max-file: "3"
+
+  tuber:
+    image: ghcr.io/tuberq/tuber:latest
+    # The image entrypoint is the bare `tuber` binary; it needs a subcommand.
+    command: server
+    environment:
+      - TUBER_NAME=splat
+      - TUBER_LISTEN=0.0.0.0
+      - TUBER_PORT=11300
+      - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
+      - TUBER_MAX_STORAGE_BYTES=20gb
+      - TUBER_MAX_JOBS_SIZE=1gb
+      - TUBER_MAX_JOB_SIZE=20mb        # must fit packed batches (~5MB at 100/batch)
+      - TUBER_METRICS_PORT=9100
+    ports:
+      - "${HOST_IP}:11330:11300"        # beanstalkd protocol
+      - "${HOST_IP}:9130:9100"          # metrics (Prometheus / Uptime Kuma)
+    volumes:
+      - /storage/splat/storage/tuber:/var/lib/tuber/binlog
+    restart: unless-stopped
+    mem_limit: 1500M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
         max-file: "3"
 ```
 
@@ -254,14 +289,14 @@ At 26 transactions/second sustained with **~950k transactions in database (4.7GB
 
 Rails 8.1's SQLite optimizations (WAL mode, connection pooling) handle write-heavy workloads efficiently.
 
-### Storage Architecture: OLTP + OLAP
+### Storage Architecture: All SQLite
 
-Splat stores every event and transaction in two places, each chosen for what it's good at:
+Splat stores everything — events, transactions, spans, and pre-rolled aggregates — in SQLite. There is no separate analytics engine to operate.
 
-- **SQLite (OLTP)** — source of truth for ingestion, find-by-id lookups, status changes, and the recent-firehose views. Fast, embedded, no operational overhead. SQLite retention can be aggressive (e.g. 14–30 days) without losing analytical history.
-- **DuckLake (OLAP)** — every event/transaction is mirror-written to a DuckDB-managed parquet store on local disk or S3. All time-windowed aggregates — endpoint stats, percentile breakdowns, response-time charts, the "Top Endpoints by Impact" table, even the project dashboard's 24-hour counts — read from DuckLake. Columnar scans over parquet are dramatically faster than row scans for these queries, and retention can be set independently and longer than SQLite (e.g. months of history at low storage cost).
+- **Raw rows** are the source of truth for ingestion, find-by-id lookups, status changes, and the recent-firehose views. Fast, embedded, no operational overhead.
+- **Aggregates** — the time-windowed numbers behind endpoint stats, percentile breakdowns, response-time charts, the "Top Endpoints by Impact" table, and the project dashboard — are rolled up into compact summary tables (e.g. `transaction_histograms`) by a recurring job, so the dashboards stay fast even as raw rows are pruned.
 
-The two stores have separate retention jobs, so you can keep weeks of OLTP detail and months of OLAP history without bloating either one.
+Raw rows and aggregates have separate retention windows, so you can prune the high-volume raw data aggressively (days) while keeping the tiny aggregate history for much longer (months). Retention windows are configurable on the Settings page.
 
 #### Endpoint Impact Ranking
 
@@ -269,9 +304,9 @@ The performance dashboard ranks endpoints by **time spent** (`avg_duration × co
 
 #### Span Storage and SQL Normalization
 
-Each transaction's span tree is stored in DuckLake (columnar parquet) and rendered as a waterfall on the transaction detail page. Spans are 10–100× the volume of transactions, but DuckLake's per-column dictionary + RLE compression — combined with one ingest-time pass — keeps storage manageable:
+Each transaction's span tree is stored in SQLite and rendered as a waterfall on the transaction detail page. Spans are 10–100× the volume of transactions, so a single ingest-time normalization pass keeps storage manageable:
 
-- **SQL normalization at ingest:** span descriptions like `SELECT * FROM users WHERE id = 42 AND email = 'alice@example.com'` are rewritten to `SELECT * FROM users WHERE id = ? AND email = ?` *before* being written to disk. The parameterized form dictionary-encodes to ~2 bytes per row instead of 500+.
+- **SQL normalization at ingest:** span descriptions like `SELECT * FROM users WHERE id = 42 AND email = 'alice@example.com'` are rewritten to `SELECT * FROM users WHERE id = ? AND email = ?` *before* being written to disk. The parameterized form collapses the near-infinite variety of literal-bearing queries down to a handful of distinct patterns.
 - **Privacy bonus:** because literals never reach disk, user IDs, email addresses in WHERE clauses, names in INSERTs, and tokens in URL paths are automatically redacted. We can show you the *pattern* of the offending query, but not the literal values that triggered it. This is a deliberate trade-off — and a documented commitment, not an accident.
 - **Cap and retention:** spans are capped at 1000 per transaction (excess dropped, transaction flagged) and retained for 30 days by default (configurable separately from transactions, since span volume is far higher).
 
@@ -567,6 +602,7 @@ Once configured, you can ask Claude:
   FROM_EMAIL: splat@splat.example.com # Change this to your email
   SOLID_QUEUE_THREADS: 3
   SOLID_QUEUE_PROCESSES: 1
+  TUBER_URL: tuber:11300 # host:port of the Tuber work queue
 ```
 
 ### MCP (Model Context Protocol)
@@ -581,11 +617,16 @@ SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS=60
 SPLAT_MAX_FILE_LIFE_DAYS=180
 ```
 
-### Mission Control
+### Tuber Work Queue
 ```
-Optionally set these if you'd like to access /jobs to view the SolidQueue management system
-  MISSION_CONTROL_USERNAME
-  MISSION_CONTROL_PASSWORD
+TUBER_URL: tuber:11300   # host:port of the Tuber (beanstalkd-compatible) server
+```
+
+Ingestion is enqueued on Tuber. To watch the tubes live — pending/ready/reserved
+counts, throughput — use [tuber-tui](https://github.com/tuberq/tuber):
+
+```bash
+tuber-tui --url <host>:11330   # the host-mapped Tuber port from compose
 ```
 
 ## OIDC Authentication Setup

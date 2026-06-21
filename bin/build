@@ -35,23 +35,16 @@ VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "$(git rev-pa
 echo "$VERSION" > VERSION
 echo "VERSION updated to: $(cat VERSION)"
 
-# Derive flavor from current git branch. feature/pg ships the Postgres
-# build; main ships the SQLite build. Refuse to build from any other
-# branch so we never push an ambiguously-tagged image.
+# SQLite is the only flavour now, so we build from main only. Refuse any
+# other branch so we never push an ambiguously-tagged image.
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-case "$BRANCH" in
-  feature/pg) FLAVOR="pg" ;;
-  main)       FLAVOR="sqlite" ;;
-  *)
-    echo "ERROR: unknown branch '$BRANCH'. bin/build only knows feature/pg (pg) and main (sqlite)."
-    exit 1
-    ;;
-esac
+if [ "$BRANCH" != "main" ]; then
+  echo "ERROR: bin/build only builds from main (got '$BRANCH')."
+  exit 1
+fi
 
 SHA=$(git rev-parse HEAD)
-echo "Flavor: $FLAVOR (branch $BRANCH)"
-echo "Tags:   reg.tbdb.info/splat:${FLAVOR}-latest"
-echo "        reg.tbdb.info/splat:${FLAVOR}-${SHA}"
+echo "Tags:   reg.tbdb.info/splat:latest"
 echo "        reg.tbdb.info/splat:${SHA}"
 
 # Use the multi-builder
@@ -59,7 +52,6 @@ docker buildx use multi-builder
 
 docker buildx build \
   --platform "$PLATFORMS" \
-  -t reg.tbdb.info/splat:${FLAVOR}-latest \
-  -t reg.tbdb.info/splat:${FLAVOR}-${SHA} \
+  -t reg.tbdb.info/splat:latest \
   -t reg.tbdb.info/splat:${SHA} \
   --push .
