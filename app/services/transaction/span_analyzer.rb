@@ -27,7 +27,9 @@ class Transaction
         }
       end
 
-      sql_breadcrumbs = breadcrumbs.select { |bc| bc["category"] == "sql.active_record" }
+      sql_breadcrumbs = breadcrumbs
+        .select { |bc| bc["category"] == "sql.active_record" }
+        .reject { |bc| infrastructure_query?(bc.dig("data", "sql")) }
 
       if sql_breadcrumbs.blank?
         return {
@@ -75,6 +77,31 @@ class Transaction
       end
 
       (total_time > 0) ? total_time.round : nil
+    end
+
+    # Queries against framework/infrastructure tables — cache, job queue,
+    # cable, schema bookkeeping, SQLite introspection — are not application
+    # N+1s. They share a tiny set of SQL shapes (SolidCache alone fires
+    # get + delete + put on every Rails.cache.fetch miss), so a request doing
+    # a handful of cache lookups trips the repeated-pattern heuristic even
+    # though the app issued no redundant DB work. Excluding them up front means
+    # both total_queries and the N+1 scan reflect application queries only.
+    # Prosopite (charkost/prosopite) gets the same effect from call-site
+    # grouping; we only have the SQL text, so we filter by table name. Matched
+    # against raw SQL so quoting (PG "ident", SQLite/MySQL bareword/backtick)
+    # doesn't matter — \b sits on the quote/word boundary either way.
+    INFRA_TABLE = Regexp.union(
+      /\bsolid_cache_entries\b/i,
+      /\bsolid_queue_\w+/i,
+      /\bsolid_cable_messages\b/i,
+      /\bschema_migrations\b/i,
+      /\bar_internal_metadata\b/i,
+      /\bsqlite_(?:master|sequence|stat\d*)\b/i,
+      /\bdbstat\b/i
+    ).freeze
+
+    def self.infrastructure_query?(sql)
+      sql.present? && INFRA_TABLE.match?(sql)
     end
 
     # /* ... */ query log tag comments carry per-request data (request_id,

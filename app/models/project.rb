@@ -63,7 +63,10 @@ class Project < ApplicationRecord
   end
 
   def recent_events(limit: 100)
-    events.recent.limit(limit)
+    # Eager-load the issue: event lists render the issue's status badge and a
+    # link per row (see projects/show), so without this each row fires its own
+    # SELECT issues WHERE id = ? — a small but real N+1 on every dashboard load.
+    events.recent.includes(:issue).limit(limit)
   end
 
   def recent_transactions(limit: 100)

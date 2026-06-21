@@ -75,4 +75,46 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     assert_equal 4, result[:total_queries]
     assert_equal 3, result[:unique_patterns]
   end
+
+  # Infrastructure queries (SolidCache/Queue/Cable, schema bookkeeping, SQLite
+  # introspection) are framework plumbing, not application N+1s. They share a
+  # tiny set of shapes and would otherwise trip the repeated-pattern heuristic.
+  test "SolidCache traffic alone is not flagged as N+1 and does not count as queries" do
+    breadcrumbs = [
+      {"category" => "sql.active_record", "data" => {"sql" => %(SELECT "solid_cache_entries"."key", "solid_cache_entries"."value" FROM "solid_cache_entries" WHERE "solid_cache_entries"."key_hash" IN (1))}},
+      {"category" => "sql.active_record", "data" => {"sql" => %(DELETE FROM "solid_cache_entries" WHERE "solid_cache_entries"."key_hash" = 2)}},
+      {"category" => "sql.active_record", "data" => {"sql" => %(INSERT INTO "solid_cache_entries" ("key","value") VALUES ('a', 'b'))}},
+      {"category" => "sql.active_record", "data" => {"sql" => %(SELECT "solid_cache_entries"."key" FROM "solid_cache_entries" WHERE "solid_cache_entries"."key_hash" IN (3))}}
+    ]
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs)
+    assert_equal 0, result[:total_queries]
+    assert_empty result[:potential_n_plus_one]
+  end
+
+  test "infrastructure queries are excluded but a real app N+1 alongside them still flags" do
+    app = 5.times.map do |i|
+      {"category" => "sql.active_record", "data" => {"sql" => %(SELECT "issues".* FROM "issues" WHERE "issues"."id" = #{i} LIMIT 1)}}
+    end
+    infra = [
+      {"category" => "sql.active_record", "data" => {"sql" => %(SELECT "solid_cache_entries"."value" FROM "solid_cache_entries" WHERE "solid_cache_entries"."key_hash" IN (9))}},
+      {"category" => "sql.active_record", "data" => {"sql" => %(SELECT "solid_queue_ready_executions".* FROM "solid_queue_ready_executions" LIMIT 1)}},
+      {"category" => "sql.active_record", "data" => {"sql" => "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name"}},
+      {"category" => "sql.active_record", "data" => {"sql" => %(SELECT COUNT(*) FROM "schema_migrations")}}
+    ]
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(app + infra)
+    # Only the 5 issue lookups count; infra is dropped.
+    assert_equal 5, result[:total_queries]
+    assert_equal 1, result[:unique_patterns]
+    assert_equal 1, result[:potential_n_plus_one].size
+  end
+
+  test "infrastructure_query? matches plumbing tables across quoting styles" do
+    assert Transaction::SpanAnalyzer.infrastructure_query?(%(SELECT * FROM "solid_cache_entries"))
+    assert Transaction::SpanAnalyzer.infrastructure_query?("SELECT * FROM solid_queue_jobs")
+    assert Transaction::SpanAnalyzer.infrastructure_query?("SELECT name FROM dbstat")
+    refute Transaction::SpanAnalyzer.infrastructure_query?(%(SELECT * FROM "products"))
+    refute Transaction::SpanAnalyzer.infrastructure_query?(nil)
+  end
 end

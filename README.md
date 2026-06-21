@@ -312,6 +312,26 @@ Each transaction's span tree is stored in SQLite and rendered as a waterfall on 
 - **Privacy bonus:** because literals never reach disk, user IDs, email addresses in WHERE clauses, names in INSERTs, and tokens in URL paths are automatically redacted. We can show you the *pattern* of the offending query, but not the literal values that triggered it. This is a deliberate trade-off — and a documented commitment, not an accident.
 - **Cap and retention:** spans are capped at 1000 per transaction (excess dropped, transaction flagged) and retained for 30 days by default (configurable separately from transactions, since span volume is far higher).
 
+#### N+1 Query Detection
+
+Splat flags endpoints that issue the same query in a loop — the classic N+1 — straight from the SQL breadcrumbs a transaction carries, with no extra instrumentation in the monitored app.
+
+**How a single transaction is judged** (`Transaction::SpanAnalyzer.analyze_sql_queries`, at ingest):
+
+1. Pull the `sql.active_record` breadcrumbs from the payload.
+2. **Drop infrastructure queries.** Cache, job-queue, cable, schema-bookkeeping, and SQLite-introspection tables (`solid_cache_entries`, `solid_queue_*`, `solid_cable_messages`, `schema_migrations`, `ar_internal_metadata`, `sqlite_*`, `dbstat`) are framework plumbing, not application work. SolidCache alone fires `get + delete + put` on every `Rails.cache.fetch` miss, so a request doing a few cache lookups would otherwise look like an N+1 of identical queries. They're excluded from both the query count and the scan so the signal reflects *your* DB work.
+3. **Normalize** each remaining query to a pattern — literals collapse to `?`, IN-lists to `IN (?)`, query-log-tag comments (`/* ... */`) are stripped, but table/column identifiers are preserved so different tables stay distinct (see SQL normalization above).
+4. **Group by pattern and count.** A pattern that appears **more than 3 times** in one transaction marks it as a potential N+1 (`has_n_plus_one`), and the per-transaction `query_count` is recorded.
+
+**How it rolls up.** The hourly aggregation job folds each transaction's `has_n_plus_one` flag and query counts into `transaction_hourly_stats` per endpoint, so the dashboards stay fast and the signal survives raw-row retention. The N+1 view ranks endpoints by how many of their transactions were flagged, alongside avg/max queries per request and latency.
+
+**Where it surfaces:**
+- **Endpoints dashboard** → the dedicated "N+1" view (`/projects/:slug/endpoints/n_plus_one`).
+- **Transaction detail page** → flagged patterns for a single request.
+- **MCP** → the `find_n_plus_one_endpoints` tool, for asking an AI assistant "which endpoints have N+1 problems?".
+
+**Heuristic, not a profiler.** This is a count-of-repeated-patterns signal, deliberately simple. Unlike in-process tools such as [Prosopite](https://github.com/charkost/prosopite) — which group queries by call-site from a live backtrace — Splat only has the stored SQL text, so it can't tell a genuine loop from the same query shape legitimately reached via different code paths. The `> 3` threshold and the infrastructure denylist keep false positives down; treat a flag as "worth a look," then confirm against the transaction's span waterfall.
+
 ## Maintenance
 
 ### Data Retention and Cleanup
