@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_21_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_21_000002) do
   create_table "spans", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.json "data"
@@ -87,9 +87,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_21_000001) do
     t.datetime "updated_at", null: false
     t.integer "view_time"
     t.index ["duration"], name: "index_transactions_on_duration"
+    t.index ["project_id", "environment"], name: "index_transactions_on_project_id_and_environment"
     t.index ["project_id", "timestamp"], name: "index_transactions_on_project_id_and_timestamp"
     t.index ["project_id", "transaction_id"], name: "index_transactions_on_project_id_and_transaction_id", unique: true
-    t.index ["project_id"], name: "index_transactions_on_project_id"
     t.index ["timestamp"], name: "index_transactions_on_timestamp"
     t.index ["transaction_name", "timestamp"], name: "index_transactions_on_transaction_name_and_timestamp"
   end
