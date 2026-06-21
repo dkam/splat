@@ -15,8 +15,30 @@ Rails.application.configure do
       # Sample rate for error events (100% for errors)
       config.sample_rate = 1.0
 
-      # Performance monitoring - enable with low sample rate
-      config.traces_sample_rate = ENV.fetch("SENTRY_TRACES_SAMPLE_RATE", 0.1).to_f
+      # Performance monitoring. Sample Splat's own web traffic (controllers /
+      # API) heavily so we get good visibility into the UI in splat-splat, but
+      # sample the high-volume ingest/processing pipeline lightly to keep the
+      # transaction count manageable.
+      #   SENTRY_TRACES_SAMPLE_RATE_WEB  — inbound web requests   (default 1.0)
+      #   SENTRY_TRACES_SAMPLE_RATE      — everything else / jobs (default 0.1)
+      web_traces_rate = ENV.fetch("SENTRY_TRACES_SAMPLE_RATE_WEB", 1.0).to_f
+      pipeline_traces_rate = ENV.fetch("SENTRY_TRACES_SAMPLE_RATE", 0.1).to_f
+
+      config.traces_sampler = lambda do |sampling_context|
+        op = sampling_context.dig(:transaction_context, :op).to_s
+        parent_sampled = sampling_context[:parent_sampled]
+
+        if !parent_sampled.nil?
+          # Honour an upstream distributed-trace decision when present.
+          parent_sampled ? 1.0 : 0.0
+        elsif op.start_with?("http.server")
+          # Inbound requests to Splat's own web UI/API.
+          web_traces_rate
+        else
+          # Background jobs and the ingest/processing pipeline.
+          pipeline_traces_rate
+        end
+      end
 
       # Filter out sensitive data
       config.send_default_pii = false
