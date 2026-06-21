@@ -42,14 +42,17 @@ if [ "$BRANCH" != "main" ]; then
   exit 1
 fi
 
-echo "Tags:   reg.tbdb.info/splat:latest"
-echo "        reg.tbdb.info/splat:v${VERSION}"
+# Always publish :vX.Y.Z; only move :latest for a non-pre-release version.
+TAGS=(-t "reg.tbdb.info/splat:v${VERSION}")
+case "$VERSION" in
+  *-*) echo "Pre-release ${VERSION} — publishing :v${VERSION} only (not :latest)" ;;
+  *)   TAGS+=(-t reg.tbdb.info/splat:latest); echo "Release ${VERSION} — publishing :v${VERSION} + :latest" ;;
+esac
 
 # Use the multi-builder
 docker buildx use multi-builder
 
 docker buildx build \
   --platform "$PLATFORMS" \
-  -t reg.tbdb.info/splat:latest \
-  -t "reg.tbdb.info/splat:v${VERSION}" \
+  "${TAGS[@]}" \
   --push .

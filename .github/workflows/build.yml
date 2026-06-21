@@ -1,30 +1,44 @@
 name: Build and publish image
 
-# Builds the multi-arch image (amd64 + arm64) and pushes it to GitHub Packages
-# (ghcr.io/dkam/splat) on every push to main. Each arch builds natively on its
-# own runner — no QEMU — then a merge job stitches the two into one manifest.
+# Publishes the multi-arch image (amd64 + arm64) to GitHub Packages
+# (ghcr.io/dkam/splat) whenever config/version.rb changes on main — a version
+# bump IS the release. Each arch builds natively (no QEMU); a merge job stitches
+# them into one manifest tagged :vX.Y.Z (+ :latest for non-pre-releases).
+#
+# To cut a release: edit Splat::VERSION in config/version.rb, commit, push.
+# For a dev build: set a pre-release version (e.g. "1.1.0-dev") — it publishes
+# :v1.1.0-dev but does not move :latest. Or run this workflow manually.
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - config/version.rb
   workflow_dispatch:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  # Read the SemVer constant once so the merge job can tag :vX.Y.Z.
+  # Read the SemVer constant; decide whether this release moves :latest.
   prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      latest: ${{ steps.version.outputs.latest }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
       - name: Read version from config/version.rb
         id: version
-        run: echo "version=$(ruby -e "require './config/version'; puts Splat::VERSION")" >> "$GITHUB_OUTPUT"
+        run: |
+          V=$(ruby -e "require './config/version'; puts Splat::VERSION")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          # A pre-release (e.g. 1.1.0-dev) publishes its own tag but not :latest.
+          if [[ "$V" == *-* ]]; then latest=false; else latest=true; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "Building v$V (move :latest = $latest)"
 
   build:
     needs: prepare
@@ -107,10 +121,11 @@ jobs:
       - name: Create and push the multi-arch manifest
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create \
-            -t ${{ env.IMAGE }}:latest \
-            -t ${{ env.IMAGE }}:v${{ needs.prepare.outputs.version }} \
-            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+          tags="-t ${{ env.IMAGE }}:v${{ needs.prepare.outputs.version }}"
+          if [ "${{ needs.prepare.outputs.latest }}" = "true" ]; then
+            tags="$tags -t ${{ env.IMAGE }}:latest"
+          fi
+          docker buildx imagetools create $tags $(printf '${{ env.IMAGE }}@sha256:%s ' *)
 
       - name: Inspect result
         run: docker buildx imagetools inspect ${{ env.IMAGE }}:latest
