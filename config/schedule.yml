@@ -49,3 +49,15 @@ cleanup_expired_oidc_sessions:
   tube: splat.maintenance
   schedule: cron 17 * * * *
   con: 1
+
+# Recompute the per-table SQLite size snapshot (dbstat page scan) for the
+# settings page and cache it. The scan walks every page of each DB file, so
+# it's kept off the request path entirely — the settings controller only
+# reads the cached snapshot. idp guards against stacking if a scan ever runs
+# longer than the 15m interval on a very large DB.
+storage_stats:
+  class: Maintenance::StorageStatsJob
+  tube: splat.maintenance
+  schedule: cron */15 * * * *
+  con: 1
+  idp: storage_stats

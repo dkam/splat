@@ -3,8 +3,14 @@ class SettingsController < ApplicationController
 
   def index
     @setting = Setting.instance
-    @sqlite_groups = StorageStats.sqlite_tables_grouped
-    @sqlite_total = @sqlite_groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
+
+    # Read the precomputed snapshot — never run the dbstat scan inline (it
+    # walks every page of each DB file and can take tens of seconds). On a
+    # cold cache (fresh deploy) the snapshot is nil; show a pending state and
+    # enqueue a build so the next view has it. The 15m scheduled job keeps it
+    # fresh thereafter.
+    @storage = StorageStats.snapshot
+    StorageStats.enqueue_refresh if @storage.nil?
   end
 
   def update

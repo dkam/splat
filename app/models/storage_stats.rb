@@ -7,7 +7,44 @@ class StorageStats
     ["Transactions + Spans", "TransactionsSpansRecord"]
   ].freeze
 
+  # Where the precomputed snapshot lives. SolidCache is SQLite-backed and
+  # survives restarts, so the snapshot is the refresher's responsibility, not
+  # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule. Bump the
+  # version suffix if the snapshot shape changes.
+  CACHE_KEY = "storage_stats/snapshot/v1"
+
   class << self
+    # The precomputed snapshot the settings page renders, or nil if one has
+    # never been built (fresh deploy with a cold cache). Cheap — a single
+    # cache read, no dbstat scan.
+    def snapshot
+      Rails.cache.read(CACHE_KEY)
+    end
+
+    # Run the heavy dbstat scan now and store the result. Called by
+    # Maintenance::StorageStatsJob; never on the request path. Returns the
+    # stored snapshot.
+    def refresh!
+      groups = sqlite_tables_grouped
+      total = groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
+      snap = {groups: groups, total: total, collected_at: Time.current}
+      Rails.cache.write(CACHE_KEY, snap)
+      snap
+    end
+
+    # Ask the maintenance pool to (re)build the snapshot. Idempotent via the
+    # tuber idp key, so a burst of cache-miss requests on a cold cache enqueues
+    # at most one scan. Safe to call from a web request — it only puts a job.
+    def enqueue_refresh
+      Ingest::Tuber.put(
+        Ingest::Tuber::MAINTENANCE_TUBE,
+        {class: "Maintenance::StorageStatsJob", args: []},
+        con: 1, idp: "storage_stats"
+      )
+    rescue => e
+      Rails.logger.warn("StorageStats.enqueue_refresh failed: #{e.class}: #{e.message}")
+    end
+
     # Tables across all three SQLite files, grouped by source DB so the
     # settings page can show them per-cluster. Each table row gives the row
     # count, table bytes, index bytes, and total bytes.

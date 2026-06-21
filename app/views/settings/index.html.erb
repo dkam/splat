@@ -4,10 +4,12 @@
     <%= link_to "← Back to Projects", projects_path, class: "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300" %>
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <div class="text-sm text-gray-500 dark:text-gray-400">SQLite total (all 3 DBs)</div>
-      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100"><%= number_to_human_size(@sqlite_total) %></div>
+      <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
+        <%= @storage ? number_to_human_size(@storage[:total]) : "—" %>
+      </div>
     </div>
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <div class="text-sm text-gray-500 dark:text-gray-400">Histogram rows</div>
@@ -17,7 +19,23 @@
     </div>
   </div>
 
-  <% @sqlite_groups.each do |group| %>
+  <p class="text-xs text-gray-500 dark:text-gray-400 mb-6">
+    <% if @storage %>
+      Storage sizes collected <%= time_ago_in_words(@storage[:collected_at]) %> ago
+      (<%= @storage[:collected_at].localtime.strftime("%Y-%m-%d %H:%M") %>) —
+      refreshed every 15&nbsp;min by <code>Maintenance::StorageStatsJob</code>.
+    <% else %>
+      Storage sizes are being calculated in the background — reload in a moment.
+    <% end %>
+  </p>
+
+  <% if @storage.nil? %>
+    <div class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-4 px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+      Calculating per-table sizes…
+    </div>
+  <% end %>
+
+  <% (@storage&.fetch(:groups) || []).each do |group| %>
     <details class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-4 overflow-hidden group">
       <summary class="px-6 py-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 list-none">
         <div>
