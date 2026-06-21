@@ -5,6 +5,7 @@ require "test_helper"
 class IssueTest < ActiveSupport::TestCase
   include ActionMailer::TestHelper
   include ActiveJob::TestHelper
+
   def setup
     @project = projects(:one)
     # memory_store persists across tests; rolled-back issue IDs repeat, so burst
@@ -13,7 +14,7 @@ class IssueTest < ActiveSupport::TestCase
   end
 
   test "sends new issue email when created with notifications enabled" do
-    ENV['SPLAT_EMAIL_NOTIFICATIONS'] = 'true'
+    ENV["SPLAT_EMAIL_NOTIFICATIONS"] = "true"
 
     assert_emails 1 do
       Issue.create!(
@@ -26,7 +27,7 @@ class IssueTest < ActiveSupport::TestCase
       )
     end
   ensure
-    ENV.delete('SPLAT_EMAIL_NOTIFICATIONS')
+    ENV.delete("SPLAT_EMAIL_NOTIFICATIONS")
   end
 
   test "does not send new issue email in development without notifications enabled" do

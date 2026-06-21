@@ -49,6 +49,6 @@ class HealthController < ApplicationController
 
   def overall_status(queue_depth)
     # Overall status is "ok" unless queue is critical
-    queue_depth >= QUEUE_CRITICAL_THRESHOLD ? "degraded" : "ok"
+    (queue_depth >= QUEUE_CRITICAL_THRESHOLD) ? "degraded" : "ok"
   end
 end

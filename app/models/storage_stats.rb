@@ -2,8 +2,8 @@ class StorageStats
   # Each entry is [label_for_ui, ActiveRecord base class]. The labels match
   # what the settings page renders as a section header.
   DBS = [
-    ["Primary",            "ApplicationRecord"],
-    ["Issues + Events",    "IssuesEventsRecord"],
+    ["Primary", "ApplicationRecord"],
+    ["Issues + Events", "IssuesEventsRecord"],
     ["Transactions + Spans", "TransactionsSpansRecord"]
   ].freeze
 
@@ -14,7 +14,7 @@ class StorageStats
     def sqlite_tables_grouped
       DBS.map do |label, base_name|
         base = base_name.constantize
-        { name: label, base: base_name, tables: sqlite_tables_for(base) }
+        {name: label, base: base_name, tables: sqlite_tables_for(base)}
       end
     end
 

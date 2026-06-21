@@ -6,7 +6,7 @@ class IssueMailerTest < ActionMailer::TestCase
   include Rails.application.routes.url_helpers
 
   def setup
-    @default_url_options = { host: 'localhost:3000' }
+    @default_url_options = {host: "localhost:3000"}
     @project = projects(:one)
     @issue = Issue.create!(
       title: "Test Error",
@@ -33,12 +33,12 @@ class IssueMailerTest < ActionMailer::TestCase
   end
 
   test "new_issue email uses custom admin emails" do
-    ENV['SPLAT_ADMIN_EMAILS'] = 'dev1@example.com, dev2@example.com'
+    ENV["SPLAT_ADMIN_EMAILS"] = "dev1@example.com, dev2@example.com"
     email = IssueMailer.new_issue(@issue)
 
     assert_equal ["dev1@example.com", "dev2@example.com"], email.to
   ensure
-    ENV.delete('SPLAT_ADMIN_EMAILS')
+    ENV.delete("SPLAT_ADMIN_EMAILS")
   end
 
   test "issue_reopened email" do
@@ -58,12 +58,12 @@ class IssueMailerTest < ActionMailer::TestCase
   end
 
   test "custom from email address" do
-    ENV['SPLAT_EMAIL_FROM'] = 'custom@splat.com'
+    ENV["SPLAT_EMAIL_FROM"] = "custom@splat.com"
     email = IssueMailer.new_issue(@issue)
 
     assert_equal ["custom@splat.com"], email.from
   ensure
-    ENV.delete('SPLAT_EMAIL_FROM')
+    ENV.delete("SPLAT_EMAIL_FROM")
   end
 
   test "includes issue URL in email body" do

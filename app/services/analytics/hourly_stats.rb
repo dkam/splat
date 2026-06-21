@@ -31,9 +31,9 @@ module Analytics
       deltas.each do |(pid, name, env, hour), a|
         placeholders << "(#{Array.new(COLUMNS.size + 4, "?").join(", ")})"
         binds.push(pid, name, env, hour,
-                   a[:count], a[:sum_duration], a[:min_duration], a[:max_duration],
-                   a[:sum_db_time], a[:db_time_count], a[:sum_view_time], a[:view_time_count],
-                   a[:sum_query_count], a[:max_query_count], a[:n_plus_one_count], a[:error_count])
+          a[:count], a[:sum_duration], a[:min_duration], a[:max_duration],
+          a[:sum_db_time], a[:db_time_count], a[:sum_view_time], a[:view_time_count],
+          a[:sum_query_count], a[:max_query_count], a[:n_plus_one_count], a[:error_count])
       end
 
       sql = +"INSERT INTO transaction_hourly_stats "
@@ -59,8 +59,8 @@ module Analytics
     # window's min/max stay exact across many bumps and the rollup.
     def conflict_update_sql
       sums = %w[count sum_duration sum_db_time db_time_count sum_view_time
-                view_time_count sum_query_count n_plus_one_count error_count]
-                .map { |c| "#{c} = #{c} + excluded.#{c}" }
+        view_time_count sum_query_count n_plus_one_count error_count]
+        .map { |c| "#{c} = #{c} + excluded.#{c}" }
       extremes = [
         "min_duration = MIN(COALESCE(min_duration, excluded.min_duration), excluded.min_duration)",
         "max_duration = MAX(max_duration, excluded.max_duration)",
@@ -70,30 +70,30 @@ module Analytics
     end
 
     def new_accumulator
-      { count: 0, sum_duration: 0, min_duration: nil, max_duration: 0,
-        sum_db_time: 0, db_time_count: 0, sum_view_time: 0, view_time_count: 0,
-        sum_query_count: 0, max_query_count: 0, n_plus_one_count: 0, error_count: 0 }
+      {count: 0, sum_duration: 0, min_duration: nil, max_duration: 0,
+       sum_db_time: 0, db_time_count: 0, sum_view_time: 0, view_time_count: 0,
+       sum_query_count: 0, max_query_count: 0, n_plus_one_count: 0, error_count: 0}
     end
 
     def accumulate!(a, t)
       dur = t.duration.to_i
-      a[:count]        += 1
+      a[:count] += 1
       a[:sum_duration] += dur
-      a[:min_duration]  = a[:min_duration].nil? ? dur : [a[:min_duration], dur].min
-      a[:max_duration]  = [a[:max_duration], dur].max
+      a[:min_duration] = a[:min_duration].nil? ? dur : [a[:min_duration], dur].min
+      a[:max_duration] = [a[:max_duration], dur].max
       if t.db_time
-        a[:sum_db_time]   += t.db_time.to_i
+        a[:sum_db_time] += t.db_time.to_i
         a[:db_time_count] += 1
       end
       if t.view_time
-        a[:sum_view_time]   += t.view_time.to_i
+        a[:sum_view_time] += t.view_time.to_i
         a[:view_time_count] += 1
       end
       qc = t.query_count.to_i
       a[:sum_query_count] += qc
-      a[:max_query_count]  = [a[:max_query_count], qc].max
+      a[:max_query_count] = [a[:max_query_count], qc].max
       a[:n_plus_one_count] += 1 if t.has_n_plus_one
-      a[:error_count]      += 1 if t.http_status.to_i >= 500
+      a[:error_count] += 1 if t.http_status.to_i >= 500
     end
   end
 end

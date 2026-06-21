@@ -50,7 +50,11 @@ module Ingest
         end
       end
     ensure
-      @client&.close rescue nil
+      begin
+        @client&.close
+      rescue
+        nil
+      end
     end
 
     def process_one_batch
@@ -96,7 +100,11 @@ module Ingest
     end
 
     def bury_or_release(job)
-      releases = job.stats.releases.to_i rescue 0
+      releases = begin
+        job.stats.releases.to_i
+      rescue
+        0
+      end
       if releases >= MAX_RETRIES
         Rails.logger.error "[#{self.class.name}] burying job after #{releases} retries"
         job.bury

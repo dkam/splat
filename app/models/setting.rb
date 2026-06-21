@@ -10,18 +10,18 @@ class Setting < ApplicationRecord
   def self.default_settings
     {
       # Raw-row retention — short, drives the OLTP/show-page surface.
-      events_data_retention_days:        30,
-      transactions_data_retention_days:  90,
-      spans_data_retention_days:         30,
+      events_data_retention_days: 30,
+      transactions_data_retention_days: 90,
+      spans_data_retention_days: 30,
       # Histograms are tiny (50–200 B per row) — keep them long for trend views.
-      histograms_retention_days:        540
+      histograms_retention_days: 540
     }
   end
 
-  def events_data_cutoff_date       = events_data_retention_days.days.ago
+  def events_data_cutoff_date = events_data_retention_days.days.ago
   def transactions_data_cutoff_date = transactions_data_retention_days.days.ago
-  def spans_data_cutoff_date        = spans_data_retention_days.days.ago
-  def histograms_cutoff_date        = histograms_retention_days.days.ago
+  def spans_data_cutoff_date = spans_data_retention_days.days.ago
+  def histograms_cutoff_date = histograms_retention_days.days.ago
 
   def forwarding?
     forward_dsn.present?
@@ -31,12 +31,12 @@ class Setting < ApplicationRecord
     ntfy_url.present?
   end
 
-  validates :events_data_retention_days,       numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
-  validates :transactions_data_retention_days, numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
-  validates :spans_data_retention_days,        numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
-  validates :histograms_retention_days,        numericality: { greater_than: 0, less_than_or_equal_to: 3650 }
-  validates :burst_threshold,                  numericality: { greater_than: 0, less_than_or_equal_to: 1_000_000 }
-  validates :ntfy_priority, inclusion: { in: NtfyNotifier::VALID_PRIORITIES }, allow_blank: true
+  validates :events_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
+  validates :transactions_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
+  validates :spans_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
+  validates :histograms_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
+  validates :burst_threshold, numericality: {greater_than: 0, less_than_or_equal_to: 1_000_000}
+  validates :ntfy_priority, inclusion: {in: NtfyNotifier::VALID_PRIORITIES}, allow_blank: true
   validate :forward_dsn_parseable
   validate :ntfy_url_parseable
 

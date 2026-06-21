@@ -97,10 +97,10 @@ class EndpointsController < ApplicationController
 
   def time_range_lower_bound(range)
     case range
-    when "1h"  then 1.hour.ago
-    when "6h"  then 6.hours.ago
+    when "1h" then 1.hour.ago
+    when "6h" then 6.hours.ago
     when "24h" then 24.hours.ago
-    when "7d"  then 7.days.ago
+    when "7d" then 7.days.ago
     when "30d" then 30.days.ago
     else 24.hours.ago
     end
@@ -111,5 +111,4 @@ class EndpointsController < ApplicationController
       @project.transactions.distinct.pluck(:environment).compact.sort
     end
   end
-
 end

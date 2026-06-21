@@ -4,8 +4,8 @@ module ApplicationHelper
   # Maps each section of the project-level tab strip to the controllers
   # that belong to it. Used by `_project_nav` to highlight the active tab.
   PROJECT_NAV_SECTIONS = {
-    overview:    %w[projects],
-    errors:      %w[issues events],
+    overview: %w[projects],
+    errors: %w[issues events],
     performance: %w[endpoints transactions]
   }.freeze
 
@@ -37,13 +37,13 @@ module ApplicationHelper
   # scale to the max value in the series so a single chart's shape is what
   # tells you the story (not the absolute height).
   def sparkline(values, width: 96, height: 24, color: "currentColor", title: nil,
-                markers: nil, time_range: nil)
+    markers: nil, time_range: nil)
     values = Array(values)
     return "".html_safe if values.empty?
 
     max = values.max.to_f
     bar_count = values.size
-    gap = bar_count > 32 ? 0.5 : 1
+    gap = (bar_count > 32) ? 0.5 : 1
     bar_width = [(width.to_f - gap * (bar_count - 1)) / bar_count, 0.5].max
 
     bars = values.each_with_index.map do |v, i|
@@ -87,11 +87,11 @@ module ApplicationHelper
   def span_op_color(op)
     return "bg-gray-400" if op.blank?
     case op
-    when /\Adb\./           then "bg-blue-500"
-    when /\Ahttp\./         then "bg-orange-500"
+    when /\Adb\./ then "bg-blue-500"
+    when /\Ahttp\./ then "bg-orange-500"
     when /\A(?:view|template|render)\./ then "bg-green-500"
-    when /\Acache\./        then "bg-purple-500"
-    when /\Aqueue\./        then "bg-pink-500"
+    when /\Acache\./ then "bg-purple-500"
+    when /\Aqueue\./ then "bg-pink-500"
     else "bg-gray-500"
     end
   end

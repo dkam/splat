@@ -4,14 +4,14 @@ class SettingsController < ApplicationController
   def index
     @setting = Setting.instance
     @sqlite_groups = StorageStats.sqlite_tables_grouped
-    @sqlite_total  = @sqlite_groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
+    @sqlite_total = @sqlite_groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
   end
 
   def update
     if @setting.update(setting_params)
       redirect_to settings_path, notice: "Settings updated successfully."
     else
-      redirect_to settings_path, alert: "Error updating settings: #{@setting.errors.full_messages.join(', ')}"
+      redirect_to settings_path, alert: "Error updating settings: #{@setting.errors.full_messages.join(", ")}"
     end
   end
 

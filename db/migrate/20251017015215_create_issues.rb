@@ -5,12 +5,12 @@ class CreateIssues < ActiveRecord::Migration[8.1]
       t.string :fingerprint, null: false
       t.string :title, null: false
       t.string :exception_type
-      
+
       # Statistics
       t.integer :count, default: 0
       t.datetime :first_seen, null: false
       t.datetime :last_seen, null: false
-      
+
       # Status
       t.integer :status, default: 0, null: false
 

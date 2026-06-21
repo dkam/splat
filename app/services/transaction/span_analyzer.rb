@@ -5,7 +5,7 @@ class Transaction
   class SpanAnalyzer
     # Extract timing data from spans when measurements are unavailable
     def self.extract_timing_data(spans = [])
-      return { db_time: nil, view_time: nil } if spans.blank?
+      return {db_time: nil, view_time: nil} if spans.blank?
 
       db_time = calculate_total_time_for_operations(spans, "db.sql.active_record")
       view_time = calculate_total_time_for_operations(spans, "view.process_action.action_controller")
@@ -18,21 +18,25 @@ class Transaction
 
     # Analyze SQL queries for performance patterns and N+1 detection
     def self.analyze_sql_queries(breadcrumbs = [])
-      return {
-        total_queries: 0,
-        unique_patterns: 0,
-        potential_n_plus_one: [],
-        query_patterns: {}
-      } if breadcrumbs.blank?
+      if breadcrumbs.blank?
+        return {
+          total_queries: 0,
+          unique_patterns: 0,
+          potential_n_plus_one: [],
+          query_patterns: {}
+        }
+      end
 
       sql_breadcrumbs = breadcrumbs.select { |bc| bc["category"] == "sql.active_record" }
 
-      return {
-        total_queries: 0,
-        unique_patterns: 0,
-        potential_n_plus_one: [],
-        query_patterns: {}
-      } if sql_breadcrumbs.blank?
+      if sql_breadcrumbs.blank?
+        return {
+          total_queries: 0,
+          unique_patterns: 0,
+          potential_n_plus_one: [],
+          query_patterns: {}
+        }
+      end
 
       # Extract and normalize SQL patterns
       query_patterns = {}
@@ -42,7 +46,7 @@ class Transaction
 
         # Normalize SQL by removing literal values and focusing on structure
         pattern = normalize_sql_pattern(sql)
-        query_patterns[pattern] ||= { count: 0, examples: [] }
+        query_patterns[pattern] ||= {count: 0, examples: []}
         query_patterns[pattern][:count] += 1
         query_patterns[pattern][:examples] << sql if query_patterns[pattern][:examples].size < 3
       end
@@ -58,8 +62,6 @@ class Transaction
       }
     end
 
-    private
-
     # Calculate total duration for specific operation types
     def self.calculate_total_time_for_operations(spans, operation_type)
       matching_spans = spans.select { |span| span["op"] == operation_type }
@@ -72,7 +74,7 @@ class Transaction
         duration_ms.round
       end
 
-      total_time > 0 ? total_time.round : nil
+      (total_time > 0) ? total_time.round : nil
     end
 
     # /* ... */ query log tag comments carry per-request data (request_id,
@@ -102,9 +104,11 @@ class Transaction
     # tables do not.
     def self.normalize_sql_pattern(sql)
       sql.gsub(BLOCK_COMMENT, "")
-         .gsub(VALUES) { |m| m.match?(/\AIN/i) ? "IN (?)" : "?" }
-         .gsub(SqlNormalizer::WHITESPACE, " ")
-         .strip
+        .gsub(VALUES) { |m| m.match?(/\AIN/i) ? "IN (?)" : "?" }
+        .gsub(SqlNormalizer::WHITESPACE, " ")
+        .strip
     end
+
+    private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern
   end
 end

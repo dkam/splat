@@ -30,7 +30,7 @@ module Ingest
       # idempotency suppression). Tuber rejects unknown opts on vanilla
       # beanstalkd, so callers omit them unless they want the behavior.
       def put(tube_name, payload, ttr: DEFAULT_TTR, pri: DEFAULT_PRI, delay: 0, con: nil, idp: nil)
-        opts = { ttr: ttr, pri: pri, delay: delay }
+        opts = {ttr: ttr, pri: pri, delay: delay}
         opts[:con] = con unless con.nil?
         opts[:idp] = idp unless idp.nil?
         producer.tubes[tube_name].put(JSON.generate(payload), **opts)

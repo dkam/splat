@@ -35,6 +35,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Stamp build version
+        id: version
+        run: |
+          VERSION="$(date -u +%Y%m%d-%H%M%S)-g$(git rev-parse --short HEAD)"
+          echo "$VERSION" > VERSION
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Stamped VERSION: $VERSION"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -43,6 +51,7 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

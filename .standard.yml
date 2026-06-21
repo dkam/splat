@@ -1,0 +1,8 @@
+ignore:
+  - 'test_*.rb'        # ad-hoc scripts in the repo root
+  - 'bin/**/*'
+  - 'db/schema.rb'
+  - 'db/**/*_schema.rb'
+  - 'tmp/**/*'
+  - 'vendor/**/*'
+  - 'node_modules/**/*'

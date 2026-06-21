@@ -1,6 +1,27 @@
 module TransactionAnalytics
   extend ActiveSupport::Concern
 
+  # Aggregate SELECT list for transaction_hourly_stats reads. Defined at module
+  # level (not inside `class_methods`) so it's a real constant rather than one
+  # redefined each time the block evaluates; it still resolves lexically from the
+  # class methods below. Window covers whole hours [hour(begin) .. hour(end)]
+  # inclusive — the end hour is the in-progress one (kept current by the live
+  # ingest bump); the begin hour over-includes up to ~1h of pre-window rows.
+  HOURLY_AGG = <<~SQL.squish.freeze
+    COALESCE(SUM(count), 0)            AS count,
+    COALESCE(SUM(sum_duration), 0)     AS sum_duration,
+    MIN(min_duration)                  AS min_duration,
+    COALESCE(MAX(max_duration), 0)     AS max_duration,
+    COALESCE(SUM(sum_db_time), 0)      AS sum_db_time,
+    COALESCE(SUM(db_time_count), 0)    AS db_time_count,
+    COALESCE(SUM(sum_view_time), 0)    AS sum_view_time,
+    COALESCE(SUM(view_time_count), 0)  AS view_time_count,
+    COALESCE(SUM(sum_query_count), 0)  AS sum_query_count,
+    COALESCE(MAX(max_query_count), 0)  AS max_query_count,
+    COALESCE(SUM(n_plus_one_count), 0) AS n_plus_one_count,
+    COALESCE(SUM(error_count), 0)      AS error_count
+  SQL
+
   # All windowed analytics read from the two hourly aggregate tables rather than
   # the raw `transactions` table:
   #   * transaction_hourly_stats — count / sums / max / min / query / N+1 / 5xx
@@ -26,30 +47,30 @@ module TransactionAnalytics
       return hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment)[:count] if time_range
 
       scope = all
-      scope = scope.where(project_id: project_id)   if project_id
+      scope = scope.where(project_id: project_id) if project_id
       scope = scope.where(environment: environment) if environment.present?
       scope.count
     end
 
     def total_and_error_count_in_range(time_range:, project_id: nil)
       row = hourly_stats_row(time_range: time_range, project_id: project_id)
-      { total: row[:count], errors: row[:error_count] }
+      {total: row[:count], errors: row[:error_count]}
     end
 
     # ---- Aggregate percentiles + simple stats. ----
 
     def percentiles(time_range, project_id: nil, environment: nil, name_query: nil)
-      row  = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
+      row = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
       pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
-      cnt  = row[:count]
+      cnt = row[:count]
       {
-        avg:   cnt.zero? ? 0.0 : (row[:sum_duration].to_f / cnt).round(1),
-        max:   row[:max_duration],
-        min:   row[:min_duration].to_i,
+        avg: cnt.zero? ? 0.0 : (row[:sum_duration].to_f / cnt).round(1),
+        max: row[:max_duration],
+        min: row[:min_duration].to_i,
         count: cnt,
-        p50:   pcts[:p50],
-        p95:   pcts[:p95],
-        p99:   pcts[:p99]
+        p50: pcts[:p50],
+        p95: pcts[:p95],
+        p99: pcts[:p99]
       }
     end
 
@@ -58,20 +79,20 @@ module TransactionAnalytics
     def percentiles_for_endpoint(name, time_range, project_id: nil, environment: nil, release: nil)
       return percentiles_for_endpoint_raw(name, time_range, project_id: project_id, environment: environment, release: release) if release.present?
 
-      row  = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, transaction_name: name)
+      row = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, transaction_name: name)
       pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, transaction_name: name)
-      cnt  = row[:count]
+      cnt = row[:count]
       {
         "transaction_name" => name,
-        "avg_duration"     => cnt.zero? ? 0.0 : (row[:sum_duration].to_f / cnt).round(1),
-        "avg_db_time"      => row[:db_time_count].zero?   ? nil : (row[:sum_db_time].to_f   / row[:db_time_count]).round(1),
-        "avg_view_time"    => row[:view_time_count].zero? ? nil : (row[:sum_view_time].to_f / row[:view_time_count]).round(1),
-        "count"            => cnt,
-        "max_duration"     => row[:max_duration],
-        "min_duration"     => row[:min_duration].to_i,
-        "p50_duration"     => pcts[:p50],
-        "p95_duration"     => pcts[:p95],
-        "p99_duration"     => pcts[:p99]
+        "avg_duration" => cnt.zero? ? 0.0 : (row[:sum_duration].to_f / cnt).round(1),
+        "avg_db_time" => row[:db_time_count].zero? ? nil : (row[:sum_db_time].to_f / row[:db_time_count]).round(1),
+        "avg_view_time" => row[:view_time_count].zero? ? nil : (row[:sum_view_time].to_f / row[:view_time_count]).round(1),
+        "count" => cnt,
+        "max_duration" => row[:max_duration],
+        "min_duration" => row[:min_duration].to_i,
+        "p50_duration" => pcts[:p50],
+        "p95_duration" => pcts[:p95],
+        "p99_duration" => pcts[:p99]
       }
     end
 
@@ -84,12 +105,12 @@ module TransactionAnalytics
         avg = cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt)
         {
           "transaction_name" => r["transaction_name"],
-          "avg_duration"     => avg.round(1),
-          "count"            => cnt,
-          "max_duration"     => r["max_duration"].to_i,
-          "time_spent"       => (avg * cnt).round,
-          "avg_queries"      => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
-          "max_queries"      => r["max_query_count"].to_i,
+          "avg_duration" => avg.round(1),
+          "count" => cnt,
+          "max_duration" => r["max_duration"].to_i,
+          "time_spent" => (avg * cnt).round,
+          "avg_queries" => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
+          "max_queries" => r["max_query_count"].to_i,
           "n_plus_one_count" => r["n_plus_one_count"].to_i
         }
       end.sort_by { |r| -r["time_spent"] }
@@ -103,15 +124,15 @@ module TransactionAnalytics
 
     def stats_by_endpoint(time_range, project_id: nil, limit: 20)
       stats_by_endpoint_with_impact(time_range, project_id: project_id, limit: limit).map do |r|
-        { "transaction_name" => r["transaction_name"],
-          "avg_duration"     => r["avg_duration"],
-          "count"            => r["count"] }
+        {"transaction_name" => r["transaction_name"],
+         "avg_duration" => r["avg_duration"],
+         "count" => r["count"]}
       end
     end
 
     def endpoints_by_n_plus_one(time_range, project_id: nil, environment: nil, limit: 50)
       rows = hourly_stats_grouped(time_range: time_range, project_id: project_id, environment: environment)
-             .select { |r| r["n_plus_one_count"].to_i.positive? }
+        .select { |r| r["n_plus_one_count"].to_i.positive? }
       return [] if rows.empty?
 
       ranked = rows.map do |r|
@@ -122,12 +143,12 @@ module TransactionAnalytics
           "n_plus_one_count" => npo,
           # count on the hourly row is total requests for the endpoint, so the
           # affected percentage no longer needs a separate totals query.
-          "total_count"      => cnt,
-          "n_plus_one_pct"   => cnt.zero? ? 0 : ((npo.to_f / cnt) * 100).round(1),
-          "avg_duration"     => cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt).round(1),
-          "max_duration"     => r["max_duration"].to_i,
-          "avg_queries"      => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
-          "max_queries"      => r["max_query_count"].to_i
+          "total_count" => cnt,
+          "n_plus_one_pct" => cnt.zero? ? 0 : ((npo.to_f / cnt) * 100).round(1),
+          "avg_duration" => cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt).round(1),
+          "max_duration" => r["max_duration"].to_i,
+          "avg_queries" => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
+          "max_queries" => r["max_query_count"].to_i
         }
       end.sort_by { |r| -r["n_plus_one_count"] }.first(limit)
 
@@ -138,12 +159,12 @@ module TransactionAnalytics
     end
 
     def slow(time_range:, project_id: nil, threshold_ms: 1000, environment: nil, http_status: nil,
-             http_method: nil, transaction_name: nil, tags: nil, limit: 100)
+      http_method: nil, transaction_name: nil, tags: nil, limit: 100)
       scope = where(timestamp: time_range).where("duration > ?", threshold_ms)
-      scope = scope.where(project_id: project_id)             if project_id
-      scope = scope.where(environment: environment)           if environment.present?
-      scope = scope.where(http_status: http_status)           if http_status.present?
-      scope = scope.where(http_method: http_method)           if http_method.present?
+      scope = scope.where(project_id: project_id) if project_id
+      scope = scope.where(environment: environment) if environment.present?
+      scope = scope.where(http_status: http_status) if http_status.present?
+      scope = scope.where(http_method: http_method) if http_method.present?
       # endpoint is advertised as a case-insensitive substring match (LIKE is
       # case-insensitive for ASCII in SQLite), not exact equality.
       scope = scope.where("transaction_name LIKE ?", "%#{transaction_name}%") if transaction_name.present?
@@ -177,7 +198,7 @@ module TransactionAnalytics
         series = by_name[name] || {}
         result[name] = Array.new(buckets) do |b|
           counts = series[b]
-          counts && counts.any? ? (Analytics::Histogram.percentile_from_counts(counts, 0.95) || 0).round : 0
+          (counts && counts.any?) ? (Analytics::Histogram.percentile_from_counts(counts, 0.95) || 0).round : 0
         end
       end
     end
@@ -199,14 +220,14 @@ module TransactionAnalytics
       Array.new(buckets) do |b|
         counts = series[b]
         if counts.nil? || counts.empty?
-          { "bucket" => b, "count" => 0, "p50" => nil, "p95" => nil, "p99" => nil }
+          {"bucket" => b, "count" => 0, "p50" => nil, "p95" => nil, "p99" => nil}
         else
           {
             "bucket" => b,
-            "count"  => counts.values.sum,
-            "p50"    => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.50)),
-            "p95"    => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.95)),
-            "p99"    => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.99))
+            "count" => counts.values.sum,
+            "p50" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.50)),
+            "p95" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.95)),
+            "p99" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.99))
           }
         end
       end
@@ -235,29 +256,9 @@ module TransactionAnalytics
 
     # ---- transaction_hourly_stats scalar reads. ----
 
-    # Window covers whole hours [hour(begin) .. hour(end)] inclusive. The end
-    # hour is the in-progress one (kept current by the live ingest bump), so it's
-    # included rather than split off to a raw arm. The begin hour over-includes
-    # up to ~1h of pre-window rows — the same hour-granular edge as the
-    # percentile reader.
-    HOURLY_AGG = <<~SQL.squish.freeze
-      COALESCE(SUM(count), 0)            AS count,
-      COALESCE(SUM(sum_duration), 0)     AS sum_duration,
-      MIN(min_duration)                  AS min_duration,
-      COALESCE(MAX(max_duration), 0)     AS max_duration,
-      COALESCE(SUM(sum_db_time), 0)      AS sum_db_time,
-      COALESCE(SUM(db_time_count), 0)    AS db_time_count,
-      COALESCE(SUM(sum_view_time), 0)    AS sum_view_time,
-      COALESCE(SUM(view_time_count), 0)  AS view_time_count,
-      COALESCE(SUM(sum_query_count), 0)  AS sum_query_count,
-      COALESCE(MAX(max_query_count), 0)  AS max_query_count,
-      COALESCE(SUM(n_plus_one_count), 0) AS n_plus_one_count,
-      COALESCE(SUM(error_count), 0)      AS error_count
-    SQL
-
     def hourly_stats_row(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil)
       where_sql, binds = hourly_filters(time_range: time_range, project_id: project_id, environment: environment,
-                                        transaction_name: transaction_name, name_query: name_query)
+        transaction_name: transaction_name, name_query: name_query)
       sql = "SELECT #{HOURLY_AGG} FROM transaction_hourly_stats WHERE #{where_sql}"
       r = connection.select_one(sanitize_sql_array([sql, *binds])) || {}
       symbolize_hourly_row(r)
@@ -265,25 +266,25 @@ module TransactionAnalytics
 
     def hourly_stats_grouped(time_range:, project_id: nil, environment: nil, name_query: nil)
       where_sql, binds = hourly_filters(time_range: time_range, project_id: project_id, environment: environment,
-                                        name_query: name_query)
+        name_query: name_query)
       sql = "SELECT transaction_name, #{HOURLY_AGG} FROM transaction_hourly_stats WHERE #{where_sql} GROUP BY transaction_name"
       connection.select_all(sanitize_sql_array([sql, *binds])).to_a
     end
 
     def symbolize_hourly_row(r)
       {
-        count:            r["count"].to_i,
-        sum_duration:     r["sum_duration"].to_i,
-        min_duration:     r["min_duration"], # nil when no rows
-        max_duration:     r["max_duration"].to_i,
-        sum_db_time:      r["sum_db_time"].to_i,
-        db_time_count:    r["db_time_count"].to_i,
-        sum_view_time:    r["sum_view_time"].to_i,
-        view_time_count:  r["view_time_count"].to_i,
-        sum_query_count:  r["sum_query_count"].to_i,
-        max_query_count:  r["max_query_count"].to_i,
+        count: r["count"].to_i,
+        sum_duration: r["sum_duration"].to_i,
+        min_duration: r["min_duration"], # nil when no rows
+        max_duration: r["max_duration"].to_i,
+        sum_db_time: r["sum_db_time"].to_i,
+        db_time_count: r["db_time_count"].to_i,
+        sum_view_time: r["sum_view_time"].to_i,
+        view_time_count: r["view_time_count"].to_i,
+        sum_query_count: r["sum_query_count"].to_i,
+        max_query_count: r["max_query_count"].to_i,
         n_plus_one_count: r["n_plus_one_count"].to_i,
-        error_count:      r["error_count"].to_i
+        error_count: r["error_count"].to_i
       }
     end
 
@@ -291,21 +292,21 @@ module TransactionAnalytics
       lo = Analytics::Histogram.hour_bucket(time_range.begin)
       hi = Analytics::Histogram.hour_bucket(time_range.end)
       clauses = ["hour_bucket >= ?", "hour_bucket <= ?"]
-      binds   = [lo, hi]
+      binds = [lo, hi]
       if project_id
         clauses << "project_id = ?"
-        binds   << project_id
+        binds << project_id
       end
       if transaction_name
         clauses << "transaction_name = ?"
-        binds   << transaction_name
+        binds << transaction_name
       elsif name_query.present?
         clauses << "transaction_name LIKE ?"
-        binds   << "%#{name_query}%"
+        binds << "%#{name_query}%"
       end
       if environment.present?
         clauses << "environment = ?"
-        binds   << environment
+        binds << environment
       end
       [clauses.join(" AND "), binds]
     end
@@ -315,9 +316,9 @@ module TransactionAnalytics
     # everything else, so the algorithm stays unified.
     def percentiles_for_endpoint_raw(name, time_range, project_id:, environment:, release:)
       scope = where(transaction_name: name).where(timestamp: time_range)
-      scope = scope.where(project_id: project_id)   if project_id
+      scope = scope.where(project_id: project_id) if project_id
       scope = scope.where(environment: environment) if environment.present?
-      scope = scope.where(release: release)         if release.present?
+      scope = scope.where(release: release) if release.present?
       avg_d, avg_db, avg_view, cnt, mx, mn = scope.pick(
         Arel.sql("AVG(duration)"), Arel.sql("AVG(db_time)"), Arel.sql("AVG(view_time)"),
         Arel.sql("COUNT(*)"), Arel.sql("MAX(duration)"), Arel.sql("MIN(duration)")
@@ -325,15 +326,15 @@ module TransactionAnalytics
       counts = raw_index_counts(scope)
       {
         "transaction_name" => name,
-        "avg_duration"     => avg_d.to_f.round(1),
-        "avg_db_time"      => avg_db&.to_f&.round(1),
-        "avg_view_time"    => avg_view&.to_f&.round(1),
-        "count"            => cnt.to_i,
-        "max_duration"     => mx.to_i,
-        "min_duration"     => mn.to_i,
-        "p50_duration"     => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.50)),
-        "p95_duration"     => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.95)),
-        "p99_duration"     => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.99))
+        "avg_duration" => avg_d.to_f.round(1),
+        "avg_db_time" => avg_db&.to_f&.round(1),
+        "avg_view_time" => avg_view&.to_f&.round(1),
+        "count" => cnt.to_i,
+        "max_duration" => mx.to_i,
+        "min_duration" => mn.to_i,
+        "p50_duration" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.50)),
+        "p95_duration" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.95)),
+        "p99_duration" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.99))
       }
     end
 
@@ -351,27 +352,27 @@ module TransactionAnalytics
     # histogram). Both branches share the same filter columns and feed the same
     # Analytics::Histogram.percentile_from_counts reducer.
     def bucketed_index_counts(time_range:, buckets:, project_id: nil, environment: nil,
-                              transaction_name: nil, transaction_names: nil, include_name: false, release: nil)
-      window         = time_range.end - time_range.begin
+      transaction_name: nil, transaction_names: nil, include_name: false, release: nil)
+      window = time_range.end - time_range.begin
       bucket_seconds = (window / buckets).to_i.clamp(1, nil)
-      origin         = time_range.begin.to_i
-      use_histogram  = (bucket_seconds % 3600).zero? && release.blank?
+      origin = time_range.begin.to_i
+      use_histogram = (bucket_seconds % 3600).zero? && release.blank?
 
       if use_histogram
-        source     = "transaction_histograms"
-        time_col   = "hour_bucket"
+        source = "transaction_histograms"
+        time_col = "hour_bucket"
         index_expr = "bucket_index"
         count_expr = "SUM(count)"
       else
-        source     = "transactions"
-        time_col   = "timestamp"
+        source = "transactions"
+        time_col = "timestamp"
         index_expr = Analytics::Histogram.bucket_index_sql
         count_expr = "COUNT(*)"
       end
 
       tb = Analytics::Histogram.time_bucket_sql(origin_epoch: origin, bucket_seconds: bucket_seconds, column: time_col)
       name_select = include_name ? "transaction_name AS name, " : ""
-      name_group  = include_name ? "name, " : ""
+      name_group = include_name ? "name, " : ""
 
       where_sql, binds = bucket_filters(
         source: source, time_col: time_col, time_range: time_range,
@@ -406,9 +407,9 @@ module TransactionAnalytics
     # { time_bucket => { count:, sum: } }. Hour-aligned → hourly_stats; sub-hour
     # → raw. Mirrors bucketed_index_counts' source-selection.
     def bucketed_volume(time_range:, buckets:, project_id: nil, environment: nil)
-      window         = time_range.end - time_range.begin
+      window = time_range.end - time_range.begin
       bucket_seconds = (window / buckets).to_i.clamp(1, nil)
-      origin         = time_range.begin.to_i
+      origin = time_range.begin.to_i
 
       if (bucket_seconds % 3600).zero?
         source, time_col = "transaction_hourly_stats", "hour_bucket"
@@ -428,7 +429,7 @@ module TransactionAnalytics
       connection.select_rows(sanitize_sql_array([sql, *binds])).each_with_object({}) do |(tb_idx, c, s), acc|
         i = tb_idx.to_i
         next if i.negative? || i >= buckets
-        acc[i] = { count: c.to_i, sum: s.to_i }
+        acc[i] = {count: c.to_i, sum: s.to_i}
       end
     end
 
@@ -436,33 +437,33 @@ module TransactionAnalytics
     # column is hour_bucket and the upper bound is inclusive of the current hour
     # (live-bumped); for raw it's the half-open [begin, end) timestamp window.
     def bucket_filters(source:, time_col:, time_range:, project_id: nil, environment: nil,
-                       transaction_name: nil, transaction_names: nil, release: nil)
+      transaction_name: nil, transaction_names: nil, release: nil)
       aggregate = (time_col == "hour_bucket")
       if aggregate
         clauses = ["#{time_col} >= ?", "#{time_col} <= ?"]
-        binds   = [Analytics::Histogram.hour_bucket(time_range.begin), Analytics::Histogram.hour_bucket(time_range.end)]
+        binds = [Analytics::Histogram.hour_bucket(time_range.begin), Analytics::Histogram.hour_bucket(time_range.end)]
       else
         clauses = ["#{time_col} >= ?", "#{time_col} < ?"]
-        binds   = [time_range.begin, time_range.end]
+        binds = [time_range.begin, time_range.end]
       end
       if project_id
         clauses << "project_id = ?"
-        binds   << project_id
+        binds << project_id
       end
       if transaction_names
-        clauses << "transaction_name IN (#{(["?"] * transaction_names.size).join(', ')})"
+        clauses << "transaction_name IN (#{(["?"] * transaction_names.size).join(", ")})"
         binds.concat(transaction_names)
       elsif transaction_name
         clauses << "transaction_name = ?"
-        binds   << transaction_name
+        binds << transaction_name
       end
       if environment.present?
         clauses << "environment = ?"
-        binds   << environment
+        binds << environment
       end
       if release.present? # only ever set on the raw source
         clauses << "release = ?"
-        binds   << release
+        binds << release
       end
       [clauses.join(" AND "), binds]
     end
@@ -486,11 +487,11 @@ module TransactionAnalytics
     def merged_percentiles(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil)
       hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
       until_hour = Analytics::Histogram.hour_bucket(time_range.end)
-      proj_filter = project_id.present?  ? "AND project_id = ?" : ""
-      env_filter  = environment.present? ? "AND environment = ?" : ""
+      proj_filter = project_id.present? ? "AND project_id = ?" : ""
+      env_filter = environment.present? ? "AND environment = ?" : ""
       name_filter =
         if transaction_name.present? then "AND transaction_name = ?"
-        elsif name_query.present?    then "AND transaction_name LIKE ?"
+        elsif name_query.present? then "AND transaction_name LIKE ?"
         else ""
         end
       name_bind = transaction_name.presence || ("%#{name_query}%" if name_query.present?)
@@ -531,11 +532,11 @@ module TransactionAnalytics
       raw_lower = [time_range.begin, until_hour].max
       binds = [hour_start, until_hour]
       binds << project_id if project_id.present?
-      binds << name_bind  if name_bind
+      binds << name_bind if name_bind
       binds << environment if environment.present?
       binds.push(raw_lower, time_range.end)
       binds << project_id if project_id.present?
-      binds << name_bind  if name_bind
+      binds << name_bind if name_bind
       binds << environment if environment.present?
 
       p50, p95, p99 = connection.select_rows(sanitize_sql_array([sql, *binds])).first || []
@@ -551,9 +552,9 @@ module TransactionAnalytics
       Array.new(buckets) do |b|
         r = rows[b]
         if r.nil? || r[:count].zero?
-          { "bucket" => b, "count" => 0, "avg_duration" => 0 }
+          {"bucket" => b, "count" => 0, "avg_duration" => 0}
         else
-          { "bucket" => b, "count" => r[:count], "avg_duration" => (r[:sum].to_f / r[:count]).round(1) }
+          {"bucket" => b, "count" => r[:count], "avg_duration" => (r[:sum].to_f / r[:count]).round(1)}
         end
       end
     end

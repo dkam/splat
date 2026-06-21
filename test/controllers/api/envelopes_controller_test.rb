@@ -10,65 +10,65 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
 
   test "successfully processes envelope with query parameter authentication" do
     post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
-         headers: { 'Content-Type' => 'application/octet-stream' },
-         params: @valid_envelope
+      headers: {"Content-Type" => "application/octet-stream"},
+      params: @valid_envelope
 
     assert_response :success
   end
 
   test "successfully processes envelope with header authentication" do
     post "/api/#{@project.id}/envelope?sentry_key=#{@project.public_key}",
-         headers: {
-           'Content-Type' => 'application/octet-stream',
-           'X-Sentry-Auth' => "Sentry sentry_key=#{@project.public_key}, sentry_version=7"
-         },
-         params: @valid_envelope
+      headers: {
+        "Content-Type" => "application/octet-stream",
+        "X-Sentry-Auth" => "Sentry sentry_key=#{@project.public_key}, sentry_version=7"
+      },
+      params: @valid_envelope
 
     assert_response :success
   end
 
   test "rejects envelope with invalid public key in query params" do
     post "/api/#{@project.slug}/envelope?sentry_key=invalid-key",
-         headers: { 'Content-Type' => 'application/octet-stream' },
-         params: @valid_envelope
+      headers: {"Content-Type" => "application/octet-stream"},
+      params: @valid_envelope
 
     assert_response :unauthorized
   end
 
   test "rejects envelope with invalid public key in header" do
     post "/api/#{@project.slug}/envelope?sentry_key=invalid-key",
-         headers: {
-           'Content-Type' => 'application/octet-stream',
-           'X-Sentry-Auth' => "Sentry sentry_key=invalid-key, sentry_version=7"
-         },
-         params: @valid_envelope
+      headers: {
+        "Content-Type" => "application/octet-stream",
+        "X-Sentry-Auth" => "Sentry sentry_key=invalid-key, sentry_version=7"
+      },
+      params: @valid_envelope
 
     assert_response :unauthorized
   end
 
   test "rejects envelope with no authentication" do
     post "/api/#{@project.slug}/envelope",
-         headers: { 'Content-Type' => 'application/octet-stream' },
-         params: @valid_envelope
+      headers: {"Content-Type" => "application/octet-stream"},
+      params: @valid_envelope
 
     assert_response :unauthorized
   end
 
   test "returns unauthorized for nonexistent project even with valid key" do
     post "/api/nonexistent/envelope?sentry_key=#{@project.public_key}",
-         headers: { 'Content-Type' => 'application/octet-stream' },
-         params: @valid_envelope
+      headers: {"Content-Type" => "application/octet-stream"},
+      params: @valid_envelope
 
     assert_response :unauthorized
   end
 
   test "handles Bearer token authentication" do
     post "/api/#{@project.slug}/envelope",
-         headers: {
-           'Content-Type' => 'application/octet-stream',
-           'Authorization' => "Bearer #{@project.public_key}"
-         },
-         params: @valid_envelope
+      headers: {
+        "Content-Type" => "application/octet-stream",
+        "Authorization" => "Bearer #{@project.public_key}"
+      },
+      params: @valid_envelope
 
     assert_response :success
   end

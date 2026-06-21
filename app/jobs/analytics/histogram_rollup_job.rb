@@ -81,11 +81,11 @@ module Analytics
     def perform(hour = nil)
       hour = Analytics::Histogram.hour_bucket(hour || 1.hour.ago)
       range_start = hour
-      range_end   = hour + 1.hour
+      range_end = hour + 1.hour
       Rails.logger.info "[HistogramRollupJob] rolling up #{range_start.iso8601}..#{range_end.iso8601}"
 
       conn = TransactionsSpansRecord.connection
-      conn.exec_query(self.class.insert_sql,      "HistogramRollupJob histogram",    [range_start, range_end])
+      conn.exec_query(self.class.insert_sql, "HistogramRollupJob histogram", [range_start, range_end])
       conn.exec_query(self.class.hourly_stats_sql, "HistogramRollupJob hourly_stats", [range_start, range_end])
     end
   end

@@ -3,7 +3,7 @@
 class Release < ApplicationRecord
   belongs_to :project
 
-  validates :version, presence: true, uniqueness: { scope: :project_id }
+  validates :version, presence: true, uniqueness: {scope: :project_id}
   validates :first_seen_at, :last_seen_at, presence: true
 
   scope :recent, -> { order(first_seen_at: :desc) }

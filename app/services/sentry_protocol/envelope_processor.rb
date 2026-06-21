@@ -70,9 +70,9 @@ module SentryProtocol
           # This is part of the payload
           if current_item["length"]
             # Length-prefixed payload
+            payload_lines << line
             if payload_lines.join("\n").bytesize + line.bytesize + 1 >= current_item["length"]
               # Last line of payload
-              payload_lines << line
               payload = payload_lines.join("\n")
 
               # Parse payload if it's JSON
@@ -89,8 +89,6 @@ module SentryProtocol
 
               current_item = nil
               payload_lines = []
-            else
-              payload_lines << line
             end
           elsif index == lines[1..].length - 1 || lines[1..][index + 1]&.start_with?("{")
             # Implicit length (terminated by newline or EOF)
@@ -229,7 +227,7 @@ module SentryProtocol
 
     def extract_event_id(payload)
       return nil unless payload.is_a?(Hash)
-      payload[:event_id] || payload['event_id']
+      payload[:event_id] || payload["event_id"]
     end
 
     def housekeeping_transaction?(name)

@@ -12,17 +12,17 @@ class Api::EnvelopesController < ApplicationController
     raw_body = request.body.read
 
     # Decompress based on Content-Encoding header
-    content_encoding = request.headers['Content-Encoding']&.downcase
+    content_encoding = request.headers["Content-Encoding"]&.downcase
 
     case content_encoding
-    when 'gzip'
+    when "gzip"
       raw_body = Zlib::GzipReader.new(StringIO.new(raw_body)).read
-    when 'deflate'
+    when "deflate"
       raw_body = Zlib::Inflate.inflate(raw_body)
-    when 'br'
+    when "br"
       # Brotli compression
       begin
-        require 'brotli'
+        require "brotli"
         raw_body = Brotli.inflate(raw_body)
       rescue LoadError
         Rails.logger.error "Brotli gem not available for decompression"
@@ -33,10 +33,10 @@ class Api::EnvelopesController < ApplicationController
         head :ok
         return
       end
-    when 'zstd'
+    when "zstd"
       # Zstandard compression
       begin
-        require 'zstd'
+        require "zstd"
         raw_body = Zstd.decompress(raw_body)
       rescue LoadError
         Rails.logger.error "Zstd gem not available for decompression"

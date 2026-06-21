@@ -28,7 +28,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
 
   test "authenticates with X-Sentry-Auth header" do
     request = ActionDispatch::TestRequest.create
-    request.headers['X-Sentry-Auth'] = "Sentry sentry_key=#{@project.public_key}, sentry_version=7, sentry_client=ruby-sdk/1.0.0"
+    request.headers["X-Sentry-Auth"] = "Sentry sentry_key=#{@project.public_key}, sentry_version=7, sentry_client=ruby-sdk/1.0.0"
 
     authenticated_project = DsnAuthenticationService.authenticate(request, @project.slug)
 
@@ -37,7 +37,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
 
   test "authenticates with Bearer Authorization header" do
     request = ActionDispatch::TestRequest.create
-    request.headers['Authorization'] = "Bearer #{@project.public_key}"
+    request.headers["Authorization"] = "Bearer #{@project.public_key}"
 
     authenticated_project = DsnAuthenticationService.authenticate(request, @project.id)
 
@@ -73,7 +73,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
   test "extracts public key from Sentry header with multiple params" do
     header = "Sentry sentry_key=#{@project.public_key}, sentry_version=7, sentry_client=ruby-sdk/1.0.0, sentry_timestamp=1234567890"
     extracted_key = DsnAuthenticationService.extract_public_key(
-      OpenStruct.new(headers: { 'X-Sentry-Auth' => header }, GET: {})
+      OpenStruct.new(headers: {"X-Sentry-Auth" => header}, GET: {})
     )
 
     assert_equal @project.public_key, extracted_key
@@ -81,7 +81,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
 
   test "returns nil for malformed Sentry header" do
     header = "Invalid header format"
-    extracted_key = DsnAuthenticationService.parse_sentry_auth_header(header)
+    extracted_key = DsnAuthenticationService.send(:parse_sentry_auth_header, header)
 
     assert_nil extracted_key
   end
@@ -91,7 +91,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
   test "trusted forwarder header without server token does nothing" do
     request = make_request(sentry_key: "any-key", forwarder_token: "anything")
 
-    with_env('SPLAT_FORWARDER_TOKEN' => nil) do
+    with_env("SPLAT_FORWARDER_TOKEN" => nil) do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "brand-new-app")
       end
@@ -102,7 +102,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
   test "mismatched forwarder token falls through to direct DSN auth" do
     request = make_request(sentry_key: "wrong-key", forwarder_token: "wrong-token")
 
-    with_env('SPLAT_FORWARDER_TOKEN' => 'correct-token') do
+    with_env("SPLAT_FORWARDER_TOKEN" => "correct-token") do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, @project.slug)
       end
@@ -114,7 +114,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
     # for forwarded envelopes — only the forwarder token matters.
     request = make_request(sentry_key: "totally-different-key", forwarder_token: "T")
 
-    project = with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
+    project = with_env("SPLAT_FORWARDER_TOKEN" => "T") do
       DsnAuthenticationService.authenticate(request, @project.slug)
     end
 
@@ -125,7 +125,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
   test "trusted forwarder auto-creates unknown slug using inbound public_key" do
     request = make_request(sentry_key: "baffle-key-abc", forwarder_token: "T")
 
-    project = with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
+    project = with_env("SPLAT_FORWARDER_TOKEN" => "T") do
       DsnAuthenticationService.authenticate(request, "baffle")
     end
 
@@ -137,7 +137,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
   test "trusted forwarder rejects malformed slug for auto-create" do
     request = make_request(sentry_key: "any-key", forwarder_token: "T")
 
-    with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
+    with_env("SPLAT_FORWARDER_TOKEN" => "T") do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "Has Spaces")
       end
@@ -150,7 +150,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
     # exists, auto-create's leading-letter regex rejects them.
     request = make_request(sentry_key: "any-key", forwarder_token: "T")
 
-    with_env('SPLAT_FORWARDER_TOKEN' => 'T') do
+    with_env("SPLAT_FORWARDER_TOKEN" => "T") do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "9999")
       end
@@ -161,7 +161,7 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
     # secure_compare returns false on length mismatch — no early-exit timing leak.
     request = make_request(sentry_key: "any-key", forwarder_token: "T")
 
-    with_env('SPLAT_FORWARDER_TOKEN' => 'TT') do
+    with_env("SPLAT_FORWARDER_TOKEN" => "TT") do
       assert_raises(DsnAuthenticationService::AuthenticationError) do
         DsnAuthenticationService.authenticate(request, "new-slug")
       end

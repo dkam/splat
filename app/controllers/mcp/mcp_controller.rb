@@ -50,10 +50,10 @@ module Mcp
       raw_body = request.body.read
 
       # Handle empty body (for GET or malformed requests)
-      if raw_body.blank?
-        rpc_request = params.as_json.except("controller", "action", "mcp")
+      rpc_request = if raw_body.blank?
+        params.as_json.except("controller", "action", "mcp")
       else
-        rpc_request = JSON.parse(raw_body)
+        JSON.parse(raw_body)
       end
 
       @rpc_id = rpc_request["id"]
@@ -407,7 +407,7 @@ module Mcp
                 type: "object",
                 description: "Filter by Sentry tags. Keys are AND'd; string equality. " \
                              "Example: {\"user_id\":\"123\",\"environment\":\"production\"}",
-                additionalProperties: { type: "string" }
+                additionalProperties: {type: "string"}
               }
             }
           }
@@ -600,7 +600,7 @@ module Mcp
     # Tool implementations
     def list_recent_issues(args)
       status = args["status"] || "open"
-      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
+      limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
       issues = Issue.includes(:project).recent
       issues = issues.where(status: status) unless status == "all"
@@ -615,7 +615,7 @@ module Mcp
       query = args["query"]
       status = args["status"]
       exception_type = args["exception_type"]
-      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
+      limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
       issues = Issue.includes(:project).recent
       issues = issues.where("title LIKE ? OR exception_type LIKE ?", "%#{query}%", "%#{query}%") if query.present?
@@ -639,7 +639,7 @@ module Mcp
 
     def get_issue_events(args)
       issue = Issue.find(args["issue_id"])
-      limit = [[args["limit"]&.to_i || 10, 1].max, 50].min
+      limit = (args["limit"]&.to_i || 10).clamp(1, 50)
       events = issue.events.order(timestamp: :desc).limit(limit)
 
       text = format_issue_events(issue, events)
@@ -657,8 +657,8 @@ module Mcp
 
     def get_transaction_stats(args)
       endpoint = args["endpoint"]
-      time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
-      limit = [[args["limit"]&.to_i || 10, 1].max, 50].min
+      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      limit = (args["limit"]&.to_i || 10).clamp(1, 50)
 
       time_range = time_range_hours.hours.ago..Time.current
 
@@ -691,13 +691,13 @@ module Mcp
       http_status = args["http_status"]
       http_method = args["http_method"]
       environment = args["environment"]
-      time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
-      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
+      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
       tags = args["tags"]
       tags = nil unless tags.is_a?(Hash) && tags.any?
       if tags
-        bad_key = tags.keys.find { |k| !k.is_a?(String) || k !~ /\A[a-zA-Z0-9_.\-]+\z/ }
+        bad_key = tags.keys.find { |k| !k.is_a?(String) || k !~ /\A[a-zA-Z0-9_.-]+\z/ }
         return render_text("Invalid tag key: #{bad_key.inspect}") if bad_key
         tags = tags.transform_values(&:to_s)
       end
@@ -733,7 +733,7 @@ module Mcp
     def get_transaction_spans(args)
       transaction = find_transaction(args["transaction_id"])
       op_filter = args["op_filter"].to_s.strip
-      limit = [[args["limit"]&.to_i || 100, 1].max, 1000].min
+      limit = (args["limit"]&.to_i || 100).clamp(1, 1000)
 
       # Materialize a hash per span; duration_ms is a computed method, not
       # a column, so .attributes alone would miss it.
@@ -759,7 +759,7 @@ module Mcp
 
     def get_endpoint_summary(args)
       endpoint = args["endpoint"]
-      hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
+      hours = (args["hours"]&.to_i || 24).clamp(1, 168)
       environment = args["environment"]
       release = args["release"]
       time_range = hours.hours.ago..Time.current
@@ -780,11 +780,11 @@ module Mcp
       }
       db_percentiles =
         if stats["avg_db_time"]
-          { avg: stats["avg_db_time"].to_f, p95: stats["p95_db_time"]&.to_f || 0 }
+          {avg: stats["avg_db_time"].to_f, p95: stats["p95_db_time"]&.to_f || 0}
         end
       view_percentiles =
         if stats["avg_view_time"]
-          { avg: stats["avg_view_time"].to_f, p95: stats["p95_view_time"]&.to_f || 0 }
+          {avg: stats["avg_view_time"].to_f, p95: stats["p95_view_time"]&.to_f || 0}
         end
 
       slowest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :desc)
@@ -800,9 +800,9 @@ module Mcp
     end
 
     def find_n_plus_one_endpoints(args)
-      time_range_hours = [[args["time_range_hours"]&.to_i || 24, 1].max, 168].min
+      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
       environment = args["environment"]
-      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
+      limit = (args["limit"]&.to_i || 20).clamp(1, 100)
       time_range = time_range_hours.hours.ago..Time.current
 
       rows = Transaction.endpoints_by_n_plus_one(
@@ -816,8 +816,8 @@ module Mcp
 
     def get_endpoint_timeseries(args)
       endpoint = args["endpoint"]
-      hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
-      buckets = [[args["buckets"]&.to_i || 24, 4].max, 168].min
+      hours = (args["hours"]&.to_i || 24).clamp(1, 168)
+      buckets = (args["buckets"]&.to_i || 24).clamp(4, 168)
       environment = args["environment"]
       release = args["release"]
       time_range = hours.hours.ago..Time.current
@@ -835,16 +835,16 @@ module Mcp
     def endpoint_extreme_row(endpoint, time_range, environment, release, direction)
       scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
       scope = scope.where(environment: environment) if environment.present?
-      scope = scope.where(release: release)         if release.present?
-      row = scope.order(duration: direction == :desc ? :desc : :asc).limit(1).first
-      row && { "id" => row.id, "duration" => row.duration, "db_time" => row.db_time,
-               "view_time" => row.view_time, "timestamp" => row.timestamp }
+      scope = scope.where(release: release) if release.present?
+      row = scope.order(duration: (direction == :desc) ? :desc : :asc).limit(1).first
+      row && {"id" => row.id, "duration" => row.duration, "db_time" => row.db_time,
+              "view_time" => row.view_time, "timestamp" => row.timestamp}
     end
 
     def get_transactions_by_endpoint(args)
       endpoint = args["endpoint"]
-      limit = [[args["limit"]&.to_i || 20, 1].max, 100].min
-      hours = [[args["hours"]&.to_i || 24, 1].max, 168].min
+      limit = (args["limit"]&.to_i || 20).clamp(1, 100)
+      hours = (args["hours"]&.to_i || 24).clamp(1, 168)
       environment = args["environment"]
       release = args["release"]
 
@@ -868,8 +868,8 @@ module Mcp
       after_release = args["after_release"]
       before_timestamp = args["before_timestamp"]
       after_timestamp = args["after_timestamp"]
-      hours_before = [[args["hours_before"]&.to_i || 24, 1].max, 168].min
-      hours_after = [[args["hours_after"]&.to_i || 24, 1].max, 168].min
+      hours_before = (args["hours_before"]&.to_i || 24).clamp(1, 168)
+      hours_after = (args["hours_after"]&.to_i || 24).clamp(1, 168)
       environment = args["environment"]
 
       # Validate input - either release-based or timestamp-based comparison
@@ -900,7 +900,7 @@ module Mcp
       )
 
       render_text(text)
-    rescue ArgumentError => e
+    rescue ArgumentError
       render_error("Invalid timestamp format. Please use ISO format (e.g., '2025-10-21T03:00:00Z')")
     end
 
@@ -953,7 +953,7 @@ module Mcp
     def durations_for(endpoint, time_range, environment: nil, release: nil)
       scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
       scope = scope.where(environment: environment) if environment.present?
-      scope = scope.where(release: release)         if release.present?
+      scope = scope.where(release: release) if release.present?
       scope.pluck(:duration).sort
     end
 
@@ -962,10 +962,11 @@ module Mcp
         jsonrpc: "2.0",
         id: @rpc_id,
         result: {
-          content: [{ type: "text", text: text }]
+          content: [{type: "text", text: text}]
         }
       }
     end
+
     def render_error(message)
       render json: {
         jsonrpc: "2.0",
@@ -992,7 +993,7 @@ module Mcp
         result += "  - Exception Type: #{issue.exception_type}\n"
         result += "  - Status: #{issue.status}\n"
         result += "  - Count: #{issue.count} occurrence(s)\n"
-        result += "  - Last Seen: #{issue.last_seen.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "  - Last Seen: #{issue.last_seen.strftime("%Y-%m-%d %H:%M:%S")}\n"
         result += "  - Project: #{issue.project.name}\n\n"
       end
 
@@ -1004,17 +1005,17 @@ module Mcp
       result += "**Exception Type:** #{issue.exception_type}\n"
       result += "**Status:** #{issue.status}\n"
       result += "**Occurrences:** #{issue.count}\n"
-      result += "**First Seen:** #{issue.first_seen.strftime('%Y-%m-%d %H:%M:%S')}\n"
-      result += "**Last Seen:** #{issue.last_seen.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      result += "**First Seen:** #{issue.first_seen.strftime("%Y-%m-%d %H:%M:%S")}\n"
+      result += "**Last Seen:** #{issue.last_seen.strftime("%Y-%m-%d %H:%M:%S")}\n"
       result += "**Project:** #{issue.project.name}\n\n"
 
-      if recent_event && recent_event.payload
+      if recent_event&.payload
         result += "### Most Recent Stack Trace\n\n"
         frames = recent_event.payload.dig("exception", "values", 0, "stacktrace", "frames")
 
         if frames.present?
           result += "```\n"
-          frames.reverse.each do |frame|
+          frames.reverse_each do |frame|
             filename = frame["filename"] || "unknown"
             lineno = frame["lineno"] || "?"
             function = frame["function"] || "unknown"
@@ -1041,7 +1042,7 @@ module Mcp
         events.each_with_index do |event, index|
           result += "### Event #{index + 1}\n"
           result += "**Event ID:** #{event.event_id}\n"
-          result += "**Timestamp:** #{event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+          result += "**Timestamp:** #{event.timestamp.strftime("%Y-%m-%d %H:%M:%S")}\n"
           result += "**Environment:** #{event.environment}\n" if event.environment.present?
           result += "**Server:** #{event.server_name}\n" if event.server_name.present?
           result += "\n"
@@ -1053,7 +1054,7 @@ module Mcp
 
     def format_event_detail(event)
       result = "## Event: #{event.event_id}\n\n"
-      result += "**Timestamp:** #{event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      result += "**Timestamp:** #{event.timestamp.strftime("%Y-%m-%d %H:%M:%S")}\n"
       result += "**Project:** #{event.project.name}\n"
       result += "**Environment:** #{event.environment}\n" if event.environment
       result += "**Release:** #{event.release}\n" if event.release
@@ -1075,7 +1076,7 @@ module Mcp
       if exception_details[:stacktrace]&.dig("frames")
         result += "### Stack Trace\n\n"
         result += "```\n"
-        exception_details[:stacktrace]["frames"].reverse.each do |frame|
+        exception_details[:stacktrace]["frames"].reverse_each do |frame|
           filename = frame["filename"] || "unknown"
           lineno = frame["lineno"] || "?"
           function = frame["function"] || "unknown"
@@ -1088,9 +1089,9 @@ module Mcp
       request_data = event.request
       if request_data.present?
         result += "### Request\n\n"
-        result += "**URL:** #{request_data['url']}\n" if request_data["url"]
-        result += "**Method:** #{request_data['method']}\n" if request_data["method"]
-        result += "**Query String:** #{request_data['query_string']}\n" if request_data["query_string"].present?
+        result += "**URL:** #{request_data["url"]}\n" if request_data["url"]
+        result += "**Method:** #{request_data["method"]}\n" if request_data["method"]
+        result += "**Query String:** #{request_data["query_string"]}\n" if request_data["query_string"].present?
 
         # Request ID (common in Rails apps)
         if request_data["headers"]
@@ -1106,9 +1107,9 @@ module Mcp
       user_data = event.user
       if user_data.present?
         result += "### User Context\n\n"
-        result += "**ID:** #{user_data['id']}\n" if user_data["id"]
-        result += "**Email:** #{user_data['email']}\n" if user_data["email"]
-        result += "**IP:** #{user_data['ip_address']}\n" if user_data["ip_address"]
+        result += "**ID:** #{user_data["id"]}\n" if user_data["id"]
+        result += "**Email:** #{user_data["email"]}\n" if user_data["email"]
+        result += "**IP:** #{user_data["ip_address"]}\n" if user_data["ip_address"]
         result += "\n"
       end
 
@@ -1127,7 +1128,7 @@ module Mcp
       if breadcrumbs.present? && breadcrumbs.any?
         result += "### Breadcrumbs (Last #{[breadcrumbs.size, 10].min})\n\n"
         breadcrumbs.last(10).each do |crumb|
-          timestamp = crumb["timestamp"] ? Time.at(crumb["timestamp"]).strftime('%H:%M:%S') : "?"
+          timestamp = crumb["timestamp"] ? Time.at(crumb["timestamp"]).strftime("%H:%M:%S") : "?"
           category = crumb["category"] || "default"
           message = crumb["message"] || crumb["type"] || "No message"
           result += "- **[#{timestamp}]** #{category}: #{message}\n"
@@ -1142,17 +1143,17 @@ module Mcp
 
         if contexts["runtime"]
           runtime = contexts["runtime"]
-          result += "**Runtime:** #{runtime['name']} #{runtime['version']}\n" if runtime["name"]
+          result += "**Runtime:** #{runtime["name"]} #{runtime["version"]}\n" if runtime["name"]
         end
 
         if contexts["os"]
           os = contexts["os"]
-          result += "**OS:** #{os['name']} #{os['version']}\n" if os["name"]
+          result += "**OS:** #{os["name"]} #{os["version"]}\n" if os["name"]
         end
 
         if contexts["device"]
           device = contexts["device"]
-          result += "**Device:** #{device['model']}\n" if device["model"]
+          result += "**Device:** #{device["model"]}\n" if device["model"]
         end
       end
 
@@ -1203,7 +1204,7 @@ module Mcp
       transactions.each do |txn|
         result += "**Transaction ##{txn["id"]}** - #{txn["transaction_name"]}\n"
         result += "  - Duration: #{txn["duration"].round}ms\n"
-        result += "  - Timestamp: #{txn["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "  - Timestamp: #{txn["timestamp"].strftime("%Y-%m-%d %H:%M:%S")}\n"
         result += "  - HTTP: #{txn["http_method"]} #{txn["http_status"]}\n" if txn["http_method"] || txn["http_status"]
         result += "  - Environment: #{txn["environment"]}\n" if txn["environment"]
         result += "  - Project: #{txn["project_name"]}\n\n" if txn["project_name"]
@@ -1216,7 +1217,7 @@ module Mcp
       result = "## Transaction ##{txn.id}: #{txn.transaction_name}\n\n"
       result += "**Transaction UUID:** #{txn.transaction_id}\n"
       result += "**Duration:** #{txn.duration.round}ms\n"
-      result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      result += "**Timestamp:** #{txn.timestamp.strftime("%Y-%m-%d %H:%M:%S")}\n"
       result += "**Project:** #{txn.project.name}\n"
       result += "**Environment:** #{txn.environment}\n" if txn.environment
       result += "**Release:** #{txn.release}\n" if txn.release
@@ -1253,7 +1254,7 @@ module Mcp
           result += "- ⚠️ Potential N+1 patterns (#{txn.potential_n_plus_one_queries.size}):\n"
           txn.potential_n_plus_one_queries.first(5).each do |pattern|
             count = txn.query_patterns.dig(pattern, "count")
-            result += "  - `#{pattern}`#{count ? " (×#{count})" : ""}\n"
+            result += "  - `#{pattern}`#{" (×#{count})" if count}\n"
           end
         end
       end
@@ -1270,7 +1271,7 @@ module Mcp
       result = "## Spans for Transaction ##{txn.id}: #{txn.transaction_name}\n\n"
       result += "**Transaction UUID:** #{txn.transaction_id}\n"
       result += "**Duration:** #{txn.duration.round}ms\n"
-      result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+      result += "**Timestamp:** #{txn.timestamp.strftime("%Y-%m-%d %H:%M:%S")}\n"
       result += "**Total Spans:** #{all_spans.size}"
       result += " (truncated at ingest — cap is #{Transaction::SPAN_CAP} per transaction)" if txn.spans_truncated
       result += "\n"
@@ -1308,7 +1309,7 @@ module Mcp
         repeated.first(15).each do |desc, ss|
           total = ss.sum { |s| s["duration_ms"].to_f }
           op = ss.first["op"]
-          truncated = desc.size > 400 ? "#{desc[0, 400]}…" : desc
+          truncated = (desc.size > 400) ? "#{desc[0, 400]}…" : desc
           result += "- **×#{ss.size}** (#{format_ms(total)} total) `#{op}`\n"
           result += "  ```sql\n  #{truncated}\n  ```\n"
         end
@@ -1332,7 +1333,7 @@ module Mcp
         dur = s["duration_ms"].to_f
         line = "#{indent}- [#{format_ms(dur)}] `#{op}`"
         if desc.present?
-          desc_truncated = desc.size > 250 ? "#{desc[0, 250]}…" : desc
+          desc_truncated = (desc.size > 250) ? "#{desc[0, 250]}…" : desc
           line += " — #{desc_truncated}"
         end
         result += "#{line}\n"
@@ -1354,8 +1355,8 @@ module Mcp
     end
 
     def format_endpoint_summary(endpoint, total_count, hours, environment, release,
-                               percentiles, db_percentiles, view_percentiles,
-                               slowest_request, fastest_request)
+      percentiles, db_percentiles, view_percentiles,
+      slowest_request, fastest_request)
       result = "## Endpoint Summary: #{endpoint}\n\n"
       result += "**Total Requests:** #{total_count}\n"
       result += "**Time Range:** Last #{hours} hour(s)\n"
@@ -1392,14 +1393,14 @@ module Mcp
         result += "**Fastest Request:** #{fastest_request["duration"].round}ms"
         result += " (DB: #{fastest_request["db_time"].round}ms)" if fastest_request["db_time"]
         result += " (View: #{fastest_request["view_time"].round}ms)" if fastest_request["view_time"]
-        result += " - #{fastest_request["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += " - #{fastest_request["timestamp"].strftime("%Y-%m-%d %H:%M:%S")}\n"
       end
 
       if slowest_request
         result += "**Slowest Request:** #{slowest_request["duration"].round}ms"
         result += " (DB: #{slowest_request["db_time"].round}ms)" if slowest_request["db_time"]
         result += " (View: #{slowest_request["view_time"].round}ms)" if slowest_request["view_time"]
-        result += " - #{slowest_request["timestamp"].strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += " - #{slowest_request["timestamp"].strftime("%Y-%m-%d %H:%M:%S")}\n"
       end
 
       result
@@ -1451,7 +1452,7 @@ module Mcp
       header += "|---|---:|---:|---:|---:|\n"
       series.each do |b|
         bucket_start = start_time + (b["bucket"] * bucket_seconds)
-        header += "| #{bucket_start.strftime('%Y-%m-%d %H:%M')} " \
+        header += "| #{bucket_start.strftime("%Y-%m-%d %H:%M")} " \
                  "| #{b["count"]} " \
                  "| #{format_ms(b["p50"])} " \
                  "| #{format_ms(b["p95"])} " \
@@ -1486,7 +1487,7 @@ module Mcp
         result += " (DB: #{txn.db_time.round}ms)" if txn.db_time
         result += " (View: #{txn.view_time.round}ms)" if txn.view_time
         result += "\n"
-        result += "**Timestamp:** #{txn.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += "**Timestamp:** #{txn.timestamp.strftime("%Y-%m-%d %H:%M:%S")}\n"
         result += "**HTTP:** #{txn.http_method} #{txn.http_status}\n" if txn.http_method || txn.http_status
         result += "**Environment:** #{txn.environment}\n" if txn.environment
         result += "**Release:** #{txn.release}\n" if txn.release
@@ -1499,7 +1500,7 @@ module Mcp
     end
 
     def format_performance_comparison(endpoint, comparison_type, before_label, after_label,
-                                     before_transactions, after_transactions)
+      before_transactions, after_transactions)
       result = "## Performance Comparison: #{endpoint}\n\n"
       result += "**Comparison Type:** #{comparison_type}\n"
       result += "**Before Period:** #{before_label}\n"

@@ -6,7 +6,7 @@ module Ingest
   # splat.maintenance tube where the scheduler pushes recurring jobs.
   class DispatchConsumer < TubeConsumer
     def initialize(tube:, batch_size: 10)
-      super(tube: tube, batch_size: batch_size)
+      super
     end
 
     private
@@ -22,7 +22,7 @@ module Ingest
       rescue Beaneater::NotFoundError
         nil
       rescue => e
-        log_exception("[#{self.class.name}] #{klass_name || '?'} failed", e)
+        log_exception("[#{self.class.name}] #{klass_name || "?"} failed", e)
         safe_finalize(job, :retry)
       end
     end

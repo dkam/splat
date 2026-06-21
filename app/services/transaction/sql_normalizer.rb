@@ -3,11 +3,11 @@
 class Transaction::SqlNormalizer
   MAX_LEN = 4000
 
-  STRING_LITERAL  = /'(?:[^'\\]|\\.|'')*'/
+  STRING_LITERAL = /'(?:[^'\\]|\\.|'')*'/
   NUMERIC_LITERAL = /(?<![A-Za-z_\d])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/
-  IN_LIST         = /\bIN\s*\(\s*\?(?:\s*,\s*\?)+\s*\)/i
-  WHITESPACE      = /\s+/
-  BLOCK_COMMENT   = %r{/\*.*?\*/}m
+  IN_LIST = /\bIN\s*\(\s*\?(?:\s*,\s*\?)+\s*\)/i
+  WHITESPACE = /\s+/
+  BLOCK_COMMENT = %r{/\*.*?\*/}m
 
   # Normalize a span description (typically SQL or URL) for storage.
   #

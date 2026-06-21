@@ -32,7 +32,7 @@ class OidcSession < ApplicationRecord
       user_email: user_email,
       expires_at: expires_in.from_now
     )
-  rescue ActiveRecord::RecordNotUnique => e
+  rescue ActiveRecord::RecordNotUnique
     # Handle race condition - session already exists
     Rails.logger.warn "OIDC session already exists for sid: #{oidc_sid}"
     find_by(oidc_sid: oidc_sid)

@@ -14,7 +14,7 @@ require "uri"
 class EnvelopeForwarder
   class InvalidDsn < StandardError; end
 
-  Target = Struct.new(:scheme, :host, :port, keyword_init: true) do
+  Target = Struct.new(:scheme, :host, :port) do
     def envelope_url(slug)
       port_part = port ? ":#{port}" : ""
       "#{scheme}://#{host}#{port_part}/api/#{slug}/envelope/"
@@ -74,7 +74,7 @@ class EnvelopeForwarder
       Target.new(
         scheme: uri.scheme,
         host: uri.host,
-        port: uri.port == uri.default_port ? nil : uri.port
+        port: (uri.port == uri.default_port) ? nil : uri.port
       )
     rescue URI::InvalidURIError => e
       raise InvalidDsn, "unparseable DSN: #{e.message}"

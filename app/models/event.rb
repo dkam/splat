@@ -2,6 +2,7 @@
 
 class Event < IssuesEventsRecord
   include Compression::CompressedJson
+
   compressed_json :payload, db: :issues_events, table: "events", platform: :platform
 
   # project lives on the primary DB. The belongs_to still works for
@@ -57,8 +58,8 @@ class Event < IssuesEventsRecord
     # counter_cache bumps issue.count, but last_seen has no auto-update.
     # Conditional WHERE keeps out-of-order events from clobbering a newer timestamp.
     Issue.where(id: issue.id)
-         .where("last_seen < ?", event.timestamp)
-         .update_all(last_seen: event.timestamp, updated_at: Time.current)
+      .where("last_seen < ?", event.timestamp)
+      .update_all(last_seen: event.timestamp, updated_at: Time.current)
 
     # Best-effort spike alert; throttled per issue and never raises into ingest.
     issue.maybe_alert_burst!
@@ -84,7 +85,7 @@ class Event < IssuesEventsRecord
 
   def self.count_in_range(time_range:, project_id: nil)
     scope = all
-    scope = scope.where(timestamp: time_range)  if time_range
+    scope = scope.where(timestamp: time_range) if time_range
     scope = scope.where(project_id: project_id) if project_id
     scope.count
   end
@@ -93,16 +94,16 @@ class Event < IssuesEventsRecord
   #   { issue_id => Array(bucket_count, ...) }, oldest bucket first.
   def self.event_counts_by_bucket(issue_ids:, time_range:, buckets:, project_id: nil)
     return {} if issue_ids.empty?
-    window         = time_range.end - time_range.begin
+    window = time_range.end - time_range.begin
     bucket_seconds = (window / buckets).to_i.clamp(1, nil)
-    range_start    = time_range.begin
+    range_start = time_range.begin
 
     scope = where(issue_id: issue_ids).where(timestamp: time_range)
     scope = scope.where(project_id: project_id) if project_id
     rows = scope
-           .group(:issue_id)
-           .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
-           .count
+      .group(:issue_id)
+      .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
+      .count
 
     result = issue_ids.each_with_object({}) { |id, h| h[id] = Array.new(buckets, 0) }
     rows.each do |(issue_id, bucket_idx), count|
@@ -116,14 +117,14 @@ class Event < IssuesEventsRecord
 
   # Volume across all events bucketed by time.
   def self.volume_by_bucket(project_id:, time_range:, buckets:)
-    window         = time_range.end - time_range.begin
+    window = time_range.end - time_range.begin
     bucket_seconds = (window / buckets).to_i.clamp(1, nil)
-    range_start    = time_range.begin
+    range_start = time_range.begin
 
     rows = where(project_id: project_id)
-           .where(timestamp: time_range)
-           .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
-           .count
+      .where(timestamp: time_range)
+      .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
+      .count
 
     Array.new(buckets, 0).tap do |result|
       rows.each do |idx, c|
@@ -145,16 +146,16 @@ class Event < IssuesEventsRecord
     }
   end
 
-  def stacktrace      = exception_details[:stacktrace]
+  def stacktrace = exception_details[:stacktrace]
   # Read the promoted column (populated at ingest) so list views don't
   # decompress the payload blob per row; fall back to exception_value.
-  def message         = self[:message].presence || exception_value
-  def level           = payload&.dig("level") || "error"
-  def tags            = payload&.dig("tags") || {}
-  def user            = payload&.dig("user") || {}
-  def request         = payload&.dig("request") || {}
-  def contexts        = payload&.dig("contexts") || {}
-  def breadcrumbs     = payload&.dig("breadcrumbs", "values") || []
+  def message = self[:message].presence || exception_value
+  def level = payload&.dig("level") || "error"
+  def tags = payload&.dig("tags") || {}
+  def user = payload&.dig("user") || {}
+  def request = payload&.dig("request") || {}
+  def contexts = payload&.dig("contexts") || {}
+  def breadcrumbs = payload&.dig("breadcrumbs", "values") || []
 
   private
 

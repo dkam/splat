@@ -14,7 +14,7 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     @range = (Time.current - 24.hours)..Time.current
   end
 
-  def create_txn(name: "GET /x", duration:, at: @hour, **attrs)
+  def create_txn(duration:, name: "GET /x", at: @hour, **attrs)
     Transaction.create!(
       project: @project, transaction_id: SecureRandom.uuid,
       transaction_name: name, timestamp: at, duration: duration, **attrs
@@ -32,14 +32,14 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     create_txn(duration: 250, db_time: 40, view_time: 20, query_count: 3, http_status: "200")
 
     row = hourly_row
-    assert_equal 1,   row["count"]
+    assert_equal 1, row["count"]
     assert_equal 250, row["sum_duration"]
     assert_equal 250, row["min_duration"]
     assert_equal 250, row["max_duration"]
-    assert_equal 40,  row["sum_db_time"]
-    assert_equal 1,   row["db_time_count"]
-    assert_equal 3,   row["sum_query_count"]
-    assert_equal 0,   row["error_count"]
+    assert_equal 40, row["sum_db_time"]
+    assert_equal 1, row["db_time_count"]
+    assert_equal 3, row["sum_query_count"]
+    assert_equal 0, row["error_count"]
 
     hist_total = Transaction.connection.select_value(
       "SELECT SUM(count) FROM transaction_histograms WHERE project_id = #{@project.id}"
@@ -52,14 +52,14 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     10.times { create_txn(duration: 1000, has_n_plus_one: true, query_count: 50, http_status: "500") }
 
     stats = Transaction.percentiles_for_endpoint("GET /x", @range, project_id: @project.id)
-    assert_equal 100,   stats["count"]
+    assert_equal 100, stats["count"]
     assert_equal 190.0, stats["avg_duration"]      # (90*100 + 10*1000)/100
-    assert_equal 1000,  stats["max_duration"]
-    assert_equal 100,   stats["min_duration"]
-    assert_equal 40.0,  stats["avg_db_time"]        # only the 90 non-null rows
+    assert_equal 1000, stats["max_duration"]
+    assert_equal 100, stats["min_duration"]
+    assert_equal 40.0, stats["avg_db_time"]        # only the 90 non-null rows
 
     err = Transaction.total_and_error_count_in_range(time_range: @range, project_id: @project.id)
-    assert_equal({ total: 100, errors: 10 }, err)
+    assert_equal({total: 100, errors: 10}, err)
   end
 
   test "DDSketch percentiles land within the ~1% relative-error band" do
@@ -74,7 +74,7 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     90.times { create_txn(duration: 100) }
     10.times { create_txn(duration: 1000) }
     stats = Transaction.percentiles_for_endpoint("GET /x", @range, project_id: @project.id)
-    assert_in_delta 100,  stats["p50_duration"], 2
+    assert_in_delta 100, stats["p50_duration"], 2
     assert_in_delta 1000, stats["p95_duration"], 12  # ~1% of 1000
   end
 
@@ -119,7 +119,7 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
 
     vol = Transaction.volume_by_bucket(project_id: @project.id, time_range: @range, buckets: 24)
     assert_equal 100, vol.sum
-    assert_equal 1, vol.reject(&:zero?).size
+    assert_equal 1, vol.count { |element| !element.zero? }
   end
 
   test "sub-hour windows fall back to the bounded raw path with the same algorithm" do

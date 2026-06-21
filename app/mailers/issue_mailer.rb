@@ -7,7 +7,7 @@ class IssueMailer < ApplicationMailer
     @url = generate_issue_url(issue)
 
     mail(
-      from: ENV.fetch('SPLAT_EMAIL_FROM', 'splat@example.com'),
+      from: ENV.fetch("SPLAT_EMAIL_FROM", "splat@example.com"),
       to: admin_emails,
       subject: "[Splat] New Issue: #{issue.title}"
     )
@@ -19,7 +19,7 @@ class IssueMailer < ApplicationMailer
     @url = generate_issue_url(issue)
 
     mail(
-      from: ENV.fetch('SPLAT_EMAIL_FROM', 'splat@example.com'),
+      from: ENV.fetch("SPLAT_EMAIL_FROM", "splat@example.com"),
       to: admin_emails,
       subject: "[Splat] Issue Reopened: #{issue.title}"
     )
@@ -33,7 +33,7 @@ class IssueMailer < ApplicationMailer
     @threshold = Setting.instance.burst_threshold
 
     mail(
-      from: ENV.fetch('SPLAT_EMAIL_FROM', 'splat@example.com'),
+      from: ENV.fetch("SPLAT_EMAIL_FROM", "splat@example.com"),
       to: admin_emails,
       subject: "[Splat] Issue burst detected: #{issue.title}"
     )
@@ -42,15 +42,15 @@ class IssueMailer < ApplicationMailer
   private
 
   def admin_emails
-    ENV.fetch('SPLAT_ADMIN_EMAILS', 'admin@example.com').split(',').map(&:strip)
+    ENV.fetch("SPLAT_ADMIN_EMAILS", "admin@example.com").split(",").map(&:strip)
   end
 
   def mailer_host
-    ENV.fetch('SPLAT_HOST', 'localhost:3000')
+    ENV.fetch("SPLAT_HOST", "localhost:3000")
   end
 
   def default_url_options
-    { host: mailer_host }
+    {host: mailer_host}
   end
 
   def generate_issue_url(issue)
@@ -60,7 +60,7 @@ class IssueMailer < ApplicationMailer
       project_issue_url(issue.project.slug, issue, host: mailer_host)
     else
       # Generate a placeholder URL for previews
-      "#{mailer_host}/projects/#{issue.project&.slug || 'preview-project'}/issues/#{issue.id || 'preview-issue'}"
+      "#{mailer_host}/projects/#{issue.project&.slug || "preview-project"}/issues/#{issue.id || "preview-issue"}"
     end
   end
 end

@@ -8,7 +8,7 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
   end
 
   test "preserves double-quoted identifiers so different tables stay distinct" do
-    users    = normalize('SELECT "users".* FROM "users" WHERE "users"."id" = 42')
+    users = normalize('SELECT "users".* FROM "users" WHERE "users"."id" = 42')
     products = normalize('SELECT "products".* FROM "products" WHERE "products"."id" = 42')
     refute_equal users, products
     assert_includes users, '"users"'
@@ -38,7 +38,7 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     breadcrumbs = 5.times.map do |i|
       {
         "category" => "sql.active_record",
-        "data" => { "sql" => %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1) }
+        "data" => {"sql" => %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1)}
       }
     end
 
@@ -65,10 +65,10 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
 
   test "different tables with same shape do not collapse into one pattern" do
     breadcrumbs = [
-      { "category" => "sql.active_record", "data" => { "sql" => 'SELECT "regions".* FROM "regions" WHERE "regions"."id" = 1' } },
-      { "category" => "sql.active_record", "data" => { "sql" => 'SELECT "regions".* FROM "regions" WHERE "regions"."id" = 2' } },
-      { "category" => "sql.active_record", "data" => { "sql" => 'SELECT "languages".* FROM "languages" WHERE "languages"."id" = 1' } },
-      { "category" => "sql.active_record", "data" => { "sql" => 'SELECT "products".* FROM "products" WHERE "products"."id" = 1' } }
+      {"category" => "sql.active_record", "data" => {"sql" => 'SELECT "regions".* FROM "regions" WHERE "regions"."id" = 1'}},
+      {"category" => "sql.active_record", "data" => {"sql" => 'SELECT "regions".* FROM "regions" WHERE "regions"."id" = 2'}},
+      {"category" => "sql.active_record", "data" => {"sql" => 'SELECT "languages".* FROM "languages" WHERE "languages"."id" = 1'}},
+      {"category" => "sql.active_record", "data" => {"sql" => 'SELECT "products".* FROM "products" WHERE "products"."id" = 1'}}
     ]
 
     result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs)

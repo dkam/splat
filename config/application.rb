@@ -7,16 +7,25 @@ require "rails/all"
 Bundler.require(*Rails.groups)
 
 module Splat
+  # The VERSION file is a build artifact (gitignored) stamped by bin/build and
+  # CI, so it's absent in local dev — hence the "dev" fallback. Resolve relative
+  # to this file: Rails.root isn't set yet at parse time (the Application class
+  # below hasn't been defined), so Rails.root.join here would be nil.
   VERSION = begin
-    File.read(Rails.root.join("VERSION")).strip
+    File.read(File.expand_path("../VERSION", __dir__)).strip
   rescue
-    "unknown"
+    "dev"
   end
 
   class Application < Rails::Application
-    config.secret_key_base = ENV.fetch('SECRET_KEY_BASE') do
-      raise "SECRET_KEY_BASE environment variable is required but not set. Please 
-  set it in your .env file or environment."
+    # Production must supply a real secret. In development/test Rails falls
+    # back to a generated local secret (tmp/local_secret.txt), so CI tooling
+    # and `bin/rails` work without the env var being set.
+    if Rails.env.production?
+      config.secret_key_base = ENV.fetch("SECRET_KEY_BASE") do
+        raise "SECRET_KEY_BASE environment variable is required but not set. " \
+              "Set it in your .env file or environment."
+      end
     end
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.1
@@ -36,20 +45,20 @@ module Splat
 
     # Email configuration using environment variables
     config.action_mailer.default_url_options = {
-      host: ENV.fetch('SPLAT_HOST', 'localhost'),
-      port: ENV.fetch('SPLAT_PORT', 3000)
+      host: ENV.fetch("SPLAT_HOST", "localhost"),
+      port: ENV.fetch("SPLAT_PORT", 3000)
     }
 
     # Configure SMTP settings using environment variables
     config.action_mailer.delivery_method = :smtp
     config.action_mailer.smtp_settings = {
-      address: ENV.fetch('SMTP_ADDRESS', 'localhost'),
-      port: ENV.fetch('SMTP_PORT', 587),
-      domain: ENV.fetch('SMTP_DOMAIN', 'localhost'),
-      user_name: ENV.fetch('SMTP_USER_NAME', nil),
-      password: ENV.fetch('SMTP_PASSWORD', nil),
-      authentication: ENV.fetch('SMTP_AUTHENTICATION', 'plain').to_sym,
-      enable_starttls_auto: ENV.fetch('SMTP_STARTTLS_AUTO', 'true') == 'true',
+      address: ENV.fetch("SMTP_ADDRESS", "localhost"),
+      port: ENV.fetch("SMTP_PORT", 587),
+      domain: ENV.fetch("SMTP_DOMAIN", "localhost"),
+      user_name: ENV.fetch("SMTP_USER_NAME", nil),
+      password: ENV.fetch("SMTP_PASSWORD", nil),
+      authentication: ENV.fetch("SMTP_AUTHENTICATION", "plain").to_sym,
+      enable_starttls_auto: ENV.fetch("SMTP_STARTTLS_AUTO", "true") == "true",
       openssl_verify_mode: OpenSSL::SSL::VERIFY_PEER
     }
 

@@ -1,0 +1,17 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "80e9eb213a9b5cffa2a15acfc78d6e61418c6005fcc8657da4281cd9add0e063",
+      "note": "False positive: interpolates an internal table name and a sanitized LIMIT (n.to_i); the qualifier is bound via placeholders. No user input reaches the SQL string."
+    },
+    {
+      "fingerprint": "980bd2d53e75fd3cd047169f651b03c50440f3018f038d93b2c58b7efec0efe9",
+      "note": "False positive: interpolates the COLUMNS constant (fixed identifier list); all values are passed as bind parameters."
+    },
+    {
+      "fingerprint": "b6ae8554338b1c4255831d30fbf14567fb17814065639c165774db8d85874eea",
+      "note": "False positive: builds a static INSERT ... ON CONFLICT with a fixed column list; all values are passed as bind parameters."
+    }
+  ],
+  "brakeman_version": "8.0.5"
+}

@@ -52,7 +52,7 @@ module SplatAuthorization
 
       # Wildcard handling (e.g., *.booko.au should match app.booko.au)
       if allowed.start_with?("*.")
-        base_domain = allowed[2..-1]  # Remove "*."
+        base_domain = allowed[2..]  # Remove "*."
         return domain_matches?(domain, base_domain)
       end
 

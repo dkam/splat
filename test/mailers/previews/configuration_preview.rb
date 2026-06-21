@@ -3,7 +3,7 @@
 class ConfigurationPreview < ActionMailer::Preview
   def custom_from_address
     # Set custom from address for preview
-    ENV['SPLAT_EMAIL_FROM'] = 'alerts@splat-monitoring.com'
+    ENV["SPLAT_EMAIL_FROM"] = "alerts@splat-monitoring.com"
 
     project = Project.new(name: "Test Project", slug: "test")
     issue = Issue.new(
@@ -18,14 +18,14 @@ class ConfigurationPreview < ActionMailer::Preview
     email = IssueMailer.new_issue(issue)
 
     # Clean up environment variable
-    ENV.delete('SPLAT_EMAIL_FROM')
+    ENV.delete("SPLAT_EMAIL_FROM")
 
     email
   end
 
   def custom_admin_emails
     # Set custom admin emails for preview
-    ENV['SPLAT_ADMIN_EMAILS'] = 'dev-team@example.com, ops@example.com'
+    ENV["SPLAT_ADMIN_EMAILS"] = "dev-team@example.com, ops@example.com"
 
     project = Project.new(name: "Multi-team Project", slug: "multi-team")
     issue = Issue.new(
@@ -40,14 +40,14 @@ class ConfigurationPreview < ActionMailer::Preview
     email = IssueMailer.new_issue(issue)
 
     # Clean up environment variable
-    ENV.delete('SPLAT_ADMIN_EMAILS')
+    ENV.delete("SPLAT_ADMIN_EMAILS")
 
     email
   end
 
   def custom_host_configuration
     # Set custom host for preview
-    ENV['SPLAT_HOST'] = 'splat.company.com:443'
+    ENV["SPLAT_HOST"] = "splat.company.com:443"
 
     project = Project.new(name: "Company Production", slug: "company-prod")
     issue = Issue.new(
@@ -62,7 +62,7 @@ class ConfigurationPreview < ActionMailer::Preview
     email = IssueMailer.issue_reopened(issue)
 
     # Clean up environment variable
-    ENV.delete('SPLAT_HOST')
+    ENV.delete("SPLAT_HOST")
 
     email
   end

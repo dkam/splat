@@ -30,25 +30,23 @@ Rails.application.config.after_initialize do
   # db base class => [target mode pragma value, mode name for the pragma + log]
   # 1 = FULL, 2 = INCREMENTAL
   targets = {
-    ApplicationRecord        => [1, "FULL"],
-    IssuesEventsRecord       => [2, "INCREMENTAL"],
-    TransactionsSpansRecord  => [2, "INCREMENTAL"]
+    ApplicationRecord => [1, "FULL"],
+    IssuesEventsRecord => [2, "INCREMENTAL"],
+    TransactionsSpansRecord => [2, "INCREMENTAL"]
   }
 
   targets.each do |base, (mode_value, mode_name)|
-    begin
-      next unless base.connection_pool.db_config.adapter.to_s.include?("sqlite3")
+    next unless base.connection_pool.db_config.adapter.to_s.include?("sqlite3")
 
-      conn = base.connection
-      next if conn.select_value("PRAGMA auto_vacuum").to_i == mode_value
+    conn = base.connection
+    next if conn.select_value("PRAGMA auto_vacuum").to_i == mode_value
 
-      conn.execute("PRAGMA auto_vacuum = #{mode_name}")
-      conn.execute("VACUUM")
-      Rails.logger.info("[sqlite_auto_vacuum] set auto_vacuum=#{mode_name} on #{base.name}")
-    rescue => e
-      # DB may not exist yet (db:create), be mid-migration, or be unreachable
-      # during asset precompile. Safe to skip — the next boot retries.
-      Rails.logger.warn("[sqlite_auto_vacuum] skipped #{base.name}: #{e.class}: #{e.message}")
-    end
+    conn.execute("PRAGMA auto_vacuum = #{mode_name}")
+    conn.execute("VACUUM")
+    Rails.logger.info("[sqlite_auto_vacuum] set auto_vacuum=#{mode_name} on #{base.name}")
+  rescue => e
+    # DB may not exist yet (db:create), be mid-migration, or be unreachable
+    # during asset precompile. Safe to skip — the next boot retries.
+    Rails.logger.warn("[sqlite_auto_vacuum] skipped #{base.name}: #{e.class}: #{e.message}")
   end
 end

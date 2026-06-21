@@ -6,7 +6,7 @@ Rails.application.routes.draw do
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Sentry ingestion endpoint
-  namespace :api, defaults: { format: :json } do
+  namespace :api, defaults: {format: :json} do
     post ":project_id/envelope", to: "envelopes#create"
   end
 
@@ -49,9 +49,9 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :transactions, only: [:show], constraints: { id: /\d+/ }
+    resources :transactions, only: [:show], constraints: {id: /\d+/}
   end
-  
+
   # MCP (Model Context Protocol) endpoint
   namespace :mcp, defaults: {format: "json"} do
     match "/", to: "mcp#handle_mcp_request", via: [:get, :post, :put, :patch, :delete, :head, :options]

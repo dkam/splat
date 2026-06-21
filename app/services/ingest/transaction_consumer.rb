@@ -45,7 +45,7 @@ module Ingest
         # record_sighting! is idempotent; safe to run after the inner commit.
         if transaction&.release.present?
           Release.record_sighting!(project: project, version: transaction.release,
-                                   timestamp: transaction.timestamp, kind: :transaction)
+            timestamp: transaction.timestamp, kind: :transaction)
         end
 
         outcomes << [job, :ok]
@@ -64,14 +64,14 @@ module Ingest
       trace_ctx = payload.dig("contexts", "trace") || {}
 
       root_start = parse_ts(payload["start_timestamp"])
-      root_end   = parse_ts(payload["timestamp"]) || transaction.timestamp
-      root_id    = trace_ctx["span_id"] || SecureRandom.hex(8)
-      trace_id   = trace_ctx["trace_id"] || SecureRandom.hex(16)
+      root_end = parse_ts(payload["timestamp"]) || transaction.timestamp
+      root_id = trace_ctx["span_id"] || SecureRandom.hex(8)
+      trace_id = trace_ctx["trace_id"] || SecureRandom.hex(16)
 
       children = raw_spans.sort_by { |s| s["start_timestamp"].to_f }
       children = children.first(Transaction::SPAN_CAP) if children.size > Transaction::SPAN_CAP
 
-      parent_depth = { root_id => 0 }
+      parent_depth = {root_id => 0}
       rows = []
       rows << build_span_row(
         project_id: transaction.project_id,
@@ -114,7 +114,7 @@ module Ingest
     # .to_json double-encodes (Rails re-serializes through the json type),
     # so Span#tags/#data would read back a JSON String instead of a Hash.
     def build_span_row(project_id:, trace_id:, transaction_id:, span_id:, parent_span_id:,
-                       start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
+      start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
       {
         project_id: project_id,
         trace_id: trace_id,
@@ -136,10 +136,14 @@ module Ingest
 
     def parse_ts(value)
       t = case value
-          when Numeric then Time.at(value)
-          when String  then (Time.parse(value) rescue nil)
-          when Time    then value
-          end
+      when Numeric then Time.at(value)
+      when String then begin
+        Time.parse(value)
+      rescue
+        nil
+      end
+      when Time then value
+      end
       t&.utc
     end
   end

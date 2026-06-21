@@ -14,7 +14,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
       items: [
         {
           type: "event",
-          payload: { "message" => "Test error", "platform" => "ruby" }
+          payload: {"message" => "Test error", "platform" => "ruby"}
         }
       ]
     )
@@ -83,7 +83,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
   test "rejects envelope without event_id in either payload or headers" do
     envelope_body = build_envelope_with_empty_headers(
       items: [
-        { type: "event", payload: { "message" => "Test" } }
+        {type: "event", payload: {"message" => "Test"}}
       ]
     )
 
@@ -108,7 +108,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     envelope_body = build_envelope(
       event_id: "abc123",
       items: [
-        { payload: { "message" => "Test" } } # Missing type
+        {payload: {"message" => "Test"}} # Missing type
       ]
     )
 
@@ -131,7 +131,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
       event_id: "abc123",
       sent_at: "2025-10-18T08:00:00Z",
       items: [
-        { type: "event", payload: { "message" => "Test" } }
+        {type: "event", payload: {"message" => "Test"}}
       ]
     )
 
@@ -154,8 +154,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     envelope_body = build_envelope(
       event_id: "abc123",
       items: [
-        { type: "event", payload: { "message" => "Error 1" } },
-        { type: "event", payload: { "message" => "Error 2" } }
+        {type: "event", payload: {"message" => "Error 1"}},
+        {type: "event", payload: {"message" => "Error 2"}}
       ]
     )
 
@@ -167,8 +167,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     envelope_body = build_envelope(
       event_id: "abc123",
       items: [
-        { type: "unknown_type", payload: { "data" => "something" } },
-        { type: "event", payload: { "message" => "Test" } }
+        {type: "unknown_type", payload: {"data" => "something"}},
+        {type: "event", payload: {"message" => "Test"}}
       ]
     )
 
@@ -253,8 +253,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     envelope_body = build_envelope(
       event_id: "abc123",
       items: [
-        { type: "attachment", payload: "binary data here" },
-        { type: "event", payload: { "message" => "Test" } }
+        {type: "attachment", payload: "binary data here"},
+        {type: "event", payload: {"message" => "Test"}}
       ]
     )
 
@@ -266,8 +266,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     envelope_body = build_envelope(
       event_id: "abc123",
       items: [
-        { type: "session", payload: { "session_id" => "xyz" } },
-        { type: "event", payload: { "message" => "Test" } }
+        {type: "session", payload: {"session_id" => "xyz"}},
+        {type: "event", payload: {"message" => "Test"}}
       ]
     )
 
@@ -288,7 +288,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     payload_json = payload_dict.to_json
     payload_length = payload_json.bytesize
 
-    envelope_header = { "event_id" => payload_dict["event_id"] }
+    envelope_header = {"event_id" => payload_dict["event_id"]}
     item_header = {
       "type" => "event",
       "length" => payload_length
@@ -305,7 +305,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
   end
 
   test "skips attachment with binary data using length field" do
-    envelope_header = { "event_id" => "abc123" }
+    envelope_header = {"event_id" => "abc123"}
 
     # Binary attachment that should be skipped
     attachment_payload = "This is some log content.\nEnd."
@@ -328,7 +328,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
       envelope_header.to_json,
       attachment_header.to_json,
       attachment_payload,
-      { "type" => "event", "length" => event_payload.to_json.bytesize }.to_json,
+      {"type" => "event", "length" => event_payload.to_json.bytesize}.to_json,
       event_payload.to_json
     ].join("\n")
 
@@ -337,10 +337,10 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
   end
 
   test "skips log items with length field" do
-    envelope_header = { "event_id" => "abc123" }
+    envelope_header = {"event_id" => "abc123"}
 
     # Log item to skip
-    log_payload = { "msg" => "some log content" }.to_json
+    log_payload = {"msg" => "some log content"}.to_json
     log_header = {
       "type" => "log",
       "length" => log_payload.bytesize
@@ -358,7 +358,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
       envelope_header.to_json,
       log_header.to_json,
       log_payload,
-      { "type" => "event", "length" => event_payload.to_json.bytesize }.to_json,
+      {"type" => "event", "length" => event_payload.to_json.bytesize}.to_json,
       event_payload.to_json
     ].join("\n")
 
@@ -383,11 +383,11 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
 
     envelope_body = [
       "{}",  # Empty headers
-      '{"type":"event","length":' + event_json.bytesize.to_s + '}',
+      '{"type":"event","length":' + event_json.bytesize.to_s + "}",
       event_json,
       '{"type":"event"}',
       '{"message":"Invalid event - no event_id","platform":"ruby"}',
-      '{"type":"transaction","length":' + transaction_json.bytesize.to_s + '}',
+      '{"type":"transaction","length":' + transaction_json.bytesize.to_s + "}",
       transaction_json
     ].join("\n")
 
@@ -418,7 +418,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     envelope_body = build_envelope(
       event_id: "abc123",
       items: [
-        { type: "event", payload: { "message" => "Test" } }
+        {type: "event", payload: {"message" => "Test"}}
       ]
     )
 
@@ -434,7 +434,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
           type: "event",
           payload: {
             "message" => "Test\u0000message",
-            "tags" => { "\u0000bad_key" => "value" },
+            "tags" => {"\u0000bad_key" => "value"},
             "platform" => "ruby",
             "timestamp" => "2025-10-18T08:00:00Z"
           }
@@ -476,7 +476,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     headers["event_id"] = event_id if event_id
     headers["sent_at"] = sent_at if sent_at
 
-    lines = [ headers.to_json ]
+    lines = [headers.to_json]
 
     items.each do |item|
       item_headers = {}
@@ -492,7 +492,7 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
   end
 
   def build_envelope_with_empty_headers(items: [])
-    lines = [ "{}" ]  # Empty headers
+    lines = ["{}"]  # Empty headers
 
     items.each do |item|
       item_headers = {}

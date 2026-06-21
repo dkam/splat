@@ -106,8 +106,7 @@ class OidcAuthController < ApplicationController
       start_new_session_for(user_info, sid: claims[:sid])
 
       redirect_to session.delete(:return_to) || root_path,
-                  notice: "Welcome #{user_info[:name]}!"
-
+        notice: "Welcome #{user_info[:name]}!"
     rescue OpenIDConnect::Exception, Rack::OAuth2::Client::Error => e
       Rails.logger.error "OIDC token exchange error: #{e.class.name} - #{e.message}"
       redirect_to login_path, alert: "Authentication failed. Please try again."
@@ -133,7 +132,7 @@ class OidcAuthController < ApplicationController
 
     unless logout_token.present?
       Rails.logger.warn "Backchannel logout missing logout_token"
-      render json: { error: "Missing logout_token" }, status: :bad_request
+      render json: {error: "Missing logout_token"}, status: :bad_request
       return
     end
 
@@ -145,17 +144,16 @@ class OidcAuthController < ApplicationController
       # Process logout
       sessions_terminated = process_backchannel_logout(claims)
 
-      Rails.logger.info "Backchannel logout processed: sid=#{claims['sid']}, sessions_terminated=#{sessions_terminated}"
+      Rails.logger.info "Backchannel logout processed: sid=#{claims["sid"]}, sessions_terminated=#{sessions_terminated}"
 
       render json: {
         status: "ok",
         sessions_terminated: sessions_terminated
       }
-
     rescue => e
       Rails.logger.error "Backchannel logout error: #{e.class.name} - #{e.message}"
       Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
-      render json: { error: "Internal server error" }, status: :internal_server_error
+      render json: {error: "Internal server error"}, status: :internal_server_error
     end
   end
 
@@ -164,7 +162,7 @@ class OidcAuthController < ApplicationController
   def oidc_client
     @oidc_client ||= begin
       # Strip .well-known/openid-configuration if present (discover! adds it automatically)
-      issuer_url = ENV.fetch("OIDC_DISCOVERY_URL").sub(%r{/?\.well-known/openid-configuration/?$}, '').chomp('/')
+      issuer_url = ENV.fetch("OIDC_DISCOVERY_URL").sub(%r{/?\.well-known/openid-configuration/?$}, "").chomp("/")
 
       # Use gem's discovery directly
       discovery = OpenIDConnect::Discovery::Provider::Config.discover!(issuer_url)
@@ -189,9 +187,9 @@ class OidcAuthController < ApplicationController
         identifier: ENV.fetch("OIDC_CLIENT_ID"),
         secret: ENV.fetch("OIDC_CLIENT_SECRET"),
         redirect_uri: "#{request.base_url}/auth/callback",
-        authorization_endpoint: config['authorization_endpoint'],
-        token_endpoint: config['token_endpoint'],
-        userinfo_endpoint: config['userinfo_endpoint']
+        authorization_endpoint: config["authorization_endpoint"],
+        token_endpoint: config["token_endpoint"],
+        userinfo_endpoint: config["userinfo_endpoint"]
       )
     end
   end
@@ -205,15 +203,15 @@ class OidcAuthController < ApplicationController
     decoded_jwt = JWT.decode(id_token, nil, false).first
 
     {
-      email: decoded_jwt['email'],
-      name: decoded_jwt['name'],
-      preferred_username: decoded_jwt['preferred_username'],
-      sub: decoded_jwt['sub'],
-      iss: decoded_jwt['iss'],
-      aud: decoded_jwt['aud'],
-      exp: decoded_jwt['exp'],
-      iat: decoded_jwt['iat'],
-      sid: decoded_jwt['sid']  # Session ID for backchannel logout
+      email: decoded_jwt["email"],
+      name: decoded_jwt["name"],
+      preferred_username: decoded_jwt["preferred_username"],
+      sub: decoded_jwt["sub"],
+      iss: decoded_jwt["iss"],
+      aud: decoded_jwt["aud"],
+      exp: decoded_jwt["exp"],
+      iat: decoded_jwt["iat"],
+      sid: decoded_jwt["sid"]  # Session ID for backchannel logout
     }
   end
 
@@ -226,8 +224,8 @@ class OidcAuthController < ApplicationController
 
   def oidc_configured?
     ENV["OIDC_CLIENT_ID"].present? &&
-    ENV["OIDC_CLIENT_SECRET"].present? &&
-    ENV["OIDC_DISCOVERY_URL"].present?
+      ENV["OIDC_CLIENT_SECRET"].present? &&
+      ENV["OIDC_DISCOVERY_URL"].present?
   end
 
   # Backchannel logout validation methods
@@ -239,24 +237,24 @@ class OidcAuthController < ApplicationController
     required_claims = %w[iss sub aud iat jti events]
     missing = required_claims - unverified.keys
     if missing.any?
-      Rails.logger.warn "Backchannel logout missing claims: #{missing.join(', ')}"
-      render json: { error: "Missing claims: #{missing.join(', ')}" }, status: :bad_request
+      Rails.logger.warn "Backchannel logout missing claims: #{missing.join(", ")}"
+      render json: {error: "Missing claims: #{missing.join(", ")}"}, status: :bad_request
       return nil
     end
 
     # Verify logout event type
-    unless unverified.dig('events', 'http://schemas.openid.net/event/backchannel-logout')
-      Rails.logger.warn "Backchannel logout invalid event type: #{unverified['events']}"
-      render json: { error: "Invalid logout event type" }, status: :bad_request
+    unless unverified.dig("events", "http://schemas.openid.net/event/backchannel-logout")
+      Rails.logger.warn "Backchannel logout invalid event type: #{unverified["events"]}"
+      render json: {error: "Invalid logout event type"}, status: :bad_request
       return nil
     end
 
     # Prevent replay attacks
-    jti = unverified['jti']
+    jti = unverified["jti"]
     cache_key = "logout_token:#{jti}"
     if Rails.cache.exist?(cache_key)
       Rails.logger.warn "Backchannel logout replay attempt: jti=#{jti}"
-      render json: { error: "Replay attack detected" }, status: :bad_request
+      render json: {error: "Replay attack detected"}, status: :bad_request
       return nil
     end
 
@@ -270,65 +268,63 @@ class OidcAuthController < ApplicationController
     decoded
   rescue JWT::DecodeError => e
     Rails.logger.error "Backchannel logout JWT decode error: #{e.message}"
-    render json: { error: "Invalid logout token format" }, status: :bad_request
+    render json: {error: "Invalid logout token format"}, status: :bad_request
     nil
   end
 
   def verify_logout_token_signature(logout_token, unverified_claims)
-    issuer = unverified_claims['iss']
-    audience = unverified_claims['aud']
+    issuer = unverified_claims["iss"]
+    audience = unverified_claims["aud"]
 
     # Verify issuer and audience match our configuration
-    expected_issuer = ENV.fetch('OIDC_ISSUER', extract_issuer_from_discovery)
-    expected_audience = ENV.fetch('OIDC_CLIENT_ID')
+    expected_issuer = ENV.fetch("OIDC_ISSUER", extract_issuer_from_discovery)
+    expected_audience = ENV.fetch("OIDC_CLIENT_ID")
 
     if issuer != expected_issuer
       Rails.logger.warn "Backchannel logout invalid issuer: #{issuer} (expected #{expected_issuer})"
-      render json: { error: "Invalid issuer" }, status: :bad_request
+      render json: {error: "Invalid issuer"}, status: :bad_request
       return nil
     end
 
     if Array(audience).none? { |aud| aud == expected_audience }
       Rails.logger.warn "Backchannel logout invalid audience: #{audience} (expected #{expected_audience})"
-      render json: { error: "Invalid audience" }, status: :bad_request
+      render json: {error: "Invalid audience"}, status: :bad_request
       return nil
     end
 
     # Fetch JWKS and verify signature
     jwks = fetch_jwks
-    decoded = JWT.decode(logout_token, nil, true, {
+    JWT.decode(logout_token, nil, true, {
       iss: expected_issuer,
       aud: expected_audience,
       verify_iss: true,
       verify_aud: true,
       verify_iat: true,
-      algorithm: 'RS256',
+      algorithm: "RS256",
       jwks: jwks
     }).first
-
-    decoded
   rescue JWT::VerificationError => e
     Rails.logger.error "Backchannel logout signature verification failed: #{e.message}"
-    render json: { error: "Invalid signature" }, status: :bad_request
+    render json: {error: "Invalid signature"}, status: :bad_request
     nil
   rescue JWT::ExpiredSignature => e
     Rails.logger.error "Backchannel logout token expired: #{e.message}"
-    render json: { error: "Token expired" }, status: :bad_request
+    render json: {error: "Token expired"}, status: :bad_request
     nil
   rescue => e
     Rails.logger.error "Backchannel logout token verification error: #{e.class.name} - #{e.message}"
-    render json: { error: "Token verification failed" }, status: :bad_request
+    render json: {error: "Token verification failed"}, status: :bad_request
     nil
   end
 
   def fetch_jwks
     @jwks ||= begin
-      discovery_url = ENV.fetch('OIDC_DISCOVERY_URL')
+      discovery_url = ENV.fetch("OIDC_DISCOVERY_URL")
       uri = URI.parse(discovery_url)
       discovery_response = Net::HTTP.get(uri)
       discovery = JSON.parse(discovery_response)
 
-      jwks_uri = discovery['jwks_uri']
+      jwks_uri = discovery["jwks_uri"]
       unless jwks_uri
         Rails.logger.error "OIDC discovery missing jwks_uri"
         raise "OIDC provider does not support JWKS"
@@ -337,7 +333,7 @@ class OidcAuthController < ApplicationController
       jwks_response = Net::HTTP.get(URI.parse(jwks_uri))
       jwks_data = JSON.parse(jwks_response)
 
-      JWT::JWK::Set.new(jwks_data['keys'])
+      JWT::JWK::Set.new(jwks_data["keys"])
     rescue => e
       Rails.logger.error "Failed to fetch JWKS: #{e.message}"
       raise "Unable to fetch JWKS from OIDC provider"
@@ -346,20 +342,20 @@ class OidcAuthController < ApplicationController
 
   def extract_issuer_from_discovery
     # Extract issuer from discovery URL if not explicitly configured
-    discovery_url = ENV.fetch('OIDC_DISCOVERY_URL')
-    discovery_url.sub(%r{/?\.well-known/openid-configuration/?$}, '').chomp('/')
+    discovery_url = ENV.fetch("OIDC_DISCOVERY_URL")
+    discovery_url.sub(%r{/?\.well-known/openid-configuration/?$}, "").chomp("/")
   end
 
   def process_backchannel_logout(claims)
     terminated_count = 0
 
-    if claims['sid']
+    oidc_sessions = if claims["sid"]
       # Terminate specific session by session ID
-      oidc_sessions = [OidcSession.find_by_oidc_sid(claims['sid'])].compact
+      [OidcSession.find_by_oidc_sid(claims["sid"])].compact
     else
       # If no sid, terminate all sessions for this user (by subject)
       # This is less common but supported by the spec
-      oidc_sessions = OidcSession.find_by_user_email(current_user_email_for_sub(claims['sub']))
+      OidcSession.find_by_user_email(current_user_email_for_sub(claims["sub"]))
     end
 
     oidc_sessions.each do |oidc_session|

@@ -8,7 +8,7 @@
 
 class CompressionDictionarySeeder
   DICTS = [
-    { segment: "events", file: "events.dict" }
+    {segment: "events", file: "events.dict"}
   ].freeze
 
   # Compression::IssuesEventsDict is scoped to the issues_events DB so the
@@ -29,12 +29,12 @@ class CompressionDictionarySeeder
       end
 
       Compression::IssuesEventsDict.create!(
-        segment:      spec[:segment],
-        version:      1,
-        dict:         File.binread(path),
-        trained_at:   File.mtime(path),
+        segment: spec[:segment],
+        version: 1,
+        dict: File.binread(path),
+        trained_at: File.mtime(path),
         sample_count: nil,
-        active:       true
+        active: true
       )
 
       Rails.logger.info "[seeds:compression_dictionaries] #{spec[:segment]} v1 (#{File.size(path)} bytes) seeded"

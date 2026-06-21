@@ -10,7 +10,7 @@ class PromoteQuerySummaryToTransactionColumns < ActiveRecord::Migration[8.1]
   def change
     add_column :transactions, :query_count, :integer, default: 0, null: false
     add_column :transactions, :has_n_plus_one, :boolean, default: false, null: false
-    add_index  :transactions, [:project_id, :has_n_plus_one], where: "has_n_plus_one = TRUE",
-               name: "index_transactions_with_n_plus_one"
+    add_index :transactions, [:project_id, :has_n_plus_one], where: "has_n_plus_one = TRUE",
+      name: "index_transactions_with_n_plus_one"
   end
 end

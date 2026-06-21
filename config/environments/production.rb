@@ -38,7 +38,6 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-  
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   config.assume_ssl = true
 
@@ -52,13 +51,13 @@ Rails.application.configure do
   # Prefix every line with an ISO8601 millisecond timestamp so docker log
   # output is timestamped even without `docker logs --timestamps`. Built on
   # SimpleFormatter so TaggedLogging.new can extend it with its tagging module.
-  config.log_tags = [ :request_id ]
+  config.log_tags = [:request_id]
   timestamped_formatter = Class.new(ActiveSupport::Logger::SimpleFormatter) do
     def call(severity, time, _progname, msg)
       "[#{time.utc.iso8601(3)}] #{severity.ljust(5)} #{msg}\n"
     end
   end
-  base_logger = Logger.new(STDOUT)
+  base_logger = Logger.new($stdout)
   base_logger.formatter = timestamped_formatter.new
   config.logger = ActiveSupport::TaggedLogging.new(base_logger)
 
@@ -80,17 +79,17 @@ Rails.application.configure do
   # in the repo. Email stays inert until SMTP_ADDRESS is set; ntfy is independent.
   # raise_delivery_errors=false keeps a missing/misconfigured relay from failing
   # alert delivery (errors are logged, not raised).
-  config.action_mailer.default_url_options = { host: ENV.fetch("SPLAT_HOST", "localhost:3000") }
-  config.action_mailer.perform_deliveries  = ENV["SMTP_ADDRESS"].present?
+  config.action_mailer.default_url_options = {host: ENV.fetch("SPLAT_HOST", "localhost:3000")}
+  config.action_mailer.perform_deliveries = ENV["SMTP_ADDRESS"].present?
   config.action_mailer.raise_delivery_errors = false
   config.action_mailer.delivery_method = :smtp
   config.action_mailer.smtp_settings = {
-    address:              ENV.fetch("SMTP_ADDRESS", "localhost"),
-    port:                 ENV.fetch("SMTP_PORT", 587).to_i,
-    domain:               ENV["SMTP_DOMAIN"],
-    user_name:            ENV["SMTP_USER_NAME"],
-    password:             ENV["SMTP_PASSWORD"],
-    authentication:       ENV.fetch("SMTP_AUTHENTICATION", "plain").to_sym,
+    address: ENV.fetch("SMTP_ADDRESS", "localhost"),
+    port: ENV.fetch("SMTP_PORT", 587).to_i,
+    domain: ENV["SMTP_DOMAIN"],
+    user_name: ENV["SMTP_USER_NAME"],
+    password: ENV["SMTP_PASSWORD"],
+    authentication: ENV.fetch("SMTP_AUTHENTICATION", "plain").to_sym,
     enable_starttls_auto: ENV.fetch("SMTP_ENABLE_STARTTLS_AUTO", "true") == "true"
   }.compact
 
@@ -102,7 +101,7 @@ Rails.application.configure do
   config.active_record.dump_schema_after_migration = false
 
   # Only use :id for inspections in production.
-  config.active_record.attributes_for_inspect = [ :id ]
+  config.active_record.attributes_for_inspect = [:id]
 
   # Enable DNS rebinding protection and other `Host` header attacks.
   # config.hosts = [

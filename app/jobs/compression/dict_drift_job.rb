@@ -11,7 +11,7 @@ module Compression
       segments.each do |segment|
         Ingest::Tuber.put(
           Ingest::Tuber::MAINTENANCE_TUBE,
-          { "class" => "Compression::DictTrainingJob", "args" => [segment] },
+          {"class" => "Compression::DictTrainingJob", "args" => [segment]},
           con: 1
         )
       end

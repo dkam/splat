@@ -94,7 +94,7 @@ class ProjectsController < ApplicationController
     # cached separately keyed off the visible issue set. Cheap when warm.
     issue_ids = @recent_issues.map(&:id)
     @issue_sparklines = Rails.cache.fetch(
-      "project_#{@project.id}_issue_sparklines/#{issue_ids.sort.join(',')}",
+      "project_#{@project.id}_issue_sparklines/#{issue_ids.sort.join(",")}",
       expires_in: SHOW_METRICS_TTL
     ) do
       Event.event_counts_by_bucket(

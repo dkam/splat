@@ -16,7 +16,7 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
   end
 
   test "retires hourly_stats older than the histogram cutoff, keeps recent" do
-    old_hour    = (Time.current - 600.days).beginning_of_hour
+    old_hour = (Time.current - 600.days).beginning_of_hour
     recent_hour = (Time.current - 10.days).beginning_of_hour
     insert_hourly_stat(hour_bucket: old_hour)
     insert_hourly_stat(hour_bucket: recent_hour)
@@ -35,7 +35,7 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
     old = (Time.current - 200.days)
     # Created via the model so the live bump writes the long-lived aggregates.
     Transaction.create!(project: @project, transaction_id: SecureRandom.uuid,
-                        transaction_name: "GET /x", timestamp: old, duration: 100)
+      transaction_name: "GET /x", timestamp: old, duration: 100)
 
     Maintenance::RetentionJob.new.perform
 

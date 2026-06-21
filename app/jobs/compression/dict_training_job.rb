@@ -15,15 +15,15 @@ module Compression
   # Promotion threshold is intentionally conservative — we want fewer,
   # better versions, not version churn.
   class DictTrainingJob
-    DB                = :issues_events
-    TABLE             = "events"
-    SAMPLES           = 10_000
-    LOOKBACK_DAYS     = 7
-    DICT_MAX_BYTES    = 112_640      # zstd default
-    GAIN_THRESHOLD    = 0.10          # 10% — bottom of the user-stated range
+    DB = :issues_events
+    TABLE = "events"
+    SAMPLES = 10_000
+    LOOKBACK_DAYS = 7
+    DICT_MAX_BYTES = 112_640      # zstd default
+    GAIN_THRESHOLD = 0.10          # 10% — bottom of the user-stated range
 
     def perform(segment)
-      db    = DB
+      db = DB
       table = TABLE
       raise ArgumentError, "DictTrainingJob: segment must start with 'events:'" \
         unless segment.to_s == table || segment.to_s.start_with?("#{table}:")
@@ -39,20 +39,20 @@ module Compression
       candidate_bytes = train_candidate(train_set)
 
       current = active_dict_bytes(db, segment)
-      current_size   = compressed_size(eval_set, current)
+      current_size = compressed_size(eval_set, current)
       candidate_size = compressed_size(eval_set, candidate_bytes)
-      gain           = current.nil? ? 1.0 : (current_size - candidate_size).to_f / current_size
+      gain = current.nil? ? 1.0 : (current_size - candidate_size).to_f / current_size
 
       promoted_version = nil
       if gain > GAIN_THRESHOLD
         promoted_version = promote!(db: db, segment: segment, bytes: candidate_bytes,
-                                     baseline_ratio: candidate_size.to_f / eval_set.sum(&:bytesize))
+          baseline_ratio: candidate_size.to_f / eval_set.sum(&:bytesize))
       end
 
       log_run(
         db: db, segment: segment,
         samples: samples.size,
-        current_ratio:   current ?      current_size.to_f / eval_set.sum(&:bytesize) : nil,
+        current_ratio: current ? current_size.to_f / eval_set.sum(&:bytesize) : nil,
         candidate_ratio: candidate_size.to_f / eval_set.sum(&:bytesize),
         gain: gain,
         promoted: !promoted_version.nil?,
@@ -94,7 +94,7 @@ module Compression
       value = value_parts.join(":")
       case kind
       when "platform" then ["AND platform = ?", value]
-      when "project"  then ["AND project_id = ?", Integer(value)]
+      when "project" then ["AND project_id = ?", Integer(value)]
       else
         raise ArgumentError, "DictTrainingJob: unknown segment qualifier #{kind.inspect} in #{segment.inspect}"
       end
@@ -112,7 +112,7 @@ module Compression
         samples.each_with_index { |bytes, i| File.binwrite(File.join(dir, "sample-#{i}.json"), bytes) }
         out_path = File.join(dir, "candidate.dict")
         cmd = ["zstd", "--train", "--maxdict=#{DICT_MAX_BYTES}",
-               "-o", out_path, *Dir[File.join(dir, "sample-*.json")]]
+          "-o", out_path, *Dir[File.join(dir, "sample-*.json")]]
         out, status = Open3.capture2e(*cmd)
         raise "zstd --train failed: #{out}" unless status.success?
         File.binread(out_path)
@@ -138,13 +138,13 @@ module Compression
         klass.where(segment: segment, active: true).update_all(active: false)
         next_version = (klass.where(segment: segment).maximum(:version) || 0) + 1
         klass.create!(
-          segment:        segment,
-          version:        next_version,
-          dict:           bytes,
-          trained_at:     Time.current,
-          sample_count:   SAMPLES,
+          segment: segment,
+          version: next_version,
+          dict: bytes,
+          trained_at: Time.current,
+          sample_count: SAMPLES,
           baseline_ratio: baseline_ratio,
-          active:         true
+          active: true
         )
         Compression::DictStore.invalidate_active(db, segment)
         next_version
@@ -152,7 +152,7 @@ module Compression
     end
 
     def log_run(db:, segment:, samples:, current_ratio: nil, candidate_ratio: nil, gain: nil,
-                promoted: false, promoted_to_version: nil, notes: nil)
+      promoted: false, promoted_to_version: nil, notes: nil)
       Compression::IssuesEventsDict.connection.exec_insert(
         <<~SQL,
           INSERT INTO dictionary_training_runs
@@ -161,7 +161,7 @@ module Compression
         SQL
         "DictTrainingJob log",
         [segment, Time.current, samples, current_ratio, candidate_ratio, gain,
-         promoted ? 1 : 0, promoted_to_version, notes]
+          promoted ? 1 : 0, promoted_to_version, notes]
       )
     end
   end

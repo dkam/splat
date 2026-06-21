@@ -36,10 +36,10 @@ module Compression
         entry = cache[segment]
         if entry.nil? || entry[:expires_at] <= monotonic_now
           value = model(db).where(segment: segment, active: true).order(version: :desc).limit(1).pick(:id) || :missing
-          entry = { value: value, expires_at: monotonic_now + ACTIVE_TTL }
+          entry = {value: value, expires_at: monotonic_now + ACTIVE_TTL}
           cache[segment] = entry
         end
-        entry[:value] == :missing ? nil : entry[:value]
+        (entry[:value] == :missing) ? nil : entry[:value]
       end
 
       # Invalidate the active-id cache for a segment. Called after the
@@ -79,7 +79,7 @@ module Compression
         row = model(db).find_by(id: id)
         return nil unless row
         Entry.new(row.id, row.segment, row.version, row.dict,
-                  Zstd::CDict.new(row.dict), Zstd::DDict.new(row.dict))
+          Zstd::CDict.new(row.dict), Zstd::DDict.new(row.dict))
       end
     end
   end

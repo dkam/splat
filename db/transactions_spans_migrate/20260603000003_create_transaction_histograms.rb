@@ -14,9 +14,9 @@ class CreateTransactionHistograms < ActiveRecord::Migration[8.1]
     # ON CONFLICT target for the hourly rollup INSERT … SELECT … GROUP BY.
     # Rebuilding the same hour overwrites the row.
     add_index :transaction_histograms,
-              [:project_id, :transaction_name, :environment, :hour_bucket, :bucket_index],
-              unique: true,
-              name: "index_transaction_histograms_unique"
+      [:project_id, :transaction_name, :environment, :hour_bucket, :bucket_index],
+      unique: true,
+      name: "index_transaction_histograms_unique"
 
     # Global rollups (across all endpoints) walk the hour_bucket range.
     add_index :transaction_histograms, [:project_id, :hour_bucket]

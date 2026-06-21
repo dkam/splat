@@ -6,9 +6,9 @@ class Issue < IssuesEventsRecord
   belongs_to :project
   has_many :events, dependent: :nullify
 
-  enum :status, { open: 0, resolved: 1, ignored: 2 }
+  enum :status, {open: 0, resolved: 1, ignored: 2}
 
-  validates :fingerprint, presence: true, uniqueness: { scope: :project_id }
+  validates :fingerprint, presence: true, uniqueness: {scope: :project_id}
   validates :title, presence: true
 
   scope :recent, -> { order(last_seen: :desc) }
@@ -107,7 +107,7 @@ class Issue < IssuesEventsRecord
       alert_burst!(rate: rate, setting: setting) if rate >= setting.burst_threshold
       true
     end
-  rescue StandardError => e
+  rescue => e
     # Best-effort: an alerting hiccup must never fail (and retry) ingest.
     Rails.logger.warn("Issue#maybe_alert_burst! failed for issue=#{id}: #{e.class} #{e.message}")
   end
@@ -152,7 +152,7 @@ class Issue < IssuesEventsRecord
 
   def email_notifications_enabled?
     # Only send email in production, or when explicitly enabled elsewhere.
-    Rails.env.production? || ENV['SPLAT_EMAIL_NOTIFICATIONS'] == 'true'
+    Rails.env.production? || ENV["SPLAT_EMAIL_NOTIFICATIONS"] == "true"
   end
 
   def was_reopened?

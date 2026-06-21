@@ -16,9 +16,9 @@ class NtfyNotifier
   VALID_PRIORITIES = %w[min low default high max].freeze
 
   EVENTS = {
-    "new_issue"      => { subject: "New Issue",      tags: %w[boom warning] },
-    "issue_reopened" => { subject: "Issue Reopened", tags: %w[recycle warning] },
-    "issue_burst"    => { subject: "Issue Burst",    tags: %w[fire warning] }
+    "new_issue" => {subject: "New Issue", tags: %w[boom warning]},
+    "issue_reopened" => {subject: "Issue Reopened", tags: %w[recycle warning]},
+    "issue_burst" => {subject: "Issue Burst", tags: %w[fire warning]}
   }.freeze
 
   class << self
@@ -55,9 +55,9 @@ class NtfyNotifier
 
       headers = {
         "Content-Type" => "text/plain; charset=utf-8",
-        "Title"        => "[Splat] #{meta[:subject]}: #{issue.title}",
-        "Priority"     => setting.ntfy_priority.presence || "default",
-        "Tags"         => meta[:tags].join(",")
+        "Title" => "[Splat] #{meta[:subject]}: #{issue.title}",
+        "Priority" => setting.ntfy_priority.presence || "default",
+        "Tags" => meta[:tags].join(",")
       }
       click = issue_url(issue)
       headers["Click"] = click if click.present?
@@ -101,14 +101,14 @@ class NtfyNotifier
       header =
         case event_key
         when "issue_reopened" then "Reopened (#{issue.count} events total)"
-        when "issue_burst"    then "Bursting at #{issue.last_burst_rate.to_i} events/hr"
+        when "issue_burst" then "Bursting at #{issue.last_burst_rate.to_i} events/hr"
         else "New issue"
         end
 
       [
         header,
         "Project: #{issue.project&.name}",
-        "Type: #{issue.exception_type || 'n/a'}",
+        "Type: #{issue.exception_type || "n/a"}",
         issue.title.to_s
       ].compact_blank.join("\n")
     end
@@ -123,7 +123,7 @@ class NtfyNotifier
       Rails.application.routes.url_helpers.project_issue_url(
         issue.project.slug, issue, host: host, protocol: scheme
       )
-    rescue StandardError
+    rescue
       nil
     end
   end

@@ -15,9 +15,9 @@ module Mcp
 
     test "search_slow_transactions passes valid tags hash through to Transaction.slow" do
       with_slow_stub do |captured|
-        call_tool("search_slow_transactions", { "tags" => { "user_id" => "123", "feature" => "x" } })
+        call_tool("search_slow_transactions", {"tags" => {"user_id" => "123", "feature" => "x"}})
         assert_response :success
-        assert_equal({ "user_id" => "123", "feature" => "x" }, captured[:kwargs][:tags])
+        assert_equal({"user_id" => "123", "feature" => "x"}, captured[:kwargs][:tags])
       end
     end
 
@@ -31,7 +31,7 @@ module Mcp
 
     test "search_slow_transactions rejects invalid tag key without hitting Transaction.slow" do
       with_slow_stub do |captured|
-        call_tool("search_slow_transactions", { "tags" => { "bad key" => "x" } })
+        call_tool("search_slow_transactions", {"tags" => {"bad key" => "x"}})
         assert_response :success
         refute captured[:called], "Transaction.slow should not be called for invalid tag keys"
         body = JSON.parse(response.body)
@@ -42,15 +42,15 @@ module Mcp
 
     test "search_slow_transactions coerces non-string tag values to strings" do
       with_slow_stub do |captured|
-        call_tool("search_slow_transactions", { "tags" => { "user_id" => 42 } })
+        call_tool("search_slow_transactions", {"tags" => {"user_id" => 42}})
         assert_response :success
-        assert_equal({ "user_id" => "42" }, captured[:kwargs][:tags])
+        assert_equal({"user_id" => "42"}, captured[:kwargs][:tags])
       end
     end
 
     test "search_slow_transactions ignores empty tags hash" do
       with_slow_stub do |captured|
-        call_tool("search_slow_transactions", { "tags" => {} })
+        call_tool("search_slow_transactions", {"tags" => {}})
         assert_response :success
         assert_nil captured[:kwargs][:tags]
       end
@@ -78,7 +78,7 @@ module Mcp
         payload: nil
       )
 
-      call_tool("get_issue_events", { "issue_id" => issue.id })
+      call_tool("get_issue_events", {"issue_id" => issue.id})
       assert_response :success
       body = JSON.parse(response.body)
       text = body.dig("result", "content", 0, "text").to_s
@@ -90,22 +90,22 @@ module Mcp
 
     def call_tool(name, arguments)
       post "/mcp",
-           params: {
-             jsonrpc: "2.0",
-             id: 1,
-             method: "tools/call",
-             params: { name: name, arguments: arguments }
-           }.to_json,
-           headers: {
-             "Content-Type" => "application/json",
-             "Authorization" => "Bearer #{@token}"
-           }
+        params: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {name: name, arguments: arguments}
+        }.to_json,
+        headers: {
+          "Content-Type" => "application/json",
+          "Authorization" => "Bearer #{@token}"
+        }
     end
 
     # Swap Transaction.slow for a recording stub for the block.
     # Captured hash exposes { called:, kwargs: } so tests can assert on inputs.
     def with_slow_stub
-      captured = { called: false, kwargs: nil }
+      captured = {called: false, kwargs: nil}
       klass = Transaction.singleton_class
       original = Transaction.method(:slow)
       klass.send(:define_method, :slow) do |**kwargs|

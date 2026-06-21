@@ -13,8 +13,8 @@ module Compression
     class << self
       def choose(db:, table:, project_id: nil, platform: nil)
         segments = []
-        segments << "#{table}:project:#{project_id}"  if project_id
-        segments << "#{table}:platform:#{platform}"   if platform
+        segments << "#{table}:project:#{project_id}" if project_id
+        segments << "#{table}:platform:#{platform}" if platform
         segments << table.to_s
         segments.each do |segment|
           id = DictStore.active_id(db, segment)

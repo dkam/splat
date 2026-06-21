@@ -31,10 +31,10 @@ module Ingest
     def register_jobs
       schedule.each do |name, entry|
         klass = entry.fetch("class")
-        tube  = entry.fetch("tube")
+        tube = entry.fetch("tube")
         sched = entry.fetch("schedule")
-        con   = entry["con"]
-        idp   = entry["idp"]
+        con = entry["con"]
+        idp = entry["idp"]
 
         register(name, klass, tube, sched, con, idp)
       end
@@ -47,7 +47,7 @@ module Ingest
     # slow run into a flood after the next worker restart.
     def register(name, klass, tube, sched, con, idp)
       method, expr = sched.split(/\s+/, 2)
-      payload = { class: klass, args: [] }
+      payload = {class: klass, args: []}
       put_opts = {}
       put_opts[:con] = con unless con.nil?
       put_opts[:idp] = idp unless idp.nil?
@@ -56,14 +56,14 @@ module Ingest
         tags = []
         tags << "con:#{con}" if con
         tags << "idp:#{idp}" if idp
-        suffix = tags.empty? ? "" : " (#{tags.join(', ')})"
+        suffix = tags.empty? ? "" : " (#{tags.join(", ")})"
         Rails.logger.info "[Scheduler] firing #{name} → #{tube}#{suffix}"
         Tuber.put(tube, payload, **put_opts)
       }
 
       case method
       when "every" then @rufus.every(expr, &handler)
-      when "cron"  then @rufus.cron(expr, &handler)
+      when "cron" then @rufus.cron(expr, &handler)
       else raise "unknown schedule method '#{method}' for #{name}"
       end
     end

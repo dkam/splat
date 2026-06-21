@@ -214,14 +214,14 @@ class EventTest < ActiveSupport::TestCase
     base_payload = {
       "exception" => {
         "values" => [
-          { "type" => "RuntimeError", "value" => "boom",
-            "stacktrace" => { "frames" => [ { "filename" => "a.rb", "lineno" => 1 } ] } }
+          {"type" => "RuntimeError", "value" => "boom",
+           "stacktrace" => {"frames" => [{"filename" => "a.rb", "lineno" => 1}]}}
         ]
       },
       "platform" => "ruby"
     }
 
-    first  = Event.create_from_sentry_payload!("ev-old", base_payload.merge("timestamp" => "2025-10-18T08:00:00Z"), @project)
+    first = Event.create_from_sentry_payload!("ev-old", base_payload.merge("timestamp" => "2025-10-18T08:00:00Z"), @project)
     second = Event.create_from_sentry_payload!("ev-new", base_payload.merge("timestamp" => "2025-10-18T12:00:00Z"), @project)
 
     assert_equal first.issue_id, second.issue_id
@@ -232,8 +232,8 @@ class EventTest < ActiveSupport::TestCase
     base_payload = {
       "exception" => {
         "values" => [
-          { "type" => "RuntimeError", "value" => "boom",
-            "stacktrace" => { "frames" => [ { "filename" => "a.rb", "lineno" => 1 } ] } }
+          {"type" => "RuntimeError", "value" => "boom",
+           "stacktrace" => {"frames" => [{"filename" => "a.rb", "lineno" => 1}]}}
         ]
       },
       "platform" => "ruby"

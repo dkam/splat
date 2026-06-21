@@ -58,9 +58,9 @@ class TransactionTest < ActiveSupport::TestCase
       "start_timestamp" => "2025-10-18T08:00:00.000Z",
       "timestamp" => "2025-10-18T08:00:01.500Z",
       "measurements" => {
-        "db" => { "value" => 800 },
-        "view" => { "value" => 200 },
-        "custom_metric" => { "value" => 42 }
+        "db" => {"value" => 800},
+        "view" => {"value" => 200},
+        "custom_metric" => {"value" => 42}
       }
     }
 
@@ -70,9 +70,9 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal 800, transaction.db_time
     assert_equal 200, transaction.view_time
     expected_measurements = {
-      "db" => { "value" => 800 },
-      "view" => { "value" => 200 },
-      "custom_metric" => { "value" => 42 },
+      "db" => {"value" => 800},
+      "view" => {"value" => 200},
+      "custom_metric" => {"value" => 42},
       "span_extracted_db_time" => 800,
       "span_extracted_view_time" => 200
     }
@@ -110,7 +110,7 @@ class TransactionTest < ActiveSupport::TestCase
 
     transaction = Transaction.create_from_sentry_payload!("txn-tags", payload, @project)
 
-    assert_equal({ "locale" => "en", "region" => "us-west-2", "feature_flag" => "new_ui" }, transaction.tags)
+    assert_equal({"locale" => "en", "region" => "us-west-2", "feature_flag" => "new_ui"}, transaction.tags)
     assert_equal "en", transaction.tag("locale")
     assert_equal "us-west-2", transaction.tag("region")
   end
@@ -237,8 +237,8 @@ class TransactionTest < ActiveSupport::TestCase
       timestamp: Time.current,
       duration: 100,
       measurements: {
-        "custom_timer" => { "value" => 42.5 },
-        "memory_used" => { "value" => 1024 }
+        "custom_timer" => {"value" => 42.5},
+        "memory_used" => {"value" => 1024}
       }
     )
 
