@@ -69,6 +69,10 @@ class IssueMailerTest < ActionMailer::TestCase
   test "includes issue URL in email body" do
     email = IssueMailer.new_issue(@issue)
 
-    assert_match "http://localhost:3030/projects", email.body.encoded
+    # Derive the host the same way IssueMailer does (SPLAT_HOST embeds host:port,
+    # default "localhost:3000") so this passes regardless of the env — local dev
+    # loads .env (localhost:3030); CI leaves it unset.
+    host = ENV.fetch("SPLAT_HOST", "localhost:3000")
+    assert_match "http://#{host}/projects", email.body.encoded
   end
 end
