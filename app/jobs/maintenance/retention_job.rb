@@ -19,19 +19,23 @@ module Maintenance
         transactions_cutoff: setting.transactions_data_cutoff_date,
         spans_cutoff:        setting.spans_data_cutoff_date
       )
-      histograms_deleted = retire_histograms(setting.histograms_cutoff_date)
+      # Both aggregate tables share the long histogram retention clock — they're
+      # the historical performance record that outlives the raw transactions.
+      histograms_deleted   = retire_histograms(setting.histograms_cutoff_date)
+      hourly_stats_deleted = retire_hourly_stats(setting.histograms_cutoff_date)
 
       vacuum(IssuesEventsRecord)
       vacuum(TransactionsSpansRecord)
 
       duration = (Time.current - start).round(2)
-      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, histograms:#{histograms_deleted}"
+      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}"
       {
         duration:           duration,
         events_deleted:     events_deleted,
         transactions_deleted: transactions_deleted,
         spans_deleted:      spans_deleted,
-        histograms_deleted: histograms_deleted
+        histograms_deleted: histograms_deleted,
+        hourly_stats_deleted: hourly_stats_deleted
       }
     end
 
@@ -71,6 +75,10 @@ module Maintenance
       batched_delete_all(TransactionHistogramAR.where("hour_bucket < ?", cutoff))
     end
 
+    def retire_hourly_stats(cutoff)
+      batched_delete_all(TransactionHourlyStatAR.where("hour_bucket < ?", cutoff))
+    end
+
     def vacuum(base)
       base.connection.execute("PRAGMA incremental_vacuum(#{VACUUM_PAGES})")
     rescue ActiveRecord::StatementInvalid => e
@@ -96,10 +104,14 @@ module Maintenance
       end
     end
 
-    # transaction_histograms has no Ruby model — define a thin one inline so
+    # The aggregate tables have no Ruby model — define thin ones inline so
     # we can use scope chaining + in_batches.
     class TransactionHistogramAR < TransactionsSpansRecord
       self.table_name = "transaction_histograms"
+    end
+
+    class TransactionHourlyStatAR < TransactionsSpansRecord
+      self.table_name = "transaction_hourly_stats"
     end
   end
 end

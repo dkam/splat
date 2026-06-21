@@ -72,7 +72,9 @@
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Raw row retention</h2>
       <p class="text-gray-600 dark:text-gray-400 mb-4">
         How long to keep the raw events / transactions / spans before the daily retention job deletes them.
-        Aggregate trend data lives in <code>transaction_histograms</code> and is retained separately below.
+        Aggregate performance history (latency distribution in <code>transaction_histograms</code> plus
+        per-hour counts/averages/N+1/errors in <code>transaction_hourly_stats</code>) is retained separately
+        below, so endpoint stats and the latency/volume charts keep working long after the raw rows age out.
       </p>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -104,12 +106,12 @@
         </div>
 
         <div>
-          <%= form.label :histograms_retention_days, "Keep histograms", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.label :histograms_retention_days, "Keep aggregates", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="flex items-center space-x-2">
             <%= form.number_field :histograms_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 540 days — they're tiny.</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Histograms + hourly stats. Default: 540 days — they're tiny.</p>
         </div>
       </div>
     </div>
@@ -190,4 +192,23 @@
       <%= form.submit "Update Settings", class: "bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white font-bold py-2 px-6 rounded focus:outline-none focus:shadow-outline" %>
     </div>
   <% end %>
+
+  <h2 class="font-bold text-2xl text-gray-900 dark:text-gray-100 mb-4 mt-8">About</h2>
+
+  <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+    <dl class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Splat</dt>
+        <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100"><%= Splat::VERSION %></dd>
+      </div>
+      <div>
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Rails</dt>
+        <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100"><%= Rails.version %></dd>
+      </div>
+      <div>
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Ruby</dt>
+        <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100"><%= RUBY_VERSION %></dd>
+      </div>
+    </dl>
+  </div>
 </div>

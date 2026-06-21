@@ -29,6 +29,15 @@ class Transaction < TransactionsSpansRecord
   scope :last_24_hours, -> { where("timestamp > ?", 24.hours.ago) }
   scope :last_7_days,  -> { where("timestamp > ?", 7.days.ago) }
 
+  # Live-hour aggregates: the duration histogram (percentiles) and the scalar
+  # stats (count/avg/max/min/queries/N+1/errors). Runs inside the insert's
+  # transaction so the row and its aggregate deltas commit atomically, and only
+  # on a genuine insert (find_or_initialize skips the save on redelivery), so it
+  # can't double-count. The hourly rollup later overwrites each hour with an
+  # authoritative recount. Lives on the model — not the ingest consumer — so
+  # every create path (console, backfills, tests) keeps the aggregates correct.
+  after_create :record_hourly_aggregates
+
   after_create_commit :broadcast_transaction_update
 
   def self.create_from_sentry_payload!(transaction_id, payload, project)
@@ -165,6 +174,11 @@ class Transaction < TransactionsSpansRecord
   def action     = controller_action&.split("#")&.last
 
   private
+
+  def record_hourly_aggregates
+    Analytics::Histogram.bump_many!([[project_id, transaction_name, environment, timestamp, duration]])
+    Analytics::HourlyStats.bump_many!([self])
+  end
 
   def broadcast_transaction_update
     cache_key = "transaction_broadcast_#{project_id}"

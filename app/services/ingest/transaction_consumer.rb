@@ -23,24 +23,21 @@ module Ingest
           next
         end
 
-        # One TransactionsSpansRecord transaction per job: the parent row,
-        # its spans, and the histogram bump commit together or not at all.
+        # One TransactionsSpansRecord transaction per job: the parent row, its
+        # spans, and the live-hour aggregate bumps commit together or not at all.
         # On rollback the rescue below marks the job :retry so beanstalkd
         # redelivers it. create_from_sentry_payload! is idempotent on
-        # (project_id, transaction_id): a redelivery finds the existing row
-        # and skips the save, leaving previously_new_record? false. We gate
-        # spans + the histogram bump on that so redelivery can't insert
-        # duplicate spans (no unique index) or double-count the live hour.
+        # (project_id, transaction_id): a redelivery finds the existing row and
+        # skips the save, leaving previously_new_record? false. The aggregate
+        # bumps fire from Transaction's after_create (only on a real insert), so
+        # redelivery can't double-count; we still gate spans on
+        # previously_new_record? since they have no unique index.
         transaction = nil
         TransactionsSpansRecord.transaction do
           transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
           if transaction.previously_new_record?
             span_rows = build_span_rows(transaction, args["payload"])
             Span.insert_all!(span_rows) if span_rows.any?
-            Analytics::Histogram.bump_many!([
-              [transaction.project_id, transaction.transaction_name, transaction.environment,
-               transaction.timestamp, transaction.duration]
-            ])
           end
         end
 

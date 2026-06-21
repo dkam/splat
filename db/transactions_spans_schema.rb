@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_20_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_21_000001) do
   create_table "spans", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.json "data"
@@ -41,6 +41,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_20_000002) do
     t.string "transaction_name", null: false
     t.index ["project_id", "hour_bucket"], name: "index_transaction_histograms_on_project_id_and_hour_bucket"
     t.index ["project_id", "transaction_name", "environment", "hour_bucket", "bucket_index"], name: "index_transaction_histograms_unique", unique: true
+  end
+
+  create_table "transaction_hourly_stats", force: :cascade do |t|
+    t.bigint "count", default: 0, null: false
+    t.bigint "db_time_count", default: 0, null: false
+    t.string "environment", default: "", null: false
+    t.bigint "error_count", default: 0, null: false
+    t.datetime "hour_bucket", null: false
+    t.integer "max_duration", default: 0, null: false
+    t.integer "max_query_count", default: 0, null: false
+    t.integer "min_duration"
+    t.bigint "n_plus_one_count", default: 0, null: false
+    t.bigint "project_id", null: false
+    t.bigint "sum_db_time", default: 0, null: false
+    t.bigint "sum_duration", default: 0, null: false
+    t.bigint "sum_query_count", default: 0, null: false
+    t.bigint "sum_view_time", default: 0, null: false
+    t.string "transaction_name", null: false
+    t.bigint "view_time_count", default: 0, null: false
+    t.index ["project_id", "hour_bucket"], name: "index_transaction_hourly_stats_on_project_id_and_hour_bucket"
+    t.index ["project_id", "transaction_name", "environment", "hour_bucket"], name: "index_transaction_hourly_stats_unique", unique: true
   end
 
   create_table "transactions", force: :cascade do |t|

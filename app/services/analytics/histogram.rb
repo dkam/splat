@@ -38,6 +38,24 @@ module Analytics
       "CAST((strftime('%s', #{column}) - #{origin_epoch.to_i}) / #{bucket_seconds.to_i} AS INTEGER)"
     end
 
+    # Reduce a {bucket_index => count} distribution to a percentile (ms) via the
+    # bucket midpoint. This is THE percentile algorithm — the per-bucket time
+    # series (sparklines) and the release-filtered raw fallback both call it, and
+    # it matches the cumulative-threshold logic SQL'd inline in
+    # TransactionAnalytics#merged_percentiles (cum >= q*total → index_to_ms), so
+    # every percentile in the app is computed one way. `q` is a fraction (0.95).
+    def percentile_from_counts(counts_by_index, q)
+      total = counts_by_index.values.sum
+      return nil if total.zero?
+      threshold = q * total
+      cum = 0
+      counts_by_index.keys.sort.each do |idx|
+        cum += counts_by_index[idx]
+        return index_to_ms(idx) if cum >= threshold
+      end
+      nil
+    end
+
     # Hour-aligned UTC datetime for a timestamp. Used as hour_bucket value.
     def hour_bucket(timestamp)
       t = timestamp.is_a?(Time) ? timestamp : Time.parse(timestamp.to_s)
