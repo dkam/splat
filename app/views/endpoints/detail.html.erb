@@ -31,6 +31,19 @@
     </div>
   </div>
 
+  <!-- P95 Latency Trend -->
+  <% if @p95_sparkline.any? { |v| v.to_i > 0 } %>
+    <div class="mb-6 bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-sm font-medium text-gray-600 dark:text-gray-400">P95 Latency Trend</div>
+        <div class="text-xs text-gray-400 dark:text-gray-500"><%= @p95_sparkline.size %> buckets · <%= @time_range %></div>
+      </div>
+      <div class="text-blue-600 dark:text-blue-400 [&>svg]:w-full [&>svg]:h-16">
+        <%= sparkline(@p95_sparkline, width: 600, height: 64, title: "P95 duration per bucket over #{@time_range}") %>
+      </div>
+    </div>
+  <% end %>
+
   <!-- Filters -->
   <div class="mb-6 bg-white dark:bg-gray-900 rounded-lg shadow p-4 border border-gray-200 dark:border-gray-800">
     <%= form_with url: detail_project_endpoints_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>

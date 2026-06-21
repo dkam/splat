@@ -69,6 +69,13 @@ class EndpointsController < ApplicationController
     @p95_duration = stats["p95_duration"]&.to_f&.round || 0
     @p99_duration = stats["p99_duration"]&.to_f&.round || 0
 
+    @p95_sparkline = Transaction.p95_by_bucket(
+      transaction_names: [@endpoint],
+      time_range: time_range,
+      buckets: 24,
+      project_id: @project.id
+    )[@endpoint] || []
+
     transactions = @project.transactions
       .where(transaction_name: @endpoint)
       .where("timestamp > ?", time_ago)
