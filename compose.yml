@@ -40,6 +40,7 @@ x-common-variables: &common-variables
 
 x-splat-worker: &splat-worker
   image: ghcr.io/dkam/splat:latest
+  pull_policy: always   # :latest moves on each release; always re-pull on `up -d`
   restart: unless-stopped
   depends_on:
     - tuber
@@ -56,6 +57,7 @@ x-splat-worker: &splat-worker
 services:
   web:
     image: ghcr.io/dkam/splat:latest
+    pull_policy: always   # :latest moves on each release; always re-pull on `up -d`
     environment:
       <<: *common-variables
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}

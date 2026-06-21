@@ -138,6 +138,7 @@ x-common-variables: &common-variables
 services:
   splat:
     image: ghcr.io/dkam/splat:latest
+    pull_policy: always   # :latest moves on each release; always re-pull on `up -d`
     environment:
       <<: *common-variables
     volumes:
@@ -156,6 +157,7 @@ services:
 
   jobs:
     image: ghcr.io/dkam/splat:latest
+    pull_policy: always   # :latest moves on each release; always re-pull on `up -d`
     environment:
       <<: *common-variables
       SOLID_QUEUE_THREADS: 3
