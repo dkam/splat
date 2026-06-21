@@ -43,10 +43,11 @@ module Splat
     # config.time_zone = "Central Time (US & Canada)"
     # config.eager_load_paths << Rails.root.join("extras")
 
-    # Email configuration using environment variables
+    # SPLAT_HOST is the host authority — a hostname or "host:port" (e.g.
+    # "splat.booko.info" or "localhost:3000"), not a full URI. The whole app
+    # reads it this way; there is no separate port var.
     config.action_mailer.default_url_options = {
-      host: ENV.fetch("SPLAT_HOST", "localhost"),
-      port: ENV.fetch("SPLAT_PORT", 3000)
+      host: ENV.fetch("SPLAT_HOST", "localhost:3000")
     }
 
     # Configure SMTP settings using environment variables
