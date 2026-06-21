@@ -6,17 +6,12 @@ require "rails/all"
 # you've limited to :test, :development, or :production.
 Bundler.require(*Rails.groups)
 
-module Splat
-  # The VERSION file is a build artifact (gitignored) stamped by bin/build and
-  # CI, so it's absent in local dev — hence the "dev" fallback. Resolve relative
-  # to this file: Rails.root isn't set yet at parse time (the Application class
-  # below hasn't been defined), so Rails.root.join here would be nil.
-  VERSION = begin
-    File.read(File.expand_path("../VERSION", __dir__)).strip
-  rescue
-    "dev"
-  end
+# Define Splat::VERSION before the Application class and all initializers, so
+# config/initializers/sentry.rb can reference it at load time (initializers load
+# alphabetically, and "sentry" sorts before "version").
+require_relative "version"
 
+module Splat
   class Application < Rails::Application
     # Production must supply a real secret. In development/test Rails falls
     # back to a generated local secret (tmp/local_secret.txt), so CI tooling

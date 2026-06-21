@@ -29,16 +29,10 @@ if ! docker buildx ls | grep -q "multi-builder"; then
     ssh://$AMD_host
 fi
 
-# Version = build timestamp + short commit, e.g. "20260621-143022-g389c428".
-# No tags required — every build is uniquely identified, and Splat::VERSION
-# (which reads this file) shows when the running image was built. VERSION is
-# gitignored: it's a build artifact, regenerated here and in CI.
-if [ -n "$(git status --porcelain)" ]; then
-  echo "WARNING: building from a dirty working tree — the image won't be reproducible from a commit."
-fi
-VERSION="$(date -u +%Y%m%d-%H%M%S)-g$(git rev-parse --short HEAD)"
-echo "$VERSION" > VERSION
-echo "VERSION: $VERSION"
+# Version is the hand-set SemVer constant in config/version.rb. Read it without
+# booting Rails so we can tag the image :vX.Y.Z.
+VERSION=$(ruby -e "require './config/version'; puts Splat::VERSION")
+echo "Building v${VERSION}"
 
 # SQLite is the only flavour now, so we build from main only. Refuse any
 # other branch so we never push an ambiguously-tagged image.
@@ -48,10 +42,8 @@ if [ "$BRANCH" != "main" ]; then
   exit 1
 fi
 
-SHA=$(git rev-parse HEAD)
 echo "Tags:   reg.tbdb.info/splat:latest"
-echo "        reg.tbdb.info/splat:${VERSION}"
-echo "        reg.tbdb.info/splat:${SHA}"
+echo "        reg.tbdb.info/splat:v${VERSION}"
 
 # Use the multi-builder
 docker buildx use multi-builder
@@ -59,6 +51,5 @@ docker buildx use multi-builder
 docker buildx build \
   --platform "$PLATFORMS" \
   -t reg.tbdb.info/splat:latest \
-  -t "reg.tbdb.info/splat:${VERSION}" \
-  -t reg.tbdb.info/splat:${SHA} \
+  -t "reg.tbdb.info/splat:v${VERSION}" \
   --push .

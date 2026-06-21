@@ -13,7 +13,7 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  # Compute the build version once, so both arches and every tag share it.
+  # Read the SemVer constant once so the merge job can tag :vX.Y.Z.
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -22,9 +22,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Compute build version
+      - name: Read version from config/version.rb
         id: version
-        run: echo "version=$(date -u +%Y%m%d-%H%M%S)-g$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(ruby -e "require './config/version'; puts Splat::VERSION")" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
@@ -45,9 +45,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Stamp build version
-        run: echo "${{ needs.prepare.outputs.version }}" > VERSION
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -112,8 +109,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t ${{ env.IMAGE }}:latest \
-            -t ${{ env.IMAGE }}:${{ needs.prepare.outputs.version }} \
-            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:v${{ needs.prepare.outputs.version }} \
             $(printf '${{ env.IMAGE }}@sha256:%s ' *)
 
       - name: Inspect result

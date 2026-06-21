@@ -58,5 +58,3 @@ yarn-debug.log*
 /.vscode
 .DS_Store
 
-# Build artifact: written by bin/build and CI, read by Splat::VERSION
-/VERSION
