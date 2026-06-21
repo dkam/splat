@@ -1,15 +1,13 @@
 Use use the oauth
 
 
-# Splat - Lightweight Error Tracker
+# Splat - Lightweight Error Tracker & APM
 
-Splat is a simple, error tracking service inspired by GlitchTip. It provides a lightweight alternative to Sentry for applications that need fast, reliable error monitoring.
+Splat is a simple error tracker and lightweight backend APM. It's a fast, reliable alternative to Sentry for applications that need error monitoring and performance insight without the overhead.
 
-Splat supports OIDC but defaults to mp authentication.
+Splat supports OIDC but defaults to no authentication. It has an MCP endpoint for your LLM Agents to use. This app was Agentically Engineered, partnering with GLM / Sonnet / Opus. 
 
-It has an MCP endpoint for your LLM Agents to use. Set an environment variable `MCP_AUTH_TOKEN` in order to use it enable it. The end point is /mcp.
-
-A large percentage of Splat was written with GLM / Sonnet / Opus. It was initially an experiement in using SQLite extensively in a write heavy service. It's performed well enough for my use case.
+Initially built as an experiment in using SQLite in a write-heavy service, it's performed well enough for my use case, growing into a capable error tracker and a focused backend APM — exception grouping plus transaction tracing, span waterfalls, latency percentiles, and N+1 detection, all queryable by an LLM over MCP.
 
 I've only used Splat with Rails, but there's no reason it shouldn't work with other systems. Happy to accept pull requests for wider compatibility.
 
@@ -20,15 +18,27 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 **Named after Ruby's splat operator and the satisfying sound of squashing bugs**, Splat accepts Sentry-compatible error events and transaction data via a simple API endpoint, processes them asynchronously, and presents them in a clean, fast web interface.
 
 ### Key Features
-- ✅ **Sentry Protocol Compatible** - Drop-in replacement for Sentry client SDKs
-- ✅ **Single-Tenant Design** - Simple setup, no user management overhead
+
+**Error Tracking**
+- ✅ **Fingerprint Grouping** - Groups events into issues by Sentry fingerprint, or derives one from exception type + location
+- ✅ **Issue Lifecycle** - Open / resolved / ignored, with resolved issues auto-reopening on new events
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
-- ✅ **Performance Monitoring** - Transaction data with lightweight metrics
+- ✅ **Stack Traces & Context** - Full event detail: stack trace, request data, breadcrumbs, user context
+- ✅ **Burst Alerting** - Spike detection with a configurable threshold, plus email and [ntfy.sh](https://ntfy.sh) notifications on new and reopened issues
+- ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
+
+**Performance Monitoring**
+- ✅ **Transaction Tracing** - Request timings with db_time / view_time breakdown
+- ✅ **Span Waterfall** - Per-transaction span tree rendered as a tiered timeline on the transaction detail page
+- ✅ **Latency Percentiles** - p50 / p95 / p99 via DDSketch histograms (±1% error), not naive array indexing
 - ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
 - ✅ **N+1 Query Detection** - Mines `measurements.query_analysis` from the transaction span analyzer, ranks endpoints by N+1 prevalence, exposes a dedicated worklist and an MCP tool
-- ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
-- ✅ **Span Waterfall** - Per-transaction span tree rendered as a tiered timeline on the transaction detail page
-- ✅ **MCP Integration** - Query errors via Claude and AI assistants
+- ✅ **Trends & Comparison** - Hourly pre-aggregates power time-series charts and release-over-release endpoint comparison
+
+**Platform**
+- ✅ **Sentry Protocol Compatible** - Drop-in replacement for Sentry client SDKs
+- ✅ **MCP Integration** - Query errors and performance data via Claude and other AI assistants
+- ✅ **Single-Tenant Design** - Simple setup, no user management overhead
 - ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
 
