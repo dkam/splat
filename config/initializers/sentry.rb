@@ -26,17 +26,24 @@ Rails.application.configure do
 
       config.traces_sampler = lambda do |sampling_context|
         op = sampling_context.dig(:transaction_context, :op).to_s
+        name = sampling_context.dig(:transaction_context, :name).to_s
         parent_sampled = sampling_context[:parent_sampled]
+
+        # The envelope-ingest API is Splat's highest-volume endpoint, so treat it
+        # as part of the processing pipeline (low rate) rather than the web UI —
+        # otherwise the busiest path would dominate splat-splat. Same for the MCP
+        # API and health-check polling. Anything not http.server is a job.
+        ingest_or_job = !op.start_with?("http.server") ||
+          name.start_with?("/api", "Api::", "/mcp", "Mcp::", "/_health", "/up")
 
         if !parent_sampled.nil?
           # Honour an upstream distributed-trace decision when present.
           parent_sampled ? 1.0 : 0.0
-        elsif op.start_with?("http.server")
-          # Inbound requests to Splat's own web UI/API.
-          web_traces_rate
-        else
-          # Background jobs and the ingest/processing pipeline.
+        elsif ingest_or_job
           pipeline_traces_rate
+        else
+          # Splat's own web UI (dashboards, issues, transactions, settings).
+          web_traces_rate
         end
       end
 
