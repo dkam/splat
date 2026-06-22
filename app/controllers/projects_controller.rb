@@ -46,6 +46,9 @@ class ProjectsController < ApplicationController
     @open_issue_count = Rails.cache.fetch("project_#{@project.id}_open_issue_count", expires_in: SHOW_METRICS_TTL) do
       @project.issues.open.count
     end
+    @logs_count_24h = Rails.cache.fetch("project_#{@project.id}_logs_count_24h", expires_in: SHOW_METRICS_TTL) do
+      Log.where(project_id: @project.id).where(timestamp: 24.hours.ago..Time.current).count
+    end
 
     @sparkline_buckets = 24
     @sparkline_range = 24.hours.ago..Time.current

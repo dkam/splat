@@ -6,8 +6,23 @@ module ApplicationHelper
   PROJECT_NAV_SECTIONS = {
     overview: %w[projects],
     errors: %w[issues events],
-    performance: %w[endpoints transactions]
+    performance: %w[endpoints transactions],
+    logs: %w[logs]
   }.freeze
+
+  # Tailwind classes for a log level badge.
+  LOG_LEVEL_BADGE_CLASSES = {
+    "trace" => "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+    "debug" => "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+    "info" => "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+    "warn" => "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+    "error" => "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+    "fatal" => "bg-red-200 text-red-900 dark:bg-red-900/60 dark:text-red-200"
+  }.freeze
+
+  def log_level_badge_class(level)
+    LOG_LEVEL_BADGE_CLASSES.fetch(level.to_s, LOG_LEVEL_BADGE_CLASSES["debug"])
+  end
 
   def project_nav_active?(section)
     return false unless @project

@@ -4,6 +4,7 @@ module Ingest
   module Tuber
     EVENTS_TUBE = "splat.events"
     TRANSACTIONS_TUBE = "splat.transactions"
+    LOGS_TUBE = "splat.logs"
     MAINTENANCE_TUBE = "splat.maintenance"
     ACTIVEJOB_TUBE = "splat.activejob"
 

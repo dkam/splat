@@ -3,30 +3,39 @@ require "open3"
 require "tmpdir"
 
 module Compression
-  # Trains a candidate zstd dictionary for one events segment and promotes
-  # it if it beats the current active dict by more than GAIN_THRESHOLD.
+  # Trains a candidate zstd dictionary for one segment and promotes it if it
+  # beats the current active dict by more than GAIN_THRESHOLD.
   #
-  # Segments all live on the issues_events DB and always target the events
-  # table; the qualifier picks the specialisation:
+  # A segment's first component names the compressed table; the qualifier picks
+  # the specialisation:
   #   "events"                    → events                (table-wide)
   #   "events:platform:python"    → events WHERE platform=python
   #   "events:project:42"         → events WHERE project_id=42
+  #   "logs:platform:sentry"      → logs   WHERE source=sentry
+  # REGISTRY maps the table to the DB it lives on plus the dict model scoped to
+  # that DB — dict bytes and dict_id stay in the same file as the data.
   #
   # Promotion threshold is intentionally conservative — we want fewer,
   # better versions, not version churn.
   class DictTrainingJob
-    DB = :issues_events
-    TABLE = "events"
     SAMPLES = 10_000
     LOOKBACK_DAYS = 7
     DICT_MAX_BYTES = 112_640      # zstd default
     GAIN_THRESHOLD = 0.10          # 10% — bottom of the user-stated range
 
+    # table => { db:, record:, dict:, platform_column: }. platform_column is the
+    # SQL column a "table:platform:X" qualifier filters on (events segment by
+    # SDK platform; logs segment by source).
+    REGISTRY = {
+      "events" => {db: :issues_events, record: "IssuesEventsRecord", dict: "Compression::IssuesEventsDict", platform_column: "platform"},
+      "logs" => {db: :logs, record: "LogsRecord", dict: "Compression::LogsDict", platform_column: "source"}
+    }.freeze
+
     def perform(segment)
-      db = DB
-      table = TABLE
-      raise ArgumentError, "DictTrainingJob: segment must start with 'events:'" \
-        unless segment.to_s == table || segment.to_s.start_with?("#{table}:")
+      table = segment.to_s.split(":").first
+      entry = REGISTRY[table] or
+        raise ArgumentError, "DictTrainingJob: no registry entry for segment #{segment.inspect}"
+      db = entry[:db]
       Rails.logger.info "[DictTrainingJob] training #{segment}"
 
       samples = sample_payloads(db: db, table: table, segment: segment, n: SAMPLES)
@@ -63,7 +72,7 @@ module Compression
     private
 
     def sample_payloads(db:, table:, segment:, n:)
-      conn = IssuesEventsRecord.connection
+      conn = REGISTRY.fetch(table)[:record].constantize.connection
       since = LOOKBACK_DAYS.days.ago
 
       qualifier_sql, qualifier_bind = segment_qualifier(table, segment)
@@ -84,16 +93,19 @@ module Compression
       end.compact
     end
 
-    # Translate a segment qualifier into a SQL fragment + bind.
+    # Translate a segment qualifier into a SQL fragment + bind. The "platform"
+    # kind filters on the table's segmentation column (events → platform,
+    # logs → source); the column name comes from REGISTRY, not user input.
     #   "events"                  → ["", nil]
     #   "events:platform:python"  → ["AND platform = ?", "python"]
     #   "events:project:42"       → ["AND project_id = ?", 42]
+    #   "logs:platform:sentry"    → ["AND source = ?", "sentry"]
     def segment_qualifier(table, segment)
       return ["", nil] if segment.to_s == table
       _, kind, *value_parts = segment.to_s.split(":")
       value = value_parts.join(":")
       case kind
-      when "platform" then ["AND platform = ?", value]
+      when "platform" then ["AND #{REGISTRY.fetch(table)[:platform_column]} = ?", value]
       when "project" then ["AND project_id = ?", Integer(value)]
       else
         raise ArgumentError, "DictTrainingJob: unknown segment qualifier #{kind.inspect} in #{segment.inspect}"
@@ -133,7 +145,7 @@ module Compression
     end
 
     def promote!(db:, segment:, bytes:, baseline_ratio:)
-      klass = Compression::IssuesEventsDict
+      klass = dict_model_for(segment)
       klass.transaction do
         klass.where(segment: segment, active: true).update_all(active: false)
         next_version = (klass.where(segment: segment).maximum(:version) || 0) + 1
@@ -151,9 +163,14 @@ module Compression
       end
     end
 
+    def dict_model_for(segment)
+      table = segment.to_s.split(":").first
+      REGISTRY.fetch(table)[:dict].constantize
+    end
+
     def log_run(db:, segment:, samples:, current_ratio: nil, candidate_ratio: nil, gain: nil,
       promoted: false, promoted_to_version: nil, notes: nil)
-      Compression::IssuesEventsDict.connection.exec_insert(
+      dict_model_for(segment).connection.exec_insert(
         <<~SQL,
           INSERT INTO dictionary_training_runs
             (segment, ran_at, samples, current_ratio, candidate_ratio, gain, promoted, promoted_to_version, notes)

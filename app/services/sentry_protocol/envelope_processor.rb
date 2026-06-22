@@ -41,6 +41,12 @@ module SentryProtocol
 
     private
 
+    # One read per envelope, memoized — process_item consults the ingest
+    # toggles for every item.
+    def setting
+      @setting ||= Setting.instance
+    end
+
     def parse_envelope
       lines = raw_body.split("\n")
       raise InvalidEnvelope, "Empty envelope body" if lines.empty?
@@ -178,6 +184,25 @@ module SentryProtocol
     def process_item(item, envelope_headers)
       item_type = item.dig(:headers, :type)
 
+      # Logs are a batch ("items": [...]) with no single event_id, so handle
+      # them before the event_id guard below.
+      if item_type == "log" || item_type == "otel_log"
+        unless setting.store_logs?
+          Rails.logger.debug "Logs disabled — dropping log item"
+          return
+        end
+        Ingest::Tuber.put(
+          Ingest::Tuber::LOGS_TUBE,
+          {
+            format: "sentry",
+            payload: item[:payload],
+            project_id: project.id
+          }
+        )
+        Rails.logger.debug "Queued log batch"
+        return
+      end
+
       # Get event_id from payload first, then envelope headers, following GlitchTip pattern
       event_id = extract_event_id(item[:payload]) || envelope_headers[:event_id]
 
@@ -188,6 +213,10 @@ module SentryProtocol
 
       case item_type
       when "event"
+        unless setting.store_events?
+          Rails.logger.debug "Events disabled — dropping event #{event_id}"
+          return
+        end
         Ingest::Tuber.put(
           Ingest::Tuber::EVENTS_TUBE,
           {
@@ -198,6 +227,10 @@ module SentryProtocol
         )
         Rails.logger.debug "Queued event processing: #{event_id}"
       when "transaction"
+        unless setting.store_transactions?
+          Rails.logger.debug "Transactions disabled — dropping transaction #{event_id}"
+          return
+        end
         transaction_name = item[:payload].is_a?(Hash) ? item[:payload]["transaction"] : nil
         if housekeeping_transaction?(transaction_name)
           Rails.logger.debug "Skipping housekeeping transaction: #{transaction_name}"

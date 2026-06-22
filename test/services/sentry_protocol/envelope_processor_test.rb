@@ -230,6 +230,69 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     end
   end
 
+  test "queues a log item to the logs tube" do
+    Setting.instance.update!(store_logs: true) # logs default off; opt in for this test
+    envelope_body = build_envelope(
+      items: [
+        {
+          type: "log",
+          payload: {"items" => [{"level" => "info", "body" => "hello", "timestamp" => 1729238400.0}]}
+        }
+      ]
+    )
+
+    put_calls = []
+    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
+    begin
+      assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
+    ensure
+      Ingest::Tuber.singleton_class.remove_method(:put)
+    end
+
+    logs_puts = put_calls.select { |args, _| args.first == Ingest::Tuber::LOGS_TUBE }
+    assert_equal 1, logs_puts.size
+    assert_equal "sentry", logs_puts.first[0][1][:format]
+  end
+
+  test "drops log items when store_logs is disabled" do
+    Setting.instance.update!(store_logs: false)
+    envelope_body = build_envelope(
+      items: [{type: "log", payload: {"items" => [{"level" => "info", "body" => "x"}]}}]
+    )
+
+    put_calls = []
+    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
+    begin
+      assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
+    ensure
+      Ingest::Tuber.singleton_class.remove_method(:put)
+    end
+
+    assert_equal [], put_calls.select { |args, _| args.first == Ingest::Tuber::LOGS_TUBE }
+  ensure
+    Setting.instance.update!(store_logs: true)
+  end
+
+  test "drops event items when store_events is disabled" do
+    Setting.instance.update!(store_events: false)
+    envelope_body = build_envelope(
+      event_id: "evt-disabled",
+      items: [{type: "event", payload: {"message" => "x", "platform" => "ruby"}}]
+    )
+
+    put_calls = []
+    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
+    begin
+      assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
+    ensure
+      Ingest::Tuber.singleton_class.remove_method(:put)
+    end
+
+    assert_equal [], put_calls.select { |args, _| args.first == Ingest::Tuber::EVENTS_TUBE }
+  ensure
+    Setting.instance.update!(store_events: true)
+  end
+
   test "processes transaction with event_id only in payload" do
     envelope_body = build_envelope_with_empty_headers(
       items: [

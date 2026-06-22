@@ -124,6 +124,15 @@
         </div>
 
         <div>
+          <%= form.label :logs_data_retention_days, "Keep logs", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :logs_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600 dark:text-gray-400">days</span>
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 14 days (logs are high-volume)</p>
+        </div>
+
+        <div>
           <%= form.label :histograms_retention_days, "Keep aggregates", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <div class="flex items-center space-x-2">
             <%= form.number_field :histograms_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
@@ -131,6 +140,29 @@
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Histograms + hourly stats. Default: 540 days — they're tiny.</p>
         </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Ingest</h2>
+      <p class="text-gray-600 dark:text-gray-400 mb-4">
+        Turn off a data type to stop storing it. Disabled items are dropped at ingest (never queued),
+        so existing data is untouched until it ages out via retention above.
+      </p>
+
+      <div class="space-y-3">
+        <label class="flex items-center gap-3">
+          <%= form.check_box :store_events, class: "rounded border-gray-300 dark:border-gray-700 text-blue-600 focus:ring-blue-500" %>
+          <span class="text-sm text-gray-700 dark:text-gray-300">Store <strong>events</strong> (errors / exceptions)</span>
+        </label>
+        <label class="flex items-center gap-3">
+          <%= form.check_box :store_transactions, class: "rounded border-gray-300 dark:border-gray-700 text-blue-600 focus:ring-blue-500" %>
+          <span class="text-sm text-gray-700 dark:text-gray-300">Store <strong>transactions</strong> &amp; spans (performance)</span>
+        </label>
+        <label class="flex items-center gap-3">
+          <%= form.check_box :store_logs, class: "rounded border-gray-300 dark:border-gray-700 text-blue-600 focus:ring-blue-500" %>
+          <span class="text-sm text-gray-700 dark:text-gray-300">Store <strong>logs</strong> (Sentry Logs / OTLP)</span>
+        </label>
       </div>
     </div>
 

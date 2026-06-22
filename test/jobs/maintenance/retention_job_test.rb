@@ -45,4 +45,17 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
     ).to_i
     assert_equal 1, surviving, "aggregate history (within 540d) survives"
   end
+
+  test "logs older than the logs cutoff are deleted, recent kept" do
+    Setting.instance.update!(logs_data_retention_days: 14)
+    old = Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 30.days.ago,
+      level: :info, source: "sentry", body: "old", payload: {})
+    recent = Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 1.day.ago,
+      level: :info, source: "sentry", body: "recent", payload: {})
+
+    Maintenance::RetentionJob.new.perform
+
+    refute Log.exists?(old.id), "log past the 14d cutoff is purged"
+    assert Log.exists?(recent.id), "recent log is retained"
+  end
 end

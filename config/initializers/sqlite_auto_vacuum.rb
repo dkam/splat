@@ -32,7 +32,8 @@ Rails.application.config.after_initialize do
   targets = {
     ApplicationRecord => [1, "FULL"],
     IssuesEventsRecord => [2, "INCREMENTAL"],
-    TransactionsSpansRecord => [2, "INCREMENTAL"]
+    TransactionsSpansRecord => [2, "INCREMENTAL"],
+    LogsRecord => [2, "INCREMENTAL"]
   }
 
   targets.each do |base, (mode_value, mode_name)|

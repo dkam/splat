@@ -10,6 +10,10 @@ Rails.application.routes.draw do
     post ":project_id/envelope", to: "envelopes#create"
   end
 
+  # OTLP/HTTP logs ingestion (OpenTelemetry, JSON encoding). Project is
+  # identified by its public key in the Authorization header or ?sentry_key=.
+  post "/v1/logs", to: "api/otlp_logs#create"
+
   # Health check
   get "_health", to: "health#show"
 
@@ -41,6 +45,8 @@ Rails.application.routes.draw do
     end
 
     resources :events, only: [:show, :destroy]
+
+    resources :logs, only: [:index, :show]
 
     resources :endpoints, only: [:index] do
       collection do

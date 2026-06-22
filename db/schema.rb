@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_20_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
   create_table "oidc_sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "expires_at", null: false
@@ -57,10 +57,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_20_000001) do
     t.integer "events_data_retention_days", default: 30, null: false
     t.string "forward_dsn"
     t.integer "histograms_retention_days", default: 540, null: false
+    t.integer "logs_data_retention_days", default: 14, null: false
     t.string "ntfy_priority", default: "default", null: false
     t.string "ntfy_token"
     t.string "ntfy_url"
     t.integer "spans_data_retention_days", default: 30, null: false
+    t.boolean "store_events", default: true, null: false
+    t.boolean "store_logs", default: false, null: false
+    t.boolean "store_transactions", default: true, null: false
     t.integer "transactions_data_retention_days", default: 90, null: false
     t.datetime "updated_at", null: false
   end

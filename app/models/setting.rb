@@ -13,6 +13,8 @@ class Setting < ApplicationRecord
       events_data_retention_days: 30,
       transactions_data_retention_days: 90,
       spans_data_retention_days: 30,
+      # Logs are the highest-volume, shortest-lived data — keep them short.
+      logs_data_retention_days: 14,
       # Histograms are tiny (50–200 B per row) — keep them long for trend views.
       histograms_retention_days: 540
     }
@@ -21,6 +23,7 @@ class Setting < ApplicationRecord
   def events_data_cutoff_date = events_data_retention_days.days.ago
   def transactions_data_cutoff_date = transactions_data_retention_days.days.ago
   def spans_data_cutoff_date = spans_data_retention_days.days.ago
+  def logs_data_cutoff_date = logs_data_retention_days.days.ago
   def histograms_cutoff_date = histograms_retention_days.days.ago
 
   def forwarding?
@@ -34,6 +37,7 @@ class Setting < ApplicationRecord
   validates :events_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :transactions_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :spans_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
+  validates :logs_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :histograms_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :burst_threshold, numericality: {greater_than: 0, less_than_or_equal_to: 1_000_000}
   validates :ntfy_priority, inclusion: {in: NtfyNotifier::VALID_PRIORITIES}, allow_blank: true

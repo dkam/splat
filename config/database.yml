@@ -37,6 +37,10 @@ development:
     <<: *default
     database: storage/development_transactions_spans.sqlite3
     migrations_paths: db/transactions_spans_migrate
+  logs:
+    <<: *default
+    database: storage/development_logs.sqlite3
+    migrations_paths: db/logs_migrate
   cache:
     <<: *default
     database: storage/development_cache.sqlite3
@@ -61,6 +65,10 @@ test:
     <<: *default
     database: storage/test_transactions_spans.sqlite3
     migrations_paths: db/transactions_spans_migrate
+  logs:
+    <<: *default
+    database: storage/test_logs.sqlite3
+    migrations_paths: db/logs_migrate
 
 
 # Store production database in the storage/ directory, which by default
@@ -77,6 +85,10 @@ production:
     <<: *default
     database: storage/production_transactions_spans.sqlite3
     migrations_paths: db/transactions_spans_migrate
+  logs:
+    <<: *default
+    database: storage/production_logs.sqlite3
+    migrations_paths: db/logs_migrate
   cache:
     <<: *default
     database: storage/production_cache.sqlite3

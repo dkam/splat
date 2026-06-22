@@ -180,6 +180,12 @@ module Mcp
         ignore_issue(arguments)
       when "reopen_issue"
         reopen_issue(arguments)
+      when "search_logs"
+        search_logs(arguments)
+      when "get_log"
+        get_log(arguments)
+      when "get_trace_logs"
+        get_trace_logs(arguments)
       else
         render json: {
           jsonrpc: "2.0",
@@ -593,6 +599,79 @@ module Mcp
             },
             required: ["issue_id"]
           }
+        },
+        {
+          name: "search_logs",
+          description: "Search structured logs (from Sentry Logs or OTLP) by level, logger, trace, environment, or message text",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "Substring to match against the log message body"
+              },
+              level: {
+                type: "string",
+                description: "Filter by severity level",
+                enum: %w[trace debug info warn error fatal]
+              },
+              logger: {
+                type: "string",
+                description: "Filter by logger name"
+              },
+              trace_id: {
+                type: "string",
+                description: "Filter to a single trace"
+              },
+              environment: {
+                type: "string",
+                description: "Filter by environment (e.g. production)"
+              },
+              time_range_hours: {
+                type: "integer",
+                description: "Look back this many hours (default: 24, max: 168)",
+                default: 24
+              },
+              limit: {
+                type: "integer",
+                description: "Maximum results (default: 50, max: 200)",
+                default: 50
+              }
+            }
+          }
+        },
+        {
+          name: "get_log",
+          description: "Get a single log record by its log_id, including decompressed attributes",
+          inputSchema: {
+            type: "object",
+            properties: {
+              log_id: {
+                type: "string",
+                description: "The log_id (UUID) of the record"
+              }
+            },
+            required: ["log_id"]
+          }
+        },
+        {
+          name: "get_trace_logs",
+          description: "Get all log records sharing a trace_id, oldest first — ties logs to a transaction/trace",
+          inputSchema: {
+            type: "object",
+            properties: {
+              trace_id: {
+                type: "string",
+                description: "The trace_id to collect logs for"
+              },
+              limit: {
+                type: "integer",
+                description: "Maximum results (default: 100, max: 500)",
+                default: 100
+              }
+            },
+            required: ["trace_id"]
+          }
         }
       ]
     end
@@ -653,6 +732,38 @@ module Mcp
       text = format_event_detail(event)
 
       render_text(text)
+    end
+
+    def search_logs(args)
+      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      limit = (args["limit"]&.to_i || 50).clamp(1, 200)
+
+      logs = Log.where(timestamp: time_range_hours.hours.ago..Time.current).recent
+      logs = logs.search_body(args["query"]) if args["query"].present?
+      logs = logs.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
+      logs = logs.by_logger(args["logger"]) if args["logger"].present?
+      logs = logs.for_trace(args["trace_id"]).reorder(timestamp: :desc) if args["trace_id"].present?
+      logs = logs.by_environment(args["environment"]) if args["environment"].present?
+      logs = logs.limit(limit)
+
+      render_text(format_logs_list(logs.to_a, time_range_hours))
+    end
+
+    def get_log(args)
+      log = Log.find_by(log_id: args["log_id"])
+      return render_error("Log not found: #{args["log_id"]}") unless log
+
+      render_text(format_log_detail(log))
+    end
+
+    def get_trace_logs(args)
+      trace_id = args["trace_id"]
+      return render_error("trace_id is required") if trace_id.blank?
+
+      limit = (args["limit"]&.to_i || 100).clamp(1, 500)
+      logs = Log.for_trace(trace_id).limit(limit).to_a
+
+      render_text(format_logs_list(logs, nil, header: "Logs for trace #{trace_id}"))
     end
 
     def get_transaction_stats(args)
@@ -955,6 +1066,52 @@ module Mcp
       scope = scope.where(environment: environment) if environment.present?
       scope = scope.where(release: release) if release.present?
       scope.pluck(:duration).sort
+    end
+
+    def format_logs_list(logs, time_range_hours, header: nil)
+      if logs.empty?
+        window = time_range_hours ? " in the last #{time_range_hours}h" : ""
+        return "No logs found#{window}."
+      end
+
+      project_names = Project.where(id: logs.map(&:project_id).uniq).pluck(:id, :name).to_h
+      title = header || "Recent Logs (last #{time_range_hours}h)"
+      result = "## #{title}\n\nShowing #{logs.size} log(s):\n\n"
+      logs.each do |log|
+        result += "- **#{log.level.to_s.upcase}** #{log.timestamp.utc.strftime("%Y-%m-%d %H:%M:%S")} "
+        result += "[#{project_names[log.project_id] || log.project_id}] #{log.body}\n"
+        meta = []
+        meta << "logger=#{log.logger_name}" if log.logger_name.present?
+        meta << "env=#{log.environment}" if log.environment.present?
+        meta << "trace=#{log.trace_id}" if log.trace_id.present?
+        meta << "log_id=#{log.log_id}"
+        result += "  #{meta.join(" · ")}\n"
+      end
+      result
+    end
+
+    def format_log_detail(log)
+      result = "## Log #{log.log_id}\n\n"
+      result += "- **Level:** #{log.level}\n"
+      result += "- **Time:** #{log.timestamp.utc.iso8601}\n"
+      result += "- **Body:** #{log.body}\n"
+      result += "- **Logger:** #{log.logger_name}\n" if log.logger_name.present?
+      result += "- **Environment:** #{log.environment}\n" if log.environment.present?
+      result += "- **Release:** #{log.release}\n" if log.release.present?
+      result += "- **Server:** #{log.server_name}\n" if log.server_name.present?
+      result += "- **Source:** #{log.source}\n" if log.source.present?
+      result += "- **Trace:** #{log.trace_id}\n" if log.trace_id.present?
+      result += "- **Span:** #{log.span_id}\n" if log.span_id.present?
+
+      attrs = log.payload_attributes
+      if attrs.present? && attrs.any?
+        result += "\n### Attributes\n\n"
+        attrs.each do |k, v|
+          val = (v.is_a?(Hash) && v.key?("value")) ? v["value"] : v
+          result += "- **#{k}:** #{val}\n"
+        end
+      end
+      result
     end
 
     def render_text(text)

@@ -1,0 +1,77 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
+  </div>
+
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Logs</h1>
+  </div>
+
+  <!-- Filters -->
+  <%= form_with url: project_logs_path(@project.slug), method: :get, data: {turbo_frame: "_top"},
+      class: "mb-6 flex flex-wrap items-end gap-3" do |f| %>
+    <div>
+      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Level</label>
+      <%= f.select :level,
+          options_for_select([["All", ""]] + Log.levels.keys.map { |l| [l, l] }, @level),
+          {},
+          class: "rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 text-sm" %>
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Environment</label>
+      <%= f.select :environment,
+          options_for_select([["All", ""]] + @environments.map { |e| [e, e] }, @environment),
+          {},
+          class: "rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 text-sm" %>
+    </div>
+    <div class="flex-1 min-w-[200px]">
+      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Search message</label>
+      <%= f.text_field :q, value: @query, placeholder: "substring of log body…",
+          class: "w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 text-sm" %>
+    </div>
+    <% if @trace_id %>
+      <%= f.hidden_field :trace_id, value: @trace_id %>
+    <% end %>
+    <div>
+      <%= f.submit "Filter", class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md cursor-pointer" %>
+      <%= link_to "Clear", project_logs_path(@project.slug), class: "ml-2 text-sm text-gray-500 dark:text-gray-400 hover:underline" %>
+    </div>
+  <% end %>
+
+  <% if @trace_id %>
+    <div class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+      Filtered to trace <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded"><%= @trace_id %></span>
+    </div>
+  <% end %>
+
+  <!-- Logs stream -->
+  <% if @logs.any? %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 font-mono text-sm">
+      <% @logs.each do |log| %>
+        <%= link_to project_log_path(@project.slug, log), class: "flex items-start gap-3 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors" do %>
+          <span class="shrink-0 text-xs text-gray-400 dark:text-gray-500 w-40 tabular-nums"><%= log.timestamp.strftime("%Y-%m-%d %H:%M:%S") %></span>
+          <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase w-14 text-center <%= log_level_badge_class(log.level) %>"><%= log.level %></span>
+          <% if log.logger_name.present? %>
+            <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400 max-w-[12rem] truncate"><%= log.logger_name %></span>
+          <% end %>
+          <span class="flex-1 text-gray-800 dark:text-gray-200 truncate"><%= log.body %></span>
+          <% if log.trace_id.present? %>
+            <span class="shrink-0 text-[10px] text-gray-400 dark:text-gray-500" title="trace <%= log.trace_id %>"><%= log.trace_id.first(8) %></span>
+          <% end %>
+        <% end %>
+      <% end %>
+    </div>
+
+    <% if @pagy.pages > 1 %>
+      <div class="mt-6 flex justify-center">
+        <%== pagy_nav(@pagy) %>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-12 text-center border border-gray-200 dark:border-gray-800">
+      <div class="text-6xl mb-4">📜</div>
+      <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No logs</h3>
+      <p class="text-gray-600 dark:text-gray-400">Logs sent via the Sentry SDK or OTLP will appear here.</p>
+    </div>
+  <% end %>
+</div>

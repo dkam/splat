@@ -1,8 +1,14 @@
 #!/bin/bash -e
 
-# If running the rails server then create or migrate existing database
+# If running the rails server then create or migrate existing database, then
+# seed. db:prepare only seeds when it *creates* a DB from scratch, so on an
+# existing install (or when a secondary DB like logs is added later) the
+# baseline compression dictionaries never get seeded. db:seed is idempotent
+# (CompressionDictionarySeeder skips any segment already at v1), so running it
+# every boot guarantees the events/logs dicts are present from the get-go.
 if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
   ./bin/rails db:prepare
+  ./bin/rails db:seed
 fi
 
 exec "${@}"

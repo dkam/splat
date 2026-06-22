@@ -13,6 +13,7 @@ require_relative "../config/environment"
 consumers = [
   Ingest::EventConsumer.new,
   Ingest::TransactionConsumer.new,
+  Ingest::LogConsumer.new,
   Ingest::DispatchConsumer.new(tube: Ingest::Tuber::MAINTENANCE_TUBE),
   Ingest::ActiveJobConsumer.new
 ]

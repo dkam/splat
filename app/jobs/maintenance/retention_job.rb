@@ -19,6 +19,7 @@ module Maintenance
         transactions_cutoff: setting.transactions_data_cutoff_date,
         spans_cutoff: setting.spans_data_cutoff_date
       )
+      logs_deleted = retire_logs(setting.logs_data_cutoff_date)
       # Both aggregate tables share the long histogram retention clock — they're
       # the historical performance record that outlives the raw transactions.
       histograms_deleted = retire_histograms(setting.histograms_cutoff_date)
@@ -26,20 +27,26 @@ module Maintenance
 
       vacuum(IssuesEventsRecord)
       vacuum(TransactionsSpansRecord)
+      vacuum(LogsRecord)
 
       duration = (Time.current - start).round(2)
-      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}"
+      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}"
       {
         duration: duration,
         events_deleted: events_deleted,
         transactions_deleted: transactions_deleted,
         spans_deleted: spans_deleted,
+        logs_deleted: logs_deleted,
         histograms_deleted: histograms_deleted,
         hourly_stats_deleted: hourly_stats_deleted
       }
     end
 
     private
+
+    def retire_logs(cutoff)
+      batched_delete_all(Log.where("timestamp < ?", cutoff))
+    end
 
     def retire_events(cutoff)
       scope = Event.where("timestamp < ?", cutoff)

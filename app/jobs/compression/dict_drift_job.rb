@@ -1,11 +1,12 @@
 module Compression
-  # Parent job that walks every active events segment and fans out one
-  # DictTrainingJob per segment. Runs daily; the training jobs themselves
-  # are gated by their own promotion threshold so most days end with zero
-  # promotions. Transactions/spans don't compress and are skipped.
+  # Parent job that walks every known compressed segment (events + logs) and
+  # fans out one DictTrainingJob per segment. Runs daily; the training jobs
+  # themselves are gated by their own promotion threshold so most days end with
+  # zero promotions. Transactions/spans don't compress and are skipped.
   class DictDriftJob
     def perform
-      segments = Compression::IssuesEventsDict.distinct.pluck(:segment)
+      segments = Compression::IssuesEventsDict.distinct.pluck(:segment) +
+        Compression::LogsDict.distinct.pluck(:segment)
 
       Rails.logger.info "[DictDriftJob] fanning out #{segments.size} segment(s)"
       segments.each do |segment|

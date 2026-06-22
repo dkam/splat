@@ -63,7 +63,8 @@ module Compression
       def model(db)
         case db
         when :issues_events then IssuesEventsDict
-        else raise ArgumentError, "unknown db #{db.inspect} — compression is events-only"
+        when :logs then LogsDict
+        else raise ArgumentError, "unknown compression db #{db.inspect}"
         end
       end
 

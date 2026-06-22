@@ -1,0 +1,84 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← Logs", project_logs_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
+  </div>
+
+  <!-- Log Header -->
+  <div class="flex justify-between items-start mb-8">
+    <div class="flex-1">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="px-2 py-1 rounded text-xs font-semibold uppercase <%= log_level_badge_class(@log.level) %>"><%= @log.level %></span>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 font-mono break-all"><%= @log.body.presence || "(no message)" %></h1>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
+        <% if @log.environment.present? %>
+          <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded"><%= @log.environment %></span>
+        <% end %>
+        <% if @log.source.present? %>
+          <span class="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded"><%= @log.source %></span>
+        <% end %>
+        <span>
+          <%= @log.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %>
+          <span class="text-gray-500 dark:text-gray-500">&mdash; <%= time_ago_in_words(@log.timestamp) %> ago</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fields -->
+  <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Fields</h2>
+    <dl class="divide-y divide-gray-100 dark:divide-gray-800">
+      <% fields = {
+        "Logger" => @log.logger_name,
+        "Release" => @log.release,
+        "Server" => @log.server_name,
+        "Severity number" => @log.severity_number,
+        "Span" => @log.span_id
+      }.reject { |_, v| v.blank? } %>
+      <% fields.each do |key, value| %>
+        <div class="py-2 grid grid-cols-3 gap-4">
+          <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= key %></dt>
+          <dd class="text-sm text-gray-900 dark:text-gray-100 col-span-2 font-mono break-all"><%= value %></dd>
+        </div>
+      <% end %>
+      <% if @log.trace_id.present? %>
+        <div class="py-2 grid grid-cols-3 gap-4">
+          <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Trace</dt>
+          <dd class="text-sm col-span-2 font-mono break-all">
+            <%= link_to @log.trace_id, project_logs_path(@project.slug, trace_id: @log.trace_id),
+                class: "text-blue-600 dark:text-blue-400 hover:underline" %>
+            <% if @related %>
+              · <%= link_to "view transaction →", project_transaction_path(@project.slug, @related.id),
+                  class: "text-blue-600 dark:text-blue-400 hover:underline" %>
+            <% end %>
+          </dd>
+        </div>
+      <% end %>
+    </dl>
+  </div>
+
+  <!-- Attributes -->
+  <% attrs = @log.payload_attributes %>
+  <% if attrs.present? && attrs.any? %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Attributes</h2>
+      <dl class="divide-y divide-gray-100 dark:divide-gray-800">
+        <% attrs.each do |key, value| %>
+          <div class="py-2 grid grid-cols-3 gap-4">
+            <dt class="text-sm font-medium text-gray-500 dark:text-gray-400 font-mono break-all"><%= key %></dt>
+            <dd class="text-sm text-gray-900 dark:text-gray-100 col-span-2 font-mono break-all">
+              <%= value.is_a?(Hash) && value.key?("value") ? value["value"] : value.to_s %>
+            </dd>
+          </div>
+        <% end %>
+      </dl>
+    </div>
+  <% end %>
+
+  <!-- Raw payload -->
+  <details class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 mb-6">
+    <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Raw payload</summary>
+    <pre class="px-6 pb-6 text-xs text-gray-700 dark:text-gray-300 overflow-x-auto"><%= JSON.pretty_generate(@log.payload || {}) %></pre>
+  </details>
+</div>

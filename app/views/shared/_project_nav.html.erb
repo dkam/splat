@@ -16,4 +16,9 @@
       title: "Performance" do %>
     🚀<span class="hidden lg:inline ml-1">Performance</span>
   <% end %>
+  <%= link_to project_logs_path(project.slug),
+      class: "px-3 py-1.5 rounded-md font-medium transition-colors #{project_nav_active?(:logs) ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800'}",
+      title: "Logs" do %>
+    📜<span class="hidden lg:inline ml-1">Logs</span>
+  <% end %>
 </nav>

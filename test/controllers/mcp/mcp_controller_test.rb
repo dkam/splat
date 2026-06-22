@@ -88,6 +88,46 @@ module Mcp
 
     private
 
+    test "search_logs returns matching logs" do
+      project = projects(:one)
+      Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+        level: :error, source: "sentry", body: "mcp searchable log", trace_id: "mcp-trace", payload: {})
+
+      call_tool("search_logs", {"query" => "mcp searchable", "level" => "error"})
+      assert_response :success
+      assert_match "mcp searchable log", tool_text
+    end
+
+    test "get_log returns a record by log_id" do
+      project = projects(:one)
+      id = SecureRandom.uuid_v7
+      Log.create!(project_id: project.id, log_id: id, timestamp: Time.current,
+        level: :info, source: "sentry", body: "fetch me",
+        payload: {"attributes" => {"sentry.environment" => "production"}})
+
+      call_tool("get_log", {"log_id" => id})
+      assert_response :success
+      assert_match "fetch me", tool_text
+      assert_match "Attributes", tool_text
+    end
+
+    test "get_trace_logs collects logs for a trace" do
+      project = projects(:one)
+      2.times do |i|
+        Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: i.minutes.ago,
+          level: :info, source: "sentry", body: "trace line #{i}", trace_id: "shared-trace", payload: {})
+      end
+
+      call_tool("get_trace_logs", {"trace_id" => "shared-trace"})
+      assert_response :success
+      assert_match "trace line 0", tool_text
+      assert_match "trace line 1", tool_text
+    end
+
+    def tool_text
+      JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+    end
+
     def call_tool(name, arguments)
       post "/mcp",
         params: {
