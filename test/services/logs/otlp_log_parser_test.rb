@@ -75,6 +75,13 @@ class Logs::OtlpLogParserTest < ActiveSupport::TestCase
     assert_equal hex, r[:trace_id]
   end
 
+  test "rejects a base64 trace id that decodes to the wrong width" do
+    # "AA==" decodes to a single 0x00 byte → "00", not a full 32-hex trace id.
+    # A truncated id would never correlate to a real trace, so drop it instead.
+    r = Logs::OtlpLogParser.parse(base_payload({"traceId" => "AA==", "body" => {"stringValue" => "x"}})).first
+    assert_nil r[:trace_id]
+  end
+
   test "maps severity_number ranges onto the level enum" do
     {1 => "trace", 5 => "debug", 9 => "info", 13 => "warn", 17 => "error", 21 => "fatal"}.each do |num, level|
       r = Logs::OtlpLogParser.parse(base_payload({"severityNumber" => num, "body" => {"stringValue" => "x"}})).first

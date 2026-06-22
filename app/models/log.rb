@@ -43,6 +43,38 @@ class Log < LogsRecord
     terms.map { |t| %("#{t}") }.join(" ")
   end
 
-  # Decoded-payload readers (lazy; only decompress the blob on access).
-  def payload_attributes = payload&.dig("attributes") || {}
+  # Attributes for display, normalized to a flat {key => scalar} hash whatever
+  # the source (lazy; only decompresses the blob on access). Sentry stores
+  # attributes as a {key => {"value"=>x}} hash; OTLP stores an array of
+  # {"key"=>k, "value"=><AnyValue>} objects. Both are flattened here so the show
+  # view and MCP can iterate uniformly — iterating the OTLP array as a hash
+  # otherwise yields the {key,value} object as the key and a blank value.
+  def payload_attributes
+    raw = payload&.dig("attributes")
+    case raw
+    when Array
+      raw.each_with_object({}) do |kv, h|
+        next unless kv.is_a?(Hash) && kv["key"]
+        h[kv["key"]] = unwrap_attribute_value(kv["value"])
+      end
+    when Hash
+      raw.transform_values { |v| unwrap_attribute_value(v) }
+    else
+      {}
+    end
+  end
+
+  private
+
+  # Unwrap a stored attribute value to a scalar for display. Handles the Sentry
+  # {"value"=>x} wrapper and the OTLP AnyValue ({stringValue|intValue|...});
+  # arrayValue/kvlistValue keep their structure rather than guessing.
+  def unwrap_attribute_value(value)
+    return value unless value.is_a?(Hash)
+    return value["value"] if value.key?("value")
+    %w[stringValue intValue boolValue doubleValue].each do |k|
+      return value[k] if value.key?(k)
+    end
+    value["arrayValue"] || value["kvlistValue"] || value
+  end
 end

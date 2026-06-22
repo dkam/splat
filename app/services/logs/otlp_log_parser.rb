@@ -104,7 +104,10 @@ module Logs
       return s.downcase if s.length == expected_hex_len && s.match?(/\A[0-9a-f]+\z/i)
       begin
         decoded = Base64.decode64(s).unpack1("H*")
-        decoded.presence
+        # Only accept a decode that yields exactly the expected id width.
+        # Otherwise a short/malformed value (e.g. "AA==" → "00") would be
+        # stored truncated and never correlate to its real trace/span.
+        decoded if decoded&.length == expected_hex_len
       rescue
         nil
       end

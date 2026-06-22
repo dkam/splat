@@ -19,6 +19,31 @@ class LogTest < ActiveSupport::TestCase
     assert_equal({"foo" => "bar"}, reloaded.payload_attributes)
   end
 
+  test "payload_attributes normalizes the OTLP array shape to a flat hash" do
+    # OTLP stores attributes as an array of {key, value:<AnyValue>} objects,
+    # unlike Sentry's {key => {value}} hash. Both must flatten the same way.
+    log = Log.create!(
+      project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+      level: :info, source: "otlp", body: "connection received",
+      payload: {"attributes" => [
+        {"key" => "db.system", "value" => {"stringValue" => "postgresql"}},
+        {"key" => "db.rows", "value" => {"intValue" => "42"}}
+      ]}
+    )
+
+    assert_equal({"db.system" => "postgresql", "db.rows" => "42"}, Log.find(log.id).payload_attributes)
+  end
+
+  test "payload_attributes unwraps the Sentry value-wrapper shape" do
+    log = Log.create!(
+      project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+      level: :info, source: "sentry", body: "x",
+      payload: {"attributes" => {"sentry.environment" => {"value" => "production", "type" => "string"}}}
+    )
+
+    assert_equal({"sentry.environment" => "production"}, Log.find(log.id).payload_attributes)
+  end
+
   test "level enum exposes the expected mapping" do
     assert_equal({"trace" => 0, "debug" => 1, "info" => 2, "warn" => 3, "error" => 4, "fatal" => 5}, Log.levels)
   end
