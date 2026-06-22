@@ -35,6 +35,23 @@ class LogFtsTest < ActiveSupport::TestCase
     assert_empty Log.search_text("ephemeral").to_a
   end
 
+  test "key:value scopes the match to that attribute (phrase)" do
+    hit = create_log(body: "imports", attrs_text: "controller ImportsController action create status 422 method POST")
+    create_log(body: "projects", attrs_text: "controller ProjectsController action show status 200 method GET")
+
+    assert_equal [hit.id], Log.search_text("status:422").pluck(:id)
+    assert_equal [hit.id], Log.search_text("method:POST").pluck(:id)
+    # 422 is scoped to the status field — the status:200 row is not returned by status:422
+    refute_includes Log.search_text("status:422").pluck(:id), Log.find_by(body: "projects").id
+  end
+
+  test "key:value combines with bare terms (AND)" do
+    hit = create_log(body: "boom imports", attrs_text: "status 422 method POST")
+    create_log(body: "quiet imports", attrs_text: "status 422 method GET")
+
+    assert_equal [hit.id], Log.search_text("status:422 boom").pluck(:id)
+  end
+
   test "punctuation/operators in the query never raise and just match tokens" do
     hit = create_log(body: "user_id=4242 failed")
     # Quotes/operators are stripped to tokens, so this matches rather than

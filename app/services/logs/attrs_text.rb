@@ -6,6 +6,14 @@ module Logs
   # plain {key => value} map (Sentry values may be {"value" => x} objects;
   # OTLP values arrive already unwrapped).
   module AttrsText
+    # Floating-point values (durations, runtimes like "317.42") are unique per
+    # row and pure FTS noise — each distinct timing becomes its own index term,
+    # bloating the dictionary for something nobody full-text-searches. Skip the
+    # value (the key is still emitted, and the exact number stays in the
+    # compressed payload for the detail view). Integers like a "422" status are
+    # low-cardinality and worth keeping.
+    FLOAT_VALUE = /\A-?\d+\.\d+\z/
+
     module_function
 
     def build(pairs)
@@ -16,7 +24,8 @@ module Logs
         next if key.blank?
         out << key.to_s
         scalar = unwrap(value)
-        out << scalar.to_s unless scalar.nil? || scalar.to_s.empty?
+        str = scalar.to_s
+        out << str unless scalar.nil? || str.empty? || str.match?(FLOAT_VALUE)
       end
       out.join(" ").presence
     end

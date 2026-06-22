@@ -32,14 +32,32 @@ class Log < LogsRecord
     q ? where("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?)", q) : all
   }
 
-  # Turn free user input into a safe FTS5 MATCH expression: extract word tokens
-  # and AND them as quoted phrases, so punctuation/operators in the input can't
-  # break the query or inject FTS syntax. Returns nil when there's nothing to
-  # search.
+  # Turn free user input into a safe FTS5 MATCH expression. Punctuation/operators
+  # in the input can't break the query or inject FTS syntax (everything is
+  # reduced to quoted token phrases). Supports a `key:value` shorthand for
+  # attribute-scoped matches. Returns nil when there's nothing to search.
   def self.fts_query(text)
-    terms = text.to_s.scan(/[\p{Alnum}_]+/)
-    return nil if terms.empty?
-    terms.map { |t| %("#{t}") }.join(" ")
+    return nil if text.blank?
+
+    clauses = text.to_s.split(/\s+/).filter_map do |term|
+      if term.include?(":")
+        # key:value — match the key and its value as an adjacent phrase.
+        # attrs_text stores "… key value …" with the value's tokens right after
+        # the key, so a phrase of [key, *value_tokens] is scoped to that key
+        # (e.g. status:422 won't match a 422 belonging to some other field).
+        key, val = term.split(":", 2)
+        toks = "#{key} #{val}".scan(/[\p{Alnum}_]+/)
+        next if toks.empty?
+        %("#{toks.join(" ")}")
+      else
+        # Bare text — each token ANDed (a token may split on punctuation).
+        toks = term.scan(/[\p{Alnum}_]+/)
+        next if toks.empty?
+        toks.map { |t| %("#{t}") }.join(" ")
+      end
+    end
+
+    clauses.empty? ? nil : clauses.join(" ")
   end
 
   # Attributes for display, normalized to a flat {key => scalar} hash whatever
