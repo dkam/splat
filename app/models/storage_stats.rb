@@ -4,14 +4,15 @@ class StorageStats
   DBS = [
     ["Primary", "ApplicationRecord"],
     ["Issues + Events", "IssuesEventsRecord"],
-    ["Transactions + Spans", "TransactionsSpansRecord"]
+    ["Transactions + Spans", "TransactionsSpansRecord"],
+    ["Logs", "LogsRecord"]
   ].freeze
 
   # Where the precomputed snapshot lives. SolidCache is SQLite-backed and
   # survives restarts, so the snapshot is the refresher's responsibility, not
   # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule. Bump the
   # version suffix if the snapshot shape changes.
-  CACHE_KEY = "storage_stats/snapshot/v1"
+  CACHE_KEY = "storage_stats/snapshot/v2"
 
   class << self
     # The precomputed snapshot the settings page renders, or nil if one has
@@ -27,9 +28,70 @@ class StorageStats
     def refresh!
       groups = sqlite_tables_grouped
       total = groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
-      snap = {groups: groups, total: total, collected_at: Time.current}
+      snap = {groups: groups, total: total, compression: compression_estimate, collected_at: Time.current}
       Rails.cache.write(CACHE_KEY, snap)
       snap
+    end
+
+    # Compressed payload tables: [ui label, AR base class, codec db, table].
+    COMPRESSED = [
+      ["Events", "IssuesEventsRecord", :issues_events, "events"],
+      ["Logs", "LogsRecord", :logs, "logs"]
+    ].freeze
+
+    # Rows to decode per table to estimate the compression ratio. A few hundred
+    # is plenty for a stable ratio and stays well under a second.
+    COMPRESSION_SAMPLE = 500
+
+    # Estimate storage saved by zstd payload compression, per compressed table.
+    # We don't store original sizes, so sample COMPRESSION_SAMPLE random blobs,
+    # decode them, and compare decompressed vs stored bytes to get a ratio, then
+    # scale by the table's blob row count. Heavy-ish (decodes a sample) — only
+    # called from the 15-min StorageStatsJob, never on the request path.
+    def compression_estimate
+      COMPRESSED.filter_map do |label, base_name, db, table|
+        conn = base_name.constantize.connection
+
+        sample = conn.select_all(<<~SQL).to_a
+          SELECT payload_blob AS blob, dict_id FROM #{table}
+          WHERE payload_blob IS NOT NULL
+          ORDER BY RANDOM() LIMIT #{COMPRESSION_SAMPLE}
+        SQL
+        next if sample.empty?
+
+        compressed = 0
+        original = 0
+        counted = 0
+        sample.each do |row|
+          blob = row["blob"]
+          next if blob.nil?
+          decoded = Compression::Codec.decode(blob, db: db, dict_id: row["dict_id"])
+          compressed += blob.bytesize
+          original += decoded.to_s.bytesize
+          counted += 1
+        rescue => e
+          Rails.logger.warn("StorageStats: skipped a #{table} blob: #{e.class}: #{e.message}")
+        end
+        next if counted.zero? || compressed.zero?
+
+        blob_rows = conn.select_value("SELECT COUNT(*) FROM #{table} WHERE payload_blob IS NOT NULL").to_i
+        ratio = original.to_f / compressed
+        est_stored = (compressed.to_f / counted * blob_rows).round
+        est_original = (est_stored * ratio).round
+
+        {
+          name: label,
+          rows: blob_rows,
+          sample: counted,
+          ratio: ratio,
+          stored_bytes: est_stored,
+          original_bytes: est_original,
+          saved_bytes: est_original - est_stored
+        }
+      end
+    rescue => e
+      Rails.logger.warn("StorageStats.compression_estimate failed: #{e.class}: #{e.message}")
+      []
     end
 
     # Ask the maintenance pool to (re)build the snapshot. Idempotent via the

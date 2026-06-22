@@ -6,7 +6,7 @@
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <div class="text-sm text-gray-500 dark:text-gray-400">SQLite total (all 3 DBs)</div>
+      <div class="text-sm text-gray-500 dark:text-gray-400">SQLite total (all DBs)</div>
       <div class="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
         <%= @storage ? number_to_human_size(@storage[:total]) : "—" %>
       </div>
@@ -68,6 +68,51 @@
           <% end %>
         </tbody>
       </table>
+    </details>
+  <% end %>
+
+  <% compression = @storage&.fetch(:compression, nil) %>
+  <% if compression&.any? %>
+    <% total_saved = compression.sum { |c| c[:saved_bytes] } %>
+    <details class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 mb-4 overflow-hidden group">
+      <summary class="px-6 py-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 list-none">
+        <div>
+          <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">
+            Compression — ~<%= number_to_human_size(total_saved) %> saved
+          </h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Estimated from a sampled decode of payload blobs (zstd + per-segment dictionaries).
+          </p>
+        </div>
+        <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 transition-transform group-open:rotate-90 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </summary>
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 border-t border-gray-200 dark:border-gray-800">
+        <thead class="bg-gray-50 dark:bg-gray-800/50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Table</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ratio</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stored (est.)</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Uncompressed (est.)</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Saved (est.)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+          <% compression.each do |c| %>
+            <tr>
+              <td class="px-6 py-3 text-sm font-mono text-gray-900 dark:text-gray-100"><%= c[:name] %></td>
+              <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= c[:ratio].round(1) %>×</td>
+              <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(c[:stored_bytes]) %></td>
+              <td class="px-6 py-3 text-sm text-right text-gray-700 dark:text-gray-300"><%= number_to_human_size(c[:original_bytes]) %></td>
+              <td class="px-6 py-3 text-sm text-right font-medium text-green-600 dark:text-green-400"><%= number_to_human_size(c[:saved_bytes]) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+      <p class="px-6 py-3 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-800">
+        Extrapolated from up to <%= StorageStats::COMPRESSION_SAMPLE %> sampled rows per table — a guesstimate, not exact.
+      </p>
     </details>
   <% end %>
 
@@ -168,7 +213,7 @@
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Counts</h2>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
           <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= number_with_delimiter(Issue.count) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Issues</div>
@@ -184,6 +229,10 @@
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
           <div class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= number_with_delimiter(Span.count) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Spans</div>
+        </div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
+          <div class="text-2xl font-bold text-purple-600 dark:text-purple-400"><%= number_with_delimiter(Log.count) %></div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">Logs</div>
         </div>
       </div>
 
