@@ -14,6 +14,19 @@ class StorageStats
   # version suffix if the snapshot shape changes.
   CACHE_KEY = "storage_stats/snapshot/v2"
 
+  # Compressed payload tables: [ui label, AR base class, codec db, table].
+  # Defined on the class (not in `class << self`) so the settings view can
+  # reference StorageStats::COMPRESSION_SAMPLE; internal singleton methods still
+  # resolve the bare constants via lexical nesting.
+  COMPRESSED = [
+    ["Events", "IssuesEventsRecord", :issues_events, "events"],
+    ["Logs", "LogsRecord", :logs, "logs"]
+  ].freeze
+
+  # Rows to decode per table to estimate the compression ratio. A few hundred
+  # is plenty for a stable ratio and stays well under a second.
+  COMPRESSION_SAMPLE = 500
+
   class << self
     # The precomputed snapshot the settings page renders, or nil if one has
     # never been built (fresh deploy with a cold cache). Cheap — a single
@@ -32,16 +45,6 @@ class StorageStats
       Rails.cache.write(CACHE_KEY, snap)
       snap
     end
-
-    # Compressed payload tables: [ui label, AR base class, codec db, table].
-    COMPRESSED = [
-      ["Events", "IssuesEventsRecord", :issues_events, "events"],
-      ["Logs", "LogsRecord", :logs, "logs"]
-    ].freeze
-
-    # Rows to decode per table to estimate the compression ratio. A few hundred
-    # is plenty for a stable ratio and stays well under a second.
-    COMPRESSION_SAMPLE = 500
 
     # Estimate storage saved by zstd payload compression, per compressed table.
     # We don't store original sizes, so sample COMPRESSION_SAMPLE random blobs,
