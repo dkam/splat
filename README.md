@@ -266,9 +266,16 @@ services:
 
 ## Authentication
 
-1. None: Anyone can access splat - ensure it's running internal / within a VPN
+Splat has no login by default — **authentication is off until you configure OIDC**. The three pick-one options:
+
+1. None (default): Anyone can access Splat — ensure it's running internal / within a VPN
 2. Basic Auth: Use your webserver to implement Basic Auth, avoiding protecting /api/ and /mcp/ endpoints as they're already authenticated
-3. OIDC: Set the 
+3. OIDC: Set the `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_DISCOVERY_URL` values (see [OIDC](#oidc) below)
+
+**Setting the OIDC values switches Splat into login-required mode.** As soon as all three `OIDC_*` variables are present, the UI is no longer open: every browser request must be authenticated via your OIDC provider, and the signed-in email must match the allowlist (`SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS`). Note:
+
+- **An empty allowlist locks everyone out.** If OIDC is configured but neither `SPLAT_ALLOWED_USERS` nor `SPLAT_ALLOWED_DOMAINS` is set, no email matches, so nobody can log in. Set at least one before enabling OIDC.
+- **Ingestion and tooling stay open.** The `/api/`, `/v1/logs`, `/mcp`, and `/_health` endpoints skip browser auth (they use token auth or are public), so enabling OIDC doesn't break event ingestion, log ingestion, MCP clients, or health checks.
 
 
 ### Basic Auth
