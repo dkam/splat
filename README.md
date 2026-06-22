@@ -46,7 +46,7 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Sentry Protocol Compatible** - Drop-in replacement for Sentry client SDKs
 - ✅ **MCP Integration** - Query errors and performance data via Claude and other AI assistants
 - ✅ **Single-Tenant Design** - Simple setup, no user management overhead
-- ✅ **Minimal Dependencies** - Rails + SQLite + Solid Queue
+- ✅ **Minimal Dependencies** - Rails + SQLite + Tuber (a single-binary work queue)
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
 
 ### Why Splat?
@@ -54,7 +54,7 @@ When you need error tracking that:
 - Your code assistant can grab issues and stack traces from
 - Shows errors within seconds
 - Can be understood and modified in one sitting
-- Latest Rails / Ruby on an all-SQLite stack plus the Solid trio (Queue/Cache/Cable). The running versions are shown on the Settings page.
+- Latest Rails / Ruby on an all-SQLite stack, with Solid Cache + Solid Cable and [Tuber](https://github.com/tuberq/tuber) for the work queue. The running versions are shown on the Settings page.
 
 
 ## Screenshots
@@ -336,7 +336,7 @@ Splat has been tested in production handling real-world traffic with excellent r
 
 **Sustained load: ~1,550 transactions/minute (~26 tx/s)**
 - Web container: 1.07 GB RAM, ~19% CPU
-- Jobs container: 340 MB RAM, ~20% CPU
+- Worker container (ingest + scheduler): 340 MB RAM, ~20% CPU
 - Queue depth: 0 (no backlog)
 - No database locks or contention
 
@@ -358,12 +358,29 @@ Rails 8.1's SQLite optimizations (WAL mode, connection pooling) handle write-hea
 
 ### Storage Architecture: All SQLite
 
-Splat stores everything — events, transactions, spans, and pre-rolled aggregates — in SQLite. There is no separate analytics engine to operate.
+Splat stores everything in SQLite — there is no separate analytics engine to operate. Rather than one big file, the data is split across several SQLite databases by concern, each with its own connection, migration path, and retention window:
+
+| Database | File | Holds |
+|---|---|---|
+| **primary** | `storage/production.sqlite3` | Application data — projects, settings, releases, OIDC sessions |
+| **issues_events** | `storage/production_issues_events.sqlite3` | Error issues and their raw events |
+| **transactions_spans** | `storage/production_transactions_spans.sqlite3` | APM transactions, span trees, and the rolled-up performance aggregates |
+| **logs** | `storage/production_logs.sqlite3` | Structured logs (zstd-compressed bodies, promoted query columns, FTS index) |
+
+(Two further Solid-backed databases — `production_cache.sqlite3` and `production_cable.sqlite3` — hold Solid Cache and Solid Cable data.)
+
+Splitting by concern keeps the write-heavy tables (events, spans, logs) from contending on a single file's write lock, lets each domain migrate independently, and means a domain's retention prune or `VACUUM` only touches its own file. Within each domain:
 
 - **Raw rows** are the source of truth for ingestion, find-by-id lookups, status changes, and the recent-firehose views. Fast, embedded, no operational overhead.
 - **Aggregates** — the time-windowed numbers behind endpoint stats, percentile breakdowns, response-time charts, the "Top Endpoints by Impact" table, and the project dashboard — are rolled up into compact summary tables (e.g. `transaction_histograms`) by a recurring job, so the dashboards stay fast even as raw rows are pruned.
 
 Raw rows and aggregates have separate retention windows, so you can prune the high-volume raw data aggressively (days) while keeping the tiny aggregate history for much longer (months). Retention windows are configurable on the Settings page.
+
+### Ingestion Queue: Tuber
+
+Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. A worker (`bin/ingest_worker`) drains the tubes through per-type consumers (events, transactions, spans, logs, plus a maintenance tube and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. A separate `bin/scheduler` process runs the recurring jobs (retention, aggregation, dictionary training).
+
+[Tuber](https://github.com/tuberq/tuber) is a single Rust binary — a Beanstalkd rewrite — that keeps job *metadata* in RAM with a write-ahead log for durability, and offloads larger job *bodies* to disk (a TOAST-style scheme), so memory stays bounded by job *count* rather than payload size. That gives Splat a durable, RAM-speed ingest buffer with no extra database to tune. See the [Tuber project](https://github.com/tuberq/tuber) for the server.
 
 #### Endpoint Impact Ranking
 
@@ -424,7 +441,7 @@ Splat automatically cleans up old data to manage database size and maintain perf
 - **Files**: 90 days (configurable via `SPLAT_MAX_FILE_LIFE_DAYS`)
 
 #### Cleanup Process
-- **Schedule**: Daily at 2:00 AM UTC via Solid Queue recurring jobs
+- **Schedule**: Daily at 2:00 AM UTC via the recurring-job scheduler (`bin/scheduler`)
 - **Actions**:
   - Deletes events older than retention period
   - Deletes transactions older than retention period
@@ -549,7 +566,7 @@ Configure Uptime Kuma to send alerts via:
 
 **When queue_status is "warning":**
 - Jobs are processing but slower than ingestion rate
-- Check Solid Queue worker status
+- Check the ingest worker status (`bin/ingest_worker`) and Tuber
 - Consider scaling workers if sustained
 
 **When queue_status is "critical":**
@@ -572,10 +589,12 @@ Splat uses SQLite databases. Two recommended backup strategies:
 - Smaller incremental transfers than full copies
 
 ### What to Backup
-- `storage/production.sqlite3` - Events, issues, transactions (critical)
+- `storage/production.sqlite3` - Application data: projects, settings, releases (critical)
+- `storage/production_issues_events.sqlite3` - Error issues and events (critical)
+- `storage/production_transactions_spans.sqlite3` - Transactions, spans, performance aggregates (critical)
 - `storage/production_logs.sqlite3` - Structured logs (critical if you rely on them)
-- `storage/production_queue.sqlite3` - Background jobs (recommended)
-- `storage/production_cache.sqlite3` - Performance counters (optional)
+- `storage/production_cache.sqlite3` / `storage/production_cable.sqlite3` - Solid Cache / Cable (optional, regenerated at runtime)
+- `storage/tuber/` - Tuber's write-ahead log — only holds in-flight ingest jobs; not needed for a point-in-time restore
 
 ## Model Context Protocol (MCP) Integration
 
@@ -710,8 +729,6 @@ Once configured, you can ask Claude:
   PORT: 3000
   SPLAT_DOMAIN: https://splat.example.com # Change this to your domain
   FROM_EMAIL: splat@splat.example.com # Change this to your email
-  SOLID_QUEUE_THREADS: 3
-  SOLID_QUEUE_PROCESSES: 1
   TUBER_URL: tuber:11300 # host:port of the Tuber work queue
 ```
 
@@ -841,7 +858,7 @@ OIDC_PROVIDER_NAME=Your Provider
 ### Development
 
 #### Services
-- **Solid Queue**: Background job processing (`bin/jobs`)
+- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/ingest_worker`; recurring jobs scheduled by `bin/scheduler`
 - **Solid Cache**: In-memory caching
 - **Solid Cable**: Real-time updates (optional)
 
