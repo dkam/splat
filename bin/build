@@ -34,13 +34,22 @@ fi
 VERSION=$(ruby -e "require './config/version'; puts Splat::VERSION")
 echo "Building v${VERSION}"
 
-# SQLite is the only flavour now, so we build from main only. Refuse any
-# other branch so we never push an ambiguously-tagged image.
+# Branch policy depends on the version. A pre-release (X.Y.Z-dev) only ever
+# publishes :vX.Y.Z-dev and never moves :latest (see TAGS below), so it's safe
+# to build from any branch for testing. A real release moves :latest, so it
+# must come from main to avoid an ambiguously-tagged image.
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$BRANCH" != "main" ]; then
-  echo "ERROR: bin/build only builds from main (got '$BRANCH')."
-  exit 1
-fi
+case "$VERSION" in
+  *-*)
+    [ "$BRANCH" != "main" ] && echo "Pre-release build from branch '$BRANCH' — publishes :v${VERSION} only, never :latest"
+    ;;
+  *)
+    if [ "$BRANCH" != "main" ]; then
+      echo "ERROR: release builds only from main (got '$BRANCH'). Use a pre-release version (e.g. ${VERSION}-dev) to build from a branch."
+      exit 1
+    fi
+    ;;
+esac
 
 # Always publish :vX.Y.Z; only move :latest for a non-pre-release version.
 TAGS=(-t "reg.tbdb.info/splat:v${VERSION}")
