@@ -21,8 +21,6 @@ module Logs
       out.join(" ").presence
     end
 
-    def unwrap(value)
-      (value.is_a?(Hash) && value.key?("value")) ? value["value"] : value
-    end
+    def unwrap(value) = Logs::AttributeValue.unwrap(value)
   end
 end

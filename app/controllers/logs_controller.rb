@@ -3,6 +3,11 @@
 class LogsController < ApplicationController
   include Pagy::Backend
 
+  # How long the environment-filter facet is cached. A distinct scan over the
+  # logs table is expensive; staleness here only delays a new environment
+  # appearing in the dropdown.
+  ENVIRONMENTS_TTL = 5.minutes
+
   before_action :set_project
 
   # Logs live on their own DB, so scope by project_id rather than a cross-DB
@@ -22,8 +27,13 @@ class LogsController < ApplicationController
 
     @pagy, @logs = pagy(logs, limit: 50)
 
-    # Distinct facets for the filter dropdowns (cheap, bounded result sets).
-    @environments = Log.where(project_id: @project.id).distinct.pluck(:environment).compact.sort
+    # Distinct environments for the filter dropdown. A DISTINCT over a
+    # high-volume table is too costly to run on every page load, so cache it
+    # briefly (same TTL pattern as the project show metrics) — a new
+    # environment showing up a few minutes late in the dropdown is fine.
+    @environments = Rails.cache.fetch("project_#{@project.id}_log_environments", expires_in: ENVIRONMENTS_TTL) do
+      Log.where(project_id: @project.id).distinct.pluck(:environment).compact.sort
+    end
   end
 
   def show

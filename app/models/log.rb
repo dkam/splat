@@ -24,7 +24,6 @@ class Log < LogsRecord
   scope :by_level, ->(level) { where(level: level) }
   scope :by_logger, ->(name) { where(logger_name: name) }
   scope :by_environment, ->(env) { where(environment: env) }
-  scope :in_range, ->(range) { range ? where(timestamp: range) : all }
   # Free-text search over message body + flattened attributes via the logs_fts
   # FTS5 index (see config/initializers/logs_fts.rb). Falls back to all when the
   # query has no usable terms.
@@ -66,15 +65,5 @@ class Log < LogsRecord
 
   private
 
-  # Unwrap a stored attribute value to a scalar for display. Handles the Sentry
-  # {"value"=>x} wrapper and the OTLP AnyValue ({stringValue|intValue|...});
-  # arrayValue/kvlistValue keep their structure rather than guessing.
-  def unwrap_attribute_value(value)
-    return value unless value.is_a?(Hash)
-    return value["value"] if value.key?("value")
-    %w[stringValue intValue boolValue doubleValue].each do |k|
-      return value[k] if value.key?(k)
-    end
-    value["arrayValue"] || value["kvlistValue"] || value
-  end
+  def unwrap_attribute_value(value) = Logs::AttributeValue.unwrap(value)
 end

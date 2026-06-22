@@ -55,12 +55,6 @@ class Api::OtlpLogsController < ApplicationController
   end
 
   def decompressed_body
-    raw = request.body.read
-    if request.headers["Content-Encoding"].to_s.downcase == "gzip" ||
-        raw.byteslice(0, 2) == "\x1F\x8B".b
-      Zlib::GzipReader.new(StringIO.new(raw)).read
-    else
-      raw
-    end
+    Ingest::Decompression.maybe_gunzip(request.body.read, request.headers["Content-Encoding"])
   end
 end

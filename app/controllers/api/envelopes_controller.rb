@@ -15,8 +15,6 @@ class Api::EnvelopesController < ApplicationController
     content_encoding = request.headers["Content-Encoding"]&.downcase
 
     case content_encoding
-    when "gzip"
-      raw_body = Zlib::GzipReader.new(StringIO.new(raw_body)).read
     when "deflate"
       raw_body = Zlib::Inflate.inflate(raw_body)
     when "br"
@@ -48,10 +46,9 @@ class Api::EnvelopesController < ApplicationController
         return
       end
     else
-      # Auto-detect gzip by magic bytes if no Content-Encoding header
-      if raw_body.byteslice(0, 2) == "\x1F\x8B".b
-        raw_body = Zlib::GzipReader.new(StringIO.new(raw_body)).read
-      end
+      # Explicit gzip, or auto-detect gzip by magic bytes when no (or an
+      # unrecognized) Content-Encoding header is set.
+      raw_body = Ingest::Decompression.maybe_gunzip(raw_body, content_encoding)
     end
 
     SentryProtocol::EnvelopeProcessor.new(raw_body, project).process

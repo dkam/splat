@@ -85,15 +85,7 @@ module Logs
     end
 
     # Unwrap an OTLP AnyValue ({stringValue|intValue|boolValue|doubleValue|...}).
-    def any_value(value)
-      return value unless value.is_a?(Hash)
-      return value["stringValue"] if value.key?("stringValue")
-      return value["intValue"] if value.key?("intValue")
-      return value["boolValue"] if value.key?("boolValue")
-      return value["doubleValue"] if value.key?("doubleValue")
-      # arrayValue/kvlistValue: keep the raw structure rather than guessing.
-      value["arrayValue"] || value["kvlistValue"] || nil
-    end
+    def any_value(value) = Logs::AttributeValue.unwrap(value)
 
     # OTLP byte fields (trace/span ids) are base64 in canonical OTLP/JSON, but
     # many exporters send hex. Accept hex directly; otherwise base64-decode to

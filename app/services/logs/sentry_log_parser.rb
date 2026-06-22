@@ -52,8 +52,7 @@ module Logs
     # Sentry attribute values are {"value" => x, "type" => "string"} objects;
     # tolerate a bare scalar too.
     def attr(attrs, key)
-      v = attrs[key]
-      v.is_a?(Hash) ? v["value"] : v
+      Logs::AttributeValue.unwrap(attrs[key])
     end
 
     def parse_ts(ts)
