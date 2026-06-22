@@ -124,6 +124,20 @@ module Mcp
       assert_match "trace line 1", tool_text
     end
 
+    test "get_transaction surfaces the trace_id from spans so logs can be cross-referenced" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "ProductsController#show", duration: 120)
+      Span.create!(project_id: project.id, transaction_id: txn.transaction_id,
+        span_id: SecureRandom.hex(8), trace_id: "txn-trace-xyz",
+        timestamp: Time.current, sequence: 0, depth: 0)
+
+      call_tool("get_transaction", {"transaction_id" => txn.id})
+      assert_response :success
+      assert_match "txn-trace-xyz", tool_text
+      assert_match "get_trace_logs", tool_text
+    end
+
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
     end

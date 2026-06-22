@@ -838,7 +838,13 @@ module Mcp
 
     def get_transaction(args)
       transaction = find_transaction(args["transaction_id"])
-      render_text(format_transaction_detail(transaction))
+      # trace_id lives on spans, not the transaction row. Resolve it so the
+      # detail output can point an agent at get_trace_logs (mirrors the
+      # transaction→logs link in the web UI).
+      trace_id = Span.where(project_id: transaction.project_id, transaction_id: transaction.transaction_id)
+        .limit(1)
+        .pick(:trace_id)
+      render_text(format_transaction_detail(transaction, trace_id))
     end
 
     def get_transaction_spans(args)
@@ -1370,7 +1376,7 @@ module Mcp
       result
     end
 
-    def format_transaction_detail(txn)
+    def format_transaction_detail(txn, trace_id = nil)
       result = "## Transaction ##{txn.id}: #{txn.transaction_name}\n\n"
       result += "**Transaction UUID:** #{txn.transaction_id}\n"
       result += "**Duration:** #{txn.duration.round}ms\n"
@@ -1379,6 +1385,10 @@ module Mcp
       result += "**Environment:** #{txn.environment}\n" if txn.environment
       result += "**Release:** #{txn.release}\n" if txn.release
       result += "**Server:** #{txn.server_name}\n" if txn.server_name
+      if trace_id.present?
+        result += "**Trace:** #{trace_id}\n"
+        result += "_Call `get_trace_logs` with this trace_id for the correlated log lines._\n"
+      end
 
       if txn.db_time || txn.view_time
         result += "\n### Time Breakdown\n"
