@@ -54,7 +54,6 @@ class LogsController < ApplicationController
   def related_transaction
     return nil if @log.trace_id.blank?
     txn_uuid = Span.where(project_id: @project.id, trace_id: @log.trace_id)
-      .where.not(transaction_id: nil)
       .limit(1)
       .pick(:transaction_id)
     return nil unless txn_uuid

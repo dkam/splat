@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_21_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
   create_table "spans", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.json "data"
@@ -28,6 +28,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_21_000002) do
     t.string "trace_id"
     t.string "transaction_id", null: false
     t.index ["project_id", "op", "timestamp"], name: "index_spans_on_project_id_and_op_and_timestamp"
+    t.index ["project_id", "trace_id"], name: "index_spans_on_project_id_and_trace_id"
     t.index ["project_id", "transaction_id", "sequence"], name: "index_spans_on_project_id_and_transaction_id_and_sequence"
     t.index ["timestamp"], name: "index_spans_on_timestamp"
   end
