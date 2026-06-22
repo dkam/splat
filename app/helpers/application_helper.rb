@@ -96,6 +96,26 @@ module ApplicationHelper
     end
   end
 
+  # Compact label for a release string. Booko's releases look like
+  # "2026-06-22T13:00:00+10:00-<40-char git sha>" — far too wide for a table
+  # cell. When the value matches that shape we show "Jun 22 13:00 · 80541a9";
+  # otherwise we fall back to a plain truncation. The full release is always
+  # kept in the element's title attribute (see the view), so nothing is lost.
+  def format_release(release)
+    return nil if release.blank?
+
+    timestamp, _, sha = release.rpartition("-")
+    if timestamp.present? && sha.match?(/\A[0-9a-f]{7,40}\z/i)
+      begin
+        return "#{Time.parse(timestamp).strftime("%b %-d %H:%M")} · #{sha[0, 7]}"
+      rescue ArgumentError
+        # not a parseable timestamp — drop through to the generic truncation
+      end
+    end
+
+    truncate(release, length: 20)
+  end
+
   # Return CSS class based on duration performance
   def duration_color_class(ms)
     return "text-gray-400 dark:text-gray-500" if ms.nil?
