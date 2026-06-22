@@ -739,7 +739,7 @@ module Mcp
       limit = (args["limit"]&.to_i || 50).clamp(1, 200)
 
       logs = Log.where(timestamp: time_range_hours.hours.ago..Time.current).recent
-      logs = logs.search_body(args["query"]) if args["query"].present?
+      logs = logs.search_text(args["query"]) if args["query"].present?
       logs = logs.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
       logs = logs.by_logger(args["logger"]) if args["logger"].present?
       logs = logs.for_trace(args["trace_id"]).reorder(timestamp: :desc) if args["trace_id"].present?

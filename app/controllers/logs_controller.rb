@@ -18,7 +18,7 @@ class LogsController < ApplicationController
     logs = logs.by_level(@level) if @level && Log.levels.key?(@level)
     logs = logs.for_trace(@trace_id).reorder(timestamp: :desc) if @trace_id
     logs = logs.by_environment(@environment) if @environment
-    logs = logs.search_body(@query) if @query
+    logs = logs.search_text(@query) if @query
 
     @pagy, @logs = pagy(logs, limit: 50)
 

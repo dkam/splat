@@ -42,6 +42,9 @@ class Logs::OtlpLogParserTest < ActiveSupport::TestCase
     assert_equal "db-1", r[:server_name]
     assert_equal "pg.scraper", r[:logger_name]
     assert_equal "otlp", r[:source]
+    # resource + record attrs flattened for the FTS index
+    assert_includes r[:attrs_text], "db.system"
+    assert_includes r[:attrs_text], "postgresql"
   end
 
   test "recovers trace_id/span_id from a sqlcommenter traceparent in the body" do

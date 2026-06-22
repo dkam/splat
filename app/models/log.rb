@@ -25,9 +25,23 @@ class Log < LogsRecord
   scope :by_logger, ->(name) { where(logger_name: name) }
   scope :by_environment, ->(env) { where(environment: env) }
   scope :in_range, ->(range) { range ? where(timestamp: range) : all }
-  # Body is in the compressed blob, but we also promote it to a column so list
-  # views and substring search don't decompress per row.
-  scope :search_body, ->(text) { where("body LIKE ?", "%#{sanitize_sql_like(text)}%") }
+  # Free-text search over message body + flattened attributes via the logs_fts
+  # FTS5 index (see config/initializers/logs_fts.rb). Falls back to all when the
+  # query has no usable terms.
+  scope :search_text, ->(text) {
+    q = fts_query(text)
+    q ? where("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?)", q) : all
+  }
+
+  # Turn free user input into a safe FTS5 MATCH expression: extract word tokens
+  # and AND them as quoted phrases, so punctuation/operators in the input can't
+  # break the query or inject FTS syntax. Returns nil when there's nothing to
+  # search.
+  def self.fts_query(text)
+    terms = text.to_s.scan(/[\p{Alnum}_]+/)
+    return nil if terms.empty?
+    terms.map { |t| %("#{t}") }.join(" ")
+  end
 
   # Decoded-payload readers (lazy; only decompress the blob on access).
   def payload_attributes = payload&.dig("attributes") || {}

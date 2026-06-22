@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_22_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_22_000004) do
   create_table "compression_dictionaries", force: :cascade do |t|
     t.boolean "active", default: false, null: false
     t.float "baseline_ratio"
@@ -39,6 +39,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000003) do
   end
 
   create_table "logs", force: :cascade do |t|
+    t.text "attrs_text"
     t.text "body"
     t.datetime "created_at", null: false
     t.bigint "dict_id"

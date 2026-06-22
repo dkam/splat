@@ -71,6 +71,7 @@ module Logs
         release: resource_attrs["service.version"],
         server_name: resource_attrs["host.name"] || resource_attrs["server.address"] || resource_attrs["service.name"],
         source: SOURCE,
+        attrs_text: Logs::AttrsText.build(resource_attrs.merge(attrs)),
         payload: rec
       }
     end

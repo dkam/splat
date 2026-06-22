@@ -44,6 +44,7 @@ module Logs
         release: attr(attrs, "sentry.release"),
         server_name: attr(attrs, "server.address") || attr(attrs, "sentry.server_name"),
         source: SOURCE,
+        attrs_text: Logs::AttrsText.build(attrs),
         payload: rec
       }
     end

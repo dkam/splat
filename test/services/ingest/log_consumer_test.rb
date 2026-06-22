@@ -11,7 +11,7 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
       timestamp: Time.current, level: Log.levels["error"], severity_number: 17,
       body: "kaboom", logger_name: "rails", trace_id: "t1", span_id: "s1",
       environment: "production", release: "9.9.9", server_name: "web-2",
-      source: "sentry", payload: {"body" => "kaboom"}
+      source: "sentry", attrs_text: "user_id 4242", payload: {"body" => "kaboom"}
     }
 
     row = @consumer.send(:build_row, @project, rec)
@@ -21,6 +21,7 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
     assert_equal "kaboom", row[:body]
     assert_equal "t1", row[:trace_id]
     assert_equal "sentry", row[:source]
+    assert_equal "user_id 4242", row[:attrs_text]
     refute_nil row[:log_id]
     refute_nil row[:payload_blob]
     assert_equal({"body" => "kaboom"}, Compression::Codec.decode_json(row[:payload_blob], db: :logs, dict_id: row[:dict_id]))

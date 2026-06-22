@@ -34,6 +34,10 @@ class Logs::SentryLogParserTest < ActiveSupport::TestCase
     assert_equal "sentry", first[:source]
     assert_equal payload["items"].first, first[:payload]
     assert_instance_of Time, first[:timestamp]
+    # attrs flattened to "key value …" for the FTS index
+    assert_includes first[:attrs_text], "logger.name"
+    assert_includes first[:attrs_text], "rails"
+    assert_includes first[:attrs_text], "production"
   end
 
   test "maps the 'warning' alias onto warn" do
