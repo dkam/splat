@@ -141,16 +141,54 @@ x-common-variables: &common-variables
   # MCP Authentication Token
   MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
 
-  # Tuber work queue — ingestion is enqueued here. Container-to-container
-  # DNS uses the service name on the container port (11300).
+  # Splat reports its own errors/traces to a Sentry-compatible DSN (often itself).
+  SENTRY_DSN: ${SENTRY_DSN}
+  SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
+
+  # Token shared with any upstream Splat that forwards envelopes to this one.
+  SPLAT_FORWARDER_TOKEN: ${SPLAT_FORWARDER_TOKEN}
+
+  # Send Rails logs to stdout so `docker compose logs <service>` works without
+  # fiddling with bind-mount permissions on log/production.log.
+  RAILS_LOG_TO_STDOUT: "true"
+
+  # Tuber work queue — ingestion is enqueued here. Container-to-container DNS
+  # uses the service name on the container port (11300); the host-side 11330
+  # mapping below is irrelevant inside the compose network.
   TUBER_URL: tuber:11300
 
+# Shared config for the non-web Rails containers (worker + scheduler). They run
+# the same image as web with a different command and no published ports.
+x-splat-worker: &splat-worker
+  image: ghcr.io/dkam/splat:latest
+  pull_policy: always
+  restart: unless-stopped
+  depends_on:
+    - tuber
+  volumes:
+    - /storage/splat/storage:/rails/storage
+  environment:
+    <<: *common-variables
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "3"
+
 services:
-  splat:
+  # HTTP server: ingest API, MCP endpoint, and the UI.
+  web:
     image: ghcr.io/dkam/splat:latest
     pull_policy: always   # :latest moves on each release; always re-pull on `up -d`
     environment:
       <<: *common-variables
+      # OIDC is only needed by the web tier (see Authentication below).
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME}
+      OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
+      SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
     volumes:
       - /storage/splat/storage:/rails/storage
       - /storage/splat/logs/web:/rails/log
@@ -165,30 +203,33 @@ services:
         max-size: "100m"
         max-file: "5"
 
-  jobs:
-    image: ghcr.io/dkam/splat:latest
-    pull_policy: always   # :latest moves on each release; always re-pull on `up -d`
-    environment:
-      <<: *common-variables
-      SOLID_QUEUE_THREADS: 3
-      SOLID_QUEUE_PROCESSES: 1
+  # Drains the Tuber tubes: ingestion (events/transactions/spans/logs) plus the
+  # maintenance tube (retention, histogram rollups, dictionary training, storage
+  # stats). Safe to scale to multiple replicas.
+  worker:
+    <<: *splat-worker
+    command: bin/ingest_worker
     volumes:
       - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/jobs:/rails/log
-    command: bundle exec bin/jobs
-    depends_on:
-      - tuber
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
+      - /storage/splat/logs/worker:/rails/log
+    mem_limit: 512M
+
+  # Fires recurring jobs (config/schedule.yml) onto the maintenance tube. Run
+  # exactly ONE replica — bin/scheduler has no cross-process lock, so a second
+  # instance would double every cron fire.
+  scheduler:
+    <<: *splat-worker
+    command: bin/scheduler
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/scheduler:/rails/log
+    mem_limit: 256M
 
   tuber:
     image: ghcr.io/tuberq/tuber:latest
     # The image entrypoint is the bare `tuber` binary; it needs a subcommand.
-    command: server
+    # --migrate-wal upgrades an older binlog format in place on start.
+    command: server --migrate-wal
     environment:
       - TUBER_NAME=splat
       - TUBER_LISTEN=0.0.0.0

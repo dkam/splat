@@ -12,7 +12,7 @@ class StorageStats
   # survives restarts, so the snapshot is the refresher's responsibility, not
   # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule. Bump the
   # version suffix if the snapshot shape changes.
-  CACHE_KEY = "storage_stats/snapshot/v2"
+  CACHE_KEY = "storage_stats/snapshot/v3"
 
   # Compressed payload tables: [ui label, AR base class, codec db, table].
   # Defined on the class (not in `class << self`) so the settings view can
@@ -26,6 +26,16 @@ class StorageStats
   # Rows to decode per table to estimate the compression ratio. A few hundred
   # is plenty for a stable ratio and stays well under a second.
   COMPRESSION_SAMPLE = 500
+
+  # Per-DB compression-dictionary state for the settings page:
+  # [ui label, dict AR model, AR base class (for the runs table connection)].
+  DICTIONARIES = [
+    ["Events", "Compression::IssuesEventsDict", "IssuesEventsRecord"],
+    ["Logs", "Compression::LogsDict", "LogsRecord"]
+  ].freeze
+
+  # How many recent training runs to keep per DB in the snapshot.
+  RECENT_TRAINING_RUNS = 10
 
   class << self
     # The precomputed snapshot the settings page renders, or nil if one has
@@ -41,7 +51,8 @@ class StorageStats
     def refresh!
       groups = sqlite_tables_grouped
       total = groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
-      snap = {groups: groups, total: total, compression: compression_estimate, collected_at: Time.current}
+      snap = {groups: groups, total: total, compression: compression_estimate,
+              dictionaries: dictionary_status, collected_at: Time.current}
       Rails.cache.write(CACHE_KEY, snap)
       snap
     end
@@ -95,6 +106,41 @@ class StorageStats
     rescue => e
       Rails.logger.warn("StorageStats.compression_estimate failed: #{e.class}: #{e.message}")
       []
+    end
+
+    # Per-DB compression-dictionary state: the trained zstd dictionaries (one
+    # active per segment) plus the most recent training-run log entries. Cheap
+    # — both tables are tiny — but only called from the StorageStatsJob so the
+    # request path stays a single cache read. A nil trained_at / empty runs is
+    # meaningful (e.g. a seeded dict the daily drift job has never revisited),
+    # so the view renders those states rather than hiding them.
+    def dictionary_status
+      DICTIONARIES.filter_map do |label, model_name, base_name|
+        model = model_name.constantize
+        conn = base_name.constantize.connection
+
+        dicts = model.order(:segment, version: :desc).map do |d|
+          {segment: d.segment, version: d.version, active: d.active,
+           trained_at: d.trained_at, baseline_ratio: d.baseline_ratio,
+           sample_count: d.sample_count}
+        end
+
+        runs = conn.select_all(<<~SQL).to_a.map do |r|
+          SELECT segment, ran_at, samples, current_ratio, candidate_ratio,
+                 gain, promoted, promoted_to_version, notes
+          FROM dictionary_training_runs ORDER BY ran_at DESC LIMIT #{RECENT_TRAINING_RUNS}
+        SQL
+          {segment: r["segment"], ran_at: parse_time(r["ran_at"]), samples: r["samples"],
+           current_ratio: r["current_ratio"], candidate_ratio: r["candidate_ratio"],
+           gain: r["gain"], promoted: r["promoted"].to_i == 1,
+           promoted_to_version: r["promoted_to_version"], notes: r["notes"]}
+        end
+
+        {name: label, dicts: dicts, runs: runs}
+      rescue => e
+        Rails.logger.warn("StorageStats.dictionary_status(#{label}) failed: #{e.class}: #{e.message}")
+        nil
+      end
     end
 
     # Ask the maintenance pool to (re)build the snapshot. Idempotent via the
@@ -156,6 +202,15 @@ class StorageStats
           total_bytes: table_bytes + index_bytes
         }
       }.sort_by { |t| -t[:total_bytes] }
+    end
+
+    # SQLite returns datetimes as strings over a raw connection. Coerce to Time
+    # for consistent formatting in the view; tolerate nil/garbage.
+    def parse_time(value)
+      return value if value.nil? || value.is_a?(Time)
+      Time.zone ? Time.zone.parse(value.to_s) : Time.parse(value.to_s)
+    rescue ArgumentError, TypeError
+      nil
     end
 
     def page_bytes_by_object(conn)
