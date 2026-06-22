@@ -87,10 +87,6 @@ group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
-
-  # ostruct is no longer a default gem in Ruby 4.0; a service test uses OpenStruct.
-  # (Previously came in transitively via kamal, now removed.)
-  gem "ostruct"
 end
 
 gem "sentry-rails"

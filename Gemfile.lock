@@ -228,7 +228,6 @@ GEM
       tzinfo
       validate_url
       webfinger (~> 2.0)
-    ostruct (0.6.3)
     pagy (9.4.0)
     parallel (2.1.0)
     parser (3.3.11.1)
@@ -450,7 +449,6 @@ DEPENDENCIES
   jwt
   letter_opener
   openid_connect
-  ostruct
   pagy (~> 9.0)
   propshaft
   puma (>= 5.0)

@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "ostruct"
 
 class DsnAuthenticationServiceTest < ActiveSupport::TestCase
   setup do
@@ -72,9 +71,9 @@ class DsnAuthenticationServiceTest < ActiveSupport::TestCase
 
   test "extracts public key from Sentry header with multiple params" do
     header = "Sentry sentry_key=#{@project.public_key}, sentry_version=7, sentry_client=ruby-sdk/1.0.0, sentry_timestamp=1234567890"
-    extracted_key = DsnAuthenticationService.extract_public_key(
-      OpenStruct.new(headers: {"X-Sentry-Auth" => header}, GET: {})
-    )
+    request = ActionDispatch::TestRequest.create
+    request.headers["X-Sentry-Auth"] = header
+    extracted_key = DsnAuthenticationService.extract_public_key(request)
 
     assert_equal @project.public_key, extracted_key
   end
