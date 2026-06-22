@@ -7,7 +7,7 @@ Splat is a simple error tracker and lightweight backend APM. It's a fast, reliab
 
 Splat supports OIDC but defaults to no authentication. It has an MCP endpoint for your LLM Agents to use. This app was Agentically Engineered, partnering with GLM / Sonnet / Opus. 
 
-Initially built as an experiment in using SQLite in a write-heavy service, it's performed well enough for my use case, growing into a capable error tracker and a focused backend APM — exception grouping plus transaction tracing, span waterfalls, latency percentiles, and N+1 detection, all queryable by an LLM over MCP.
+Initially built as an experiment in using SQLite in a write-heavy service, it's performed well enough for my use case, growing into a capable error tracker, a focused backend APM, and a structured log store — exception grouping plus transaction tracing, span waterfalls, latency percentiles, N+1 detection, and full-text searchable logs that tie back to traces, all queryable by an LLM over MCP.
 
 I've only used Splat with Rails, but there's no reason it shouldn't work with other systems. Happy to accept pull requests for wider compatibility.
 
@@ -34,6 +34,13 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 - ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
 - ✅ **N+1 Query Detection** - Mines `measurements.query_analysis` from the transaction span analyzer, ranks endpoints by N+1 prevalence, exposes a dedicated worklist and an MCP tool
 - ✅ **Trends & Comparison** - Hourly pre-aggregates power time-series charts and release-over-release endpoint comparison
+
+**Logs**
+- ✅ **Structured Log Ingestion** - Accepts both Sentry Logs (envelope item type `log`) and OpenTelemetry over OTLP/HTTP (`POST /v1/logs`), normalized into one searchable shape
+- ✅ **Full-Text Search** - SQLite FTS5 over message body *and* flattened attributes, with a `key:value` shorthand (e.g. `status:422 method:POST timeout`)
+- ✅ **Trace Correlation** - Logs carry `trace_id`, so a log links to its transaction and a transaction links back to its logs (sampling-aware — the link only appears when the other side exists)
+- ✅ **zstd Dictionary Compression** - The full record (including attributes) is compressed into a blob with a trained zstd dictionary; hot query/display fields are promoted to columns
+- ✅ **Level & Environment Facets** - Filter by severity (Sentry trace→fatal or bucketed OTLP severity numbers) and environment
 
 **Platform**
 - ✅ **Sentry Protocol Compatible** - Drop-in replacement for Sentry client SDKs
@@ -383,6 +390,19 @@ Splat flags endpoints that issue the same query in a loop — the classic N+1 �
 
 **Heuristic, not a profiler.** This is a count-of-repeated-patterns signal, deliberately simple. Unlike in-process tools such as [Prosopite](https://github.com/charkost/prosopite) — which group queries by call-site from a live backtrace — Splat only has the stored SQL text, so it can't tell a genuine loop from the same query shape legitimately reached via different code paths. The `> 3` threshold and the infrastructure denylist keep false positives down; treat a flag as "worth a look," then confirm against the transaction's span waterfall.
 
+### Structured Logs
+
+Splat ingests structured logs alongside errors and transactions, into their own SQLite database (separate retention, separate file). Two wire formats are accepted and normalized into a single shape at ingest:
+
+- **Sentry Logs** — envelope item type `log`, sent by the same SDK already pointed at Splat.
+- **OpenTelemetry** — OTLP/HTTP, JSON-encoded, at `POST /v1/logs`. Severity numbers are bucketed onto Sentry's `trace → debug → info → warn → error → fatal` scale so both sources share one level enum.
+
+**Compact storage.** The full record — message plus arbitrary attributes — is compressed into a blob using a trained zstd dictionary (logs are small and repetitive, so a shared dictionary pays off far more than per-row compression). The hot fields used for listing and filtering (timestamp, level, logger, environment, `trace_id`, `span_id`) are promoted to real columns and indexed; everything else is decompressed only when you open a single log.
+
+**Full-text search.** An FTS5 index covers both the message body and the *flattened* attributes, kept in sync with the table on insert/delete. The search box accepts free text (each token ANDed) plus a `key:value` shorthand that scopes a value to its attribute — so `status:422` matches a `422` stored under `status`, not some unrelated field. Pasted UUIDs are collapsed to a single token so a hyphenated id matches the way it's indexed.
+
+**Trace correlation.** Because logs carry `trace_id`, the log detail page links to its transaction and the transaction detail page links back to "View N logs for this trace." The two directions are deliberately lopsided: logs are ingested at ~100% while transactions are typically sampled (e.g. 1–10%), so the log→transaction link only appears when that trace happened to be sampled, while transaction→logs almost always resolves. Each link only renders when the other side actually exists, so you never land on an empty page.
+
 ## Maintenance
 
 ### Data Retention and Cleanup
@@ -392,6 +412,8 @@ Splat automatically cleans up old data to manage database size and maintain perf
 #### Default Retention Periods
 - **Events/Issues**: 90 days (configurable via `SPLAT_MAX_EVENT_LIFE_DAYS`)
 - **Transactions**: 90 days (configurable via `SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS`)
+- **Spans**: 30 days (span volume is far higher than transactions)
+- **Logs**: 14 days (configurable on the Settings page; logs are high-volume)
 - **Files**: 90 days (configurable via `SPLAT_MAX_FILE_LIFE_DAYS`)
 
 #### Cleanup Process
@@ -544,6 +566,7 @@ Splat uses SQLite databases. Two recommended backup strategies:
 
 ### What to Backup
 - `storage/production.sqlite3` - Events, issues, transactions (critical)
+- `storage/production_logs.sqlite3` - Structured logs (critical if you rely on them)
 - `storage/production_queue.sqlite3` - Background jobs (recommended)
 - `storage/production_cache.sqlite3` - Performance counters (optional)
 
@@ -655,6 +678,11 @@ Claude Code (VS Code extension) supports HTTP transport. In your workspace, you 
 - `compare_endpoint_performance` - Before/after percentile comparison around a release or timestamp
 - `get_transaction` - Get detailed transaction breakdown
 
+**Logs:**
+- `search_logs` - Search structured logs by level, logger, trace, environment, or message text
+- `get_log` - Get a single log record by `log_id`, including decompressed attributes
+- `get_trace_logs` - Get all logs sharing a `trace_id`, oldest first — ties logs to a transaction/trace
+
 ### Usage Examples
 
 Once configured, you can ask Claude:
@@ -664,6 +692,8 @@ Once configured, you can ask Claude:
 - "Which endpoints have N+1 query problems?" → ranked worklist
 - "Show the p95 of UsersController#show over the last 7 days, hourly"
 - "Compare AlertsController#index performance before and after release v1.42.0"
+- "Search the logs for `status:422` POST requests in the last hour"
+- "Show me every log line for trace abc123 in order" → reconstructs a request timeline
 
 ## Full List of Environment Variables
 ```
