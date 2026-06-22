@@ -47,6 +47,27 @@ Rails.application.configure do
         end
       end
 
+      # Structured logs → splat-splat, so Splat dogfoods its own logs feature as
+      # a low-traffic source. enable_logs also makes sentry-rails attach its log
+      # subscribers; keep only action_controller (one log per request) and drop
+      # the default active_record subscriber, whose per-SQL-query logs would
+      # firehose splat-splat given Splat's own ingest write volume.
+      config.enable_logs = true
+      config.rails.structured_logging.subscribers = {
+        action_controller: Sentry::Rails::LogSubscribers::ActionControllerSubscriber
+      }
+
+      # Keep splat-splat low-traffic: drop request logs from Splat's high-volume
+      # server paths (envelope ingest, MCP, health/up) — the same paths the
+      # traces sampler treats as pipeline — leaving just the admin web UI.
+      config.before_send_log = lambda do |log|
+        path = log.attributes[:path].to_s
+        controller = log.attributes[:controller].to_s
+        high_volume = path.start_with?("/api", "/mcp", "/_health", "/up") ||
+          controller.start_with?("Api::", "Mcp::")
+        high_volume ? nil : log
+      end
+
       # Filter out sensitive data
       config.send_default_pii = false
 
