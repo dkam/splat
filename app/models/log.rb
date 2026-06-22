@@ -39,7 +39,9 @@ class Log < LogsRecord
   def self.fts_query(text)
     return nil if text.blank?
 
-    clauses = text.to_s.split(/\s+/).filter_map do |term|
+    # Collapse pasted UUIDs the same way the index does, so a hyphenated UUID
+    # matches its single stored token instead of fragmenting into five terms.
+    clauses = Logs::Uuid.collapse(text.to_s).split(/\s+/).filter_map do |term|
       if term.include?(":")
         # key:value — match the key and its value as an adjacent phrase.
         # attrs_text stores "… key value …" with the value's tokens right after

@@ -25,7 +25,9 @@ module Logs
         out << key.to_s
         scalar = unwrap(value)
         str = scalar.to_s
-        out << str unless scalar.nil? || str.empty? || str.match?(FLOAT_VALUE)
+        # Collapse hyphenated UUIDs to one token so they index as a single,
+        # exact-matchable term instead of five hyphen-split fragments.
+        out << Logs::Uuid.collapse(str) unless scalar.nil? || str.empty? || str.match?(FLOAT_VALUE)
       end
       out.join(" ").presence
     end

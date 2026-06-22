@@ -52,6 +52,17 @@ class LogFtsTest < ActiveSupport::TestCase
     assert_equal [hit.id], Log.search_text("status:422 boom").pluck(:id)
   end
 
+  test "a UUID is indexed and searched as one collapsed token (exact match, no fragment match)" do
+    uuid = "550e8400-e29b-41d4-a716-446655440000"
+    hit = create_log(body: "request done", attrs_text: Logs::AttrsText.build({"request_id" => uuid}))
+
+    # full UUID (hyphenated or not) matches the single stored token
+    assert_equal [hit.id], Log.search_text(uuid).pluck(:id)
+    assert_equal [hit.id], Log.search_text(uuid.delete("-")).pluck(:id)
+    # a fragment no longer loosely matches — it's not a standalone token anymore
+    assert_empty Log.search_text("e29b").to_a
+  end
+
   test "punctuation/operators in the query never raise and just match tokens" do
     hit = create_log(body: "user_id=4242 failed")
     # Quotes/operators are stripped to tokens, so this matches rather than
