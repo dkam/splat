@@ -12,6 +12,12 @@
       <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 px-2 py-1 rounded"><%= @transaction.transaction_id %></span>
       <span>•</span>
       <span><%= @transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S.%L") %></span>
+      <% if @trace_log_count > 0 %>
+        <span>•</span>
+        <%= link_to "View #{pluralize(@trace_log_count, "log")} for this trace →",
+            project_logs_path(@project.slug, trace_id: @trace_id),
+            class: "text-blue-600 dark:text-blue-400 hover:underline" %>
+      <% end %>
     </div>
   </div>
 

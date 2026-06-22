@@ -13,6 +13,13 @@ class TransactionsController < ApplicationController
       near_timestamp: @transaction.timestamp
     )
 
+    # trace_id lives on spans, not the transaction row. Resolve it so the view
+    # can link transaction → logs (the reverse of the log detail's trace link).
+    @trace_id = Span.where(project_id: @project.id, transaction_id: @transaction.transaction_id)
+      .limit(1)
+      .pick(:trace_id)
+    @trace_log_count = @trace_id ? Log.where(project_id: @project.id, trace_id: @trace_id).count : 0
+
     respond_to do |format|
       format.html
       format.json { render json: transaction_data }
