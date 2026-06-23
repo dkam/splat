@@ -55,7 +55,8 @@ module Compression
       promoted_version = nil
       if gain > GAIN_THRESHOLD
         promoted_version = promote!(db: db, segment: segment, bytes: candidate_bytes,
-          baseline_ratio: candidate_size.to_f / eval_set.sum(&:bytesize))
+          baseline_ratio: candidate_size.to_f / eval_set.sum(&:bytesize),
+          sample_count: samples.size)
       end
 
       log_run(
@@ -144,7 +145,7 @@ module Compression
       samples.sum { |s| Zstd.compress(s, level: Compression::Codec::LEVEL).bytesize }
     end
 
-    def promote!(db:, segment:, bytes:, baseline_ratio:)
+    def promote!(db:, segment:, bytes:, baseline_ratio:, sample_count:)
       klass = dict_model_for(segment)
       klass.transaction do
         klass.where(segment: segment, active: true).update_all(active: false)
@@ -154,7 +155,7 @@ module Compression
           version: next_version,
           dict: bytes,
           trained_at: Time.current,
-          sample_count: SAMPLES,
+          sample_count: sample_count,
           baseline_ratio: baseline_ratio,
           active: true
         )
