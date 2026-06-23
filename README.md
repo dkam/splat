@@ -45,7 +45,7 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 **Platform**
 - ✅ **Sentry Protocol Compatible** - Drop-in replacement for Sentry client SDKs
 - ✅ **MCP Integration** - Query errors and performance data via Claude and other AI assistants
-- ✅ **Single-Tenant Design** - Simple setup, no user management overhead
+- ✅ **Single-Tenant, Multi-Project** - Group events under multiple projects/DSNs; no user or team management overhead
 - ✅ **Minimal Dependencies** - Rails + SQLite + Tuber (a single-binary work queue)
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
 
