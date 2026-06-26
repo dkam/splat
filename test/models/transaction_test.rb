@@ -26,6 +26,19 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal 250, transaction.duration # 250ms
   end
 
+  test "create_from_sentry_payload! promotes trace_id from the trace context" do
+    payload = {
+      "transaction" => "GET /x",
+      "start_timestamp" => 1_700_000_000.0,
+      "timestamp" => 1_700_000_000.1,
+      "contexts" => {"trace" => {"op" => "http.server", "trace_id" => "promote-me"}}
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace", payload, @project)
+
+    assert_equal "promote-me", transaction.trace_id
+  end
+
   test "create_from_sentry_payload! includes HTTP context" do
     payload = {
       "transaction" => "UsersController#show",

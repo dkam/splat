@@ -47,16 +47,11 @@ class LogsController < ApplicationController
     @project = Project.find_by(slug: params[:project_slug]) || Project.find(params[:project_slug])
   end
 
-  # If the log carries a trace_id, try to find the matching transaction so the
-  # detail view can link log → trace. trace_id lives on spans, so resolve the
-  # span's transaction_id (a UUID) to the Transaction record (numeric PK the
-  # show route expects).
+  # If the log carries a trace_id, find the matching transaction so the detail
+  # view can link log → trace. trace_id is promoted onto the transaction, so this
+  # is a direct lookup (index: transactions on [project_id, trace_id]).
   def related_transaction
     return nil if @log.trace_id.blank?
-    txn_uuid = Span.where(project_id: @project.id, trace_id: @log.trace_id)
-      .limit(1)
-      .pick(:transaction_id)
-    return nil unless txn_uuid
-    Transaction.find_by(project_id: @project.id, transaction_id: txn_uuid)
+    Transaction.find_by(project_id: @project.id, trace_id: @log.trace_id)
   end
 end

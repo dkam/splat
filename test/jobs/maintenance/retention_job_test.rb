@@ -46,6 +46,36 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
     assert_equal 1, surviving, "aggregate history (within 540d) survives"
   end
 
+  def create_span_tree(transaction_id:, timestamp:)
+    SpanTree.create_from_tree!(project_id: @project.id, transaction_id: transaction_id,
+      timestamp: timestamp, tree: {"trace_id" => "t", "spans" => []},
+      span_count: 0, spans_truncated: false)
+  end
+
+  test "span_trees past the span cutoff are purged, recent kept" do
+    Setting.instance.update!(spans_data_retention_days: 30)
+    old = create_span_tree(transaction_id: "old-txn", timestamp: 60.days.ago)
+    recent = create_span_tree(transaction_id: "recent-txn", timestamp: 1.day.ago)
+
+    Maintenance::RetentionJob.new.perform
+
+    refute SpanTree.exists?(old.id), "blob past the 30d span cutoff is purged"
+    assert SpanTree.exists?(recent.id), "recent blob is retained"
+  end
+
+  test "span_trees are cascade-deleted with their aged-out transaction" do
+    Setting.instance.update!(spans_data_retention_days: 30, transactions_data_retention_days: 90)
+    txn = Transaction.create!(project: @project, transaction_id: "casc-txn",
+      transaction_name: "GET /x", timestamp: 200.days.ago, duration: 100)
+    # Blob is within the span window, but its transaction is past the 90d cutoff.
+    blob = create_span_tree(transaction_id: "casc-txn", timestamp: 1.day.ago)
+
+    Maintenance::RetentionJob.new.perform
+
+    refute Transaction.exists?(txn.id)
+    refute SpanTree.exists?(blob.id), "blob cascade-deleted with its transaction"
+  end
+
   test "logs older than the logs cutoff are deleted, recent kept" do
     Setting.instance.update!(logs_data_retention_days: 14)
     old = Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 30.days.ago,

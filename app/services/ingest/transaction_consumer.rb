@@ -24,20 +24,30 @@ module Ingest
         end
 
         # One TransactionsSpansRecord transaction per job: the parent row, its
-        # spans, and the live-hour aggregate bumps commit together or not at all.
-        # On rollback the rescue below marks the job :retry so beanstalkd
+        # span-tree blob, and the live-hour aggregate bumps commit together or not
+        # at all. On rollback the rescue below marks the job :retry so beanstalkd
         # redelivers it. create_from_sentry_payload! is idempotent on
         # (project_id, transaction_id): a redelivery finds the existing row and
         # skips the save, leaving previously_new_record? false. The aggregate
         # bumps fire from Transaction's after_create (only on a real insert), so
-        # redelivery can't double-count; we still gate spans on
-        # previously_new_record? since they have no unique index.
+        # redelivery can't double-count; we gate the span-tree write on
+        # previously_new_record? too — the span_trees unique index would otherwise
+        # raise on redelivery and bounce the whole job into a retry loop.
         transaction = nil
         TransactionsSpansRecord.transaction do
           transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
           if transaction.previously_new_record?
             span_rows = build_span_rows(transaction, args["payload"])
-            Span.insert_all!(span_rows) if span_rows.any?
+            if span_rows.any?
+              SpanTree.create_from_tree!(
+                project_id: transaction.project_id,
+                transaction_id: transaction.transaction_id,
+                timestamp: transaction.timestamp,
+                tree: build_span_tree(span_rows),
+                span_count: span_rows.size,
+                spans_truncated: transaction.spans_truncated
+              )
+            end
           end
         end
 
@@ -109,10 +119,28 @@ module Ingest
       rows
     end
 
-    # Row for Span.insert_all!. tags/data are :json columns — pass the raw
-    # Hash and let the column type serialize it once. Pre-encoding with
-    # .to_json double-encodes (Rails re-serializes through the json type),
-    # so Span#tags/#data would read back a JSON String instead of a Hash.
+    # Reshape the span rows into the compressed-blob tree: trace_id hoisted once
+    # (constant per transaction), per-span fields inline. The shorter "ts"/"end_ts"
+    # keys are the on-disk form decoded by Span::Node.from_tree — keep the two in
+    # sync. This is the exact shape the compression spot-check measured (~10x plain
+    # zstd). tags/data stay raw Hashes so to_json serializes them once here.
+    def build_span_tree(span_rows)
+      {
+        "trace_id" => span_rows.first[:trace_id],
+        "spans" => span_rows.map do |r|
+          {
+            "span_id" => r[:span_id], "parent_span_id" => r[:parent_span_id],
+            "op" => r[:op], "status" => r[:status], "description" => r[:description],
+            "ts" => r[:timestamp], "end_ts" => r[:end_timestamp],
+            "depth" => r[:depth], "sequence" => r[:sequence],
+            "tags" => r[:tags] || {}, "data" => r[:data] || {}
+          }
+        end
+      }
+    end
+
+    # Row consumed by build_span_tree. tags/data are kept as raw Hashes so the
+    # single tree.to_json (in SpanTree.create_from_tree!) serializes them once.
     def build_span_row(project_id:, trace_id:, transaction_id:, span_id:, parent_span_id:,
       start_ts:, end_ts:, op:, status:, description:, tags:, data:, depth:, sequence:)
       {

@@ -838,13 +838,10 @@ module Mcp
 
     def get_transaction(args)
       transaction = find_transaction(args["transaction_id"])
-      # trace_id lives on spans, not the transaction row. Resolve it so the
-      # detail output can point an agent at get_trace_logs (mirrors the
-      # transaction→logs link in the web UI).
-      trace_id = Span.where(project_id: transaction.project_id, transaction_id: transaction.transaction_id)
-        .limit(1)
-        .pick(:trace_id)
-      render_text(format_transaction_detail(transaction, trace_id))
+      # trace_id is promoted onto the transaction row; the detail output uses it
+      # to point an agent at get_trace_logs (mirrors the transaction→logs link
+      # in the web UI).
+      render_text(format_transaction_detail(transaction, transaction.trace_id))
     end
 
     def get_transaction_spans(args)
