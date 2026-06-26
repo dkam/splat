@@ -26,10 +26,6 @@ class Setting < ApplicationRecord
   def logs_data_cutoff_date = logs_data_retention_days.days.ago
   def histograms_cutoff_date = histograms_retention_days.days.ago
 
-  def forwarding?
-    forward_dsn.present?
-  end
-
   def ntfy_configured?
     ntfy_url.present?
   end
@@ -41,18 +37,9 @@ class Setting < ApplicationRecord
   validates :histograms_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :burst_threshold, numericality: {greater_than: 0, less_than_or_equal_to: 1_000_000}
   validates :ntfy_priority, inclusion: {in: NtfyNotifier::VALID_PRIORITIES}, allow_blank: true
-  validate :forward_dsn_parseable
   validate :ntfy_url_parseable
 
   private
-
-  def forward_dsn_parseable
-    return if forward_dsn.blank?
-
-    EnvelopeForwarder.parse_dsn(forward_dsn)
-  rescue EnvelopeForwarder::InvalidDsn => e
-    errors.add(:forward_dsn, e.message)
-  end
 
   def ntfy_url_parseable
     return if ntfy_url.blank?

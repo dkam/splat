@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_23_230652) do
   create_table "oidc_sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "expires_at", null: false
@@ -28,6 +28,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
     t.boolean "active", default: true
     t.datetime "created_at", null: false
     t.text "description"
+    t.json "forward_dsns", default: []
     t.string "name", null: false
     t.string "platform"
     t.string "public_key", null: false
@@ -55,7 +56,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
     t.integer "burst_threshold", default: 1000, null: false
     t.datetime "created_at", null: false
     t.integer "events_data_retention_days", default: 30, null: false
-    t.string "forward_dsn"
     t.integer "histograms_retention_days", default: 540, null: false
     t.integer "logs_data_retention_days", default: 14, null: false
     t.string "ntfy_priority", default: "default", null: false

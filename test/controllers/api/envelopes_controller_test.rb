@@ -73,7 +73,45 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "enqueues a forward job when the project has forward DSNs" do
+    @project.update!(forward_dsns: ["https://k@downstream.example/9"])
+
+    forward_puts = capture_tuber_puts do
+      post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
+        headers: {"Content-Type" => "application/octet-stream"},
+        params: @valid_envelope
+    end.select { |tube, _| tube == Ingest::Tuber::FORWARD_TUBE }
+
+    assert_response :success
+    assert_equal 1, forward_puts.size
+    payload = forward_puts.first[1]
+    assert_equal @project.id, payload[:project_id]
+    assert_equal ["https://k@downstream.example/9"], payload[:dsns]
+  end
+
+  test "does not enqueue a forward job when the project has no forward DSNs" do
+    forward_puts = capture_tuber_puts do
+      post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
+        headers: {"Content-Type" => "application/octet-stream"},
+        params: @valid_envelope
+    end.select { |tube, _| tube == Ingest::Tuber::FORWARD_TUBE }
+
+    assert_response :success
+    assert_empty forward_puts
+  end
+
   private
+
+  def capture_tuber_puts
+    calls = []
+    Ingest::Tuber.singleton_class.define_method(:put) { |tube, payload, **| calls << [tube, payload] }
+    begin
+      yield
+    ensure
+      Ingest::Tuber.singleton_class.remove_method(:put)
+    end
+    calls
+  end
 
   def create_sample_envelope
     # Create a minimal valid Sentry envelope

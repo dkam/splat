@@ -17,8 +17,28 @@ module Compression
   #
   # Promotion threshold is intentionally conservative — we want fewer,
   # better versions, not version churn.
+  #
+  # Memory: samples are decoded one row at a time and streamed straight to the
+  # tmpdir — never the whole set in RAM. Decoded payloads are far larger than
+  # their stored blobs (a production event is ~3.5 KB stored, ~80 KB decoded,
+  # ~23× — full Sentry payloads with stack traces and breadcrumbs), so holding
+  # 10k of them at once was ~750 MB and OOM-killed the 512 MB ingest worker.
+  # We cap the training corpus by *bytes* (TRAIN_MAX_BYTES), which both bounds
+  # the worker and `zstd --train`'s own footprint, and auto-tunes across
+  # segments (a few fat events, or many small logs — same ceiling). A 112 KB
+  # dict needs only ~20 MB of training data; more adds little, especially on
+  # large payloads where zstd's own window already captures the redundancy.
   class DictTrainingJob
-    SAMPLES = 10_000
+    SAMPLES = 10_000               # max rows to pull into the random pool
+    TRAIN_MAX_BYTES = 24 * 1024 * 1024  # decoded-byte budget for the training set
+    EVAL_RATIO = 5                 # every Nth sample goes to eval (≈20%)
+    # `zstd --train` reads only the first 128 KB of each sample (ZDICT's
+    # per-sample window — facebook/zstd#3111) and warns on "very large"
+    # samples. Truncating training samples to that window is therefore free —
+    # identical training input — and stops a fat payload's unread tail from
+    # eating the TRAIN_MAX_BYTES budget, so it buys more *distinct* samples.
+    # Eval samples are left whole: they measure real end-to-end compression.
+    ZSTD_SAMPLE_WINDOW = 131_072
     LOOKBACK_DAYS = 7
     DICT_MAX_BYTES = 112_640      # zstd default
     GAIN_THRESHOLD = 0.10          # 10% — bottom of the user-stated range
@@ -38,41 +58,55 @@ module Compression
       db = entry[:db]
       Rails.logger.info "[DictTrainingJob] training #{segment}"
 
-      samples = sample_payloads(db: db, table: table, segment: segment, n: SAMPLES)
-      if samples.size < 100
-        log_run(db: db, segment: segment, samples: samples.size, notes: "skipped: too few samples")
-        return
+      Dir.mktmpdir("zstd-train-") do |dir|
+        train_dir = File.join(dir, "train")
+        eval_dir = File.join(dir, "eval")
+        Dir.mkdir(train_dir)
+        Dir.mkdir(eval_dir)
+
+        total = stream_samples(db: db, table: table, segment: segment,
+          train_dir: train_dir, eval_dir: eval_dir)
+        if total < 100
+          log_run(db: db, segment: segment, samples: total, notes: "skipped: too few samples")
+          next
+        end
+
+        candidate_bytes = train_candidate(train_dir)
+
+        eval_files = Dir[File.join(eval_dir, "*")]
+        eval_total = eval_files.sum { |f| File.size(f) }
+        current = active_dict_bytes(db, segment)
+        current_size = current ? compressed_size(eval_files, current) : nil
+        candidate_size = compressed_size(eval_files, candidate_bytes)
+        gain = current.nil? ? 1.0 : (current_size - candidate_size).to_f / current_size
+
+        promoted_version = nil
+        if gain > GAIN_THRESHOLD
+          promoted_version = promote!(db: db, segment: segment, bytes: candidate_bytes,
+            baseline_ratio: candidate_size.to_f / eval_total,
+            sample_count: total)
+        end
+
+        log_run(
+          db: db, segment: segment,
+          samples: total,
+          current_ratio: current ? current_size.to_f / eval_total : nil,
+          candidate_ratio: candidate_size.to_f / eval_total,
+          gain: gain,
+          promoted: !promoted_version.nil?,
+          promoted_to_version: promoted_version
+        )
       end
-
-      train_set, eval_set = split(samples)
-      candidate_bytes = train_candidate(train_set)
-
-      current = active_dict_bytes(db, segment)
-      current_size = compressed_size(eval_set, current)
-      candidate_size = compressed_size(eval_set, candidate_bytes)
-      gain = current.nil? ? 1.0 : (current_size - candidate_size).to_f / current_size
-
-      promoted_version = nil
-      if gain > GAIN_THRESHOLD
-        promoted_version = promote!(db: db, segment: segment, bytes: candidate_bytes,
-          baseline_ratio: candidate_size.to_f / eval_set.sum(&:bytesize),
-          sample_count: samples.size)
-      end
-
-      log_run(
-        db: db, segment: segment,
-        samples: samples.size,
-        current_ratio: current ? current_size.to_f / eval_set.sum(&:bytesize) : nil,
-        candidate_ratio: candidate_size.to_f / eval_set.sum(&:bytesize),
-        gain: gain,
-        promoted: !promoted_version.nil?,
-        promoted_to_version: promoted_version
-      )
     end
 
     private
 
-    def sample_payloads(db:, table:, segment:, n:)
+    # Pull a random pool of rows, decode each one at a time, and write it
+    # straight to the train or eval dir — peak memory is one decoded payload
+    # plus the (compressed) result set, never the whole decoded corpus. Stops
+    # once the training set reaches TRAIN_MAX_BYTES of decoded data. Returns the
+    # number of samples written (train + eval).
+    def stream_samples(db:, table:, segment:, train_dir:, eval_dir:)
       conn = REGISTRY.fetch(table)[:record].constantize.connection
       since = LOOKBACK_DAYS.days.ago
 
@@ -87,11 +121,29 @@ module Compression
            AND payload_blob IS NOT NULL
            #{qualifier_sql}
          ORDER BY RANDOM()
-         LIMIT #{n.to_i}
+         LIMIT #{SAMPLES.to_i}
       SQL
-      rows.rows.map do |(blob, dict_id)|
-        Compression::Codec.decode(blob, db: db, dict_id: dict_id)
-      end.compact
+
+      train_n = 0
+      eval_n = 0
+      train_bytes = 0
+      rows.rows.each do |(blob, dict_id)|
+        payload = Compression::Codec.decode(blob, db: db, dict_id: dict_id)
+        next if payload.nil?
+
+        written = train_n + eval_n
+        if (written % EVAL_RATIO).zero?
+          File.binwrite(File.join(eval_dir, "s-#{eval_n}.json"), payload)
+          eval_n += 1
+        else
+          sample = payload.byteslice(0, ZSTD_SAMPLE_WINDOW)
+          File.binwrite(File.join(train_dir, "s-#{train_n}.json"), sample)
+          train_n += 1
+          train_bytes += sample.bytesize
+        end
+        break if train_bytes >= TRAIN_MAX_BYTES
+      end
+      train_n + eval_n
     end
 
     # Translate a segment qualifier into a SQL fragment + bind. The "platform"
@@ -113,23 +165,13 @@ module Compression
       end
     end
 
-    # Disjoint 80/20 train/eval split, randomised.
-    def split(samples, train_ratio: 0.8)
-      shuffled = samples.shuffle
-      cut = (shuffled.size * train_ratio).floor
-      [shuffled[0...cut], shuffled[cut..]]
-    end
-
-    def train_candidate(samples)
-      Dir.mktmpdir("zstd-train-") do |dir|
-        samples.each_with_index { |bytes, i| File.binwrite(File.join(dir, "sample-#{i}.json"), bytes) }
-        out_path = File.join(dir, "candidate.dict")
-        cmd = ["zstd", "--train", "--maxdict=#{DICT_MAX_BYTES}",
-          "-o", out_path, *Dir[File.join(dir, "sample-*.json")]]
-        out, status = Open3.capture2e(*cmd)
-        raise "zstd --train failed: #{out}" unless status.success?
-        File.binread(out_path)
-      end
+    def train_candidate(train_dir)
+      out_path = File.join(train_dir, "candidate.dict")
+      files = Dir[File.join(train_dir, "s-*.json")]
+      cmd = ["zstd", "--train", "--maxdict=#{DICT_MAX_BYTES}", "-o", out_path, *files]
+      out, status = Open3.capture2e(*cmd)
+      raise "zstd --train failed: #{out}" unless status.success?
+      File.binread(out_path)
     end
 
     def active_dict_bytes(db, segment)
@@ -138,11 +180,13 @@ module Compression
       Compression::DictStore.fetch(db, id).bytes
     end
 
-    def compressed_size(samples, dict_bytes)
-      samples.sum { |s| Zstd.compress(s, level: Compression::Codec::LEVEL, dict: dict_bytes).bytesize }
+    # Compress each eval sample on its own, reading from disk one at a time so
+    # the eval corpus never sits in memory all at once.
+    def compressed_size(eval_files, dict_bytes)
+      eval_files.sum { |f| Zstd.compress(File.binread(f), level: Compression::Codec::LEVEL, dict: dict_bytes).bytesize }
     rescue ArgumentError
       # nil dict_bytes — fall back to plain zstd.
-      samples.sum { |s| Zstd.compress(s, level: Compression::Codec::LEVEL).bytesize }
+      eval_files.sum { |f| Zstd.compress(File.binread(f), level: Compression::Codec::LEVEL).bytesize }
     end
 
     def promote!(db:, segment:, bytes:, baseline_ratio:, sample_count:)

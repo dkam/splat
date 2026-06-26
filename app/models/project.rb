@@ -9,6 +9,7 @@ class Project < ApplicationRecord
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true
   validates :public_key, presence: true, uniqueness: true
+  validate :forward_dsns_parseable
 
   scope :by_slug, ->(slug) { where(slug: slug) }
   scope :by_public_key, ->(key) { where(public_key: key) }
@@ -18,6 +19,22 @@ class Project < ApplicationRecord
   # change the slug and break every client already pointing at the old DSN.
   before_validation :generate_slug, if: -> { name? && slug.blank? }
   before_validation :generate_public_key, if: -> { public_key.blank? }
+
+  # Forwarding targets: zero or more downstream DSNs this project's envelopes
+  # are mirrored to (see EnvelopeForwarder). Stored as a JSON array of strings.
+  def forwarding?
+    forward_dsns.present?
+  end
+
+  # Newline-delimited form for the project edit textarea. The setter splits on
+  # newlines, trims, drops blanks, and dedups so the stored array stays clean.
+  def forward_dsns_text
+    Array(forward_dsns).join("\n")
+  end
+
+  def forward_dsns_text=(value)
+    self.forward_dsns = value.to_s.split("\n").map(&:strip).reject(&:blank?).uniq
+  end
 
   def broadcast_issues_refresh
     # Broadcast to the issues stream for this project
@@ -124,6 +141,17 @@ class Project < ApplicationRecord
   end
 
   private
+
+  # Each forward DSN must be a parseable http(s) DSN. Only scheme/host/port are
+  # used at forward time, but we validate the whole string here so a typo is
+  # caught at save instead of silently failing in the background consumer.
+  def forward_dsns_parseable
+    Array(forward_dsns).each do |dsn|
+      EnvelopeForwarder.parse_dsn(dsn)
+    rescue EnvelopeForwarder::InvalidDsn => e
+      errors.add(:forward_dsns, "#{dsn.inspect}: #{e.message}")
+    end
+  end
 
   def generate_slug
     self.slug = name&.parameterize&.downcase

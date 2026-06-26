@@ -5,6 +5,7 @@ module Ingest
     EVENTS_TUBE = "splat.events"
     TRANSACTIONS_TUBE = "splat.transactions"
     LOGS_TUBE = "splat.logs"
+    FORWARD_TUBE = "splat.forward"
     MAINTENANCE_TUBE = "splat.maintenance"
     ACTIVEJOB_TUBE = "splat.activejob"
 
@@ -46,7 +47,7 @@ module Ingest
       # Pending jobs across the ingest pipeline. Used by the health endpoint
       # and the layout chrome to show backlog at a glance.
       INGEST_TUBES = [
-        EVENTS_TUBE, TRANSACTIONS_TUBE,
+        EVENTS_TUBE, TRANSACTIONS_TUBE, FORWARD_TUBE,
         MAINTENANCE_TUBE, ACTIVEJOB_TUBE
       ].freeze
 
