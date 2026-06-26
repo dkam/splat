@@ -50,12 +50,47 @@ class EnvelopeForwarderTest < ActiveSupport::TestCase
     assert_equal "http://target.example:8080/api/project-one/envelope/", req[:url]
   end
 
-  test "forward is a no-op when forwarding is not configured" do
-    Setting.instance.update!(forward_dsn: nil)
+  test "forward is a no-op when the project has no forward DSNs" do
+    @project.update!(forward_dsns: [])
 
-    assert_nothing_raised do
+    put_calls = capture_tuber_puts do
       EnvelopeForwarder.forward("raw-body", project: @project)
     end
+
+    assert_empty put_calls
+  end
+
+  test "forward enqueues a base64'd job to the forward tube" do
+    @project.update!(forward_dsns: ["https://k@a.example/1", "https://k@b.example/2"])
+
+    put_calls = capture_tuber_puts do
+      EnvelopeForwarder.forward("raw-body", project: @project, content_type: "application/x-sentry-envelope")
+    end
+
+    assert_equal 1, put_calls.size
+    tube, payload = put_calls.first
+    assert_equal Ingest::Tuber::FORWARD_TUBE, tube
+    assert_equal @project.id, payload[:project_id]
+    assert_equal ["https://k@a.example/1", "https://k@b.example/2"], payload[:dsns]
+    assert_equal "raw-body", Base64.strict_decode64(payload[:body])
+    assert_equal "application/x-sentry-envelope", payload[:content_type]
+  end
+
+  test "forward never raises into the ingest path" do
+    @project.update!(forward_dsns: ["https://k@a.example/1"])
+
+    Ingest::Tuber.singleton_class.define_method(:put) { |*, **| raise "boom" }
+    begin
+      assert_nothing_raised do
+        EnvelopeForwarder.forward("raw-body", project: @project)
+      end
+    ensure
+      Ingest::Tuber.singleton_class.remove_method(:put)
+    end
+  end
+
+  test "deliver returns false (not raise) on an invalid DSN" do
+    assert_equal false, EnvelopeForwarder.deliver("raw-body", dsn: "ftp://x@nope/1", project: @project)
   end
 
   test "outbound_request includes SPLAT_FORWARDER_TOKEN when set" do
@@ -78,5 +113,20 @@ class EnvelopeForwarderTest < ActiveSupport::TestCase
     ensure
       ENV["SPLAT_FORWARDER_TOKEN"] = previous if previous
     end
+  end
+
+  private
+
+  # Capture Ingest::Tuber.put calls as [tube, payload] pairs without touching
+  # beanstalkd. Mirrors the override pattern used in the processor tests.
+  def capture_tuber_puts
+    calls = []
+    Ingest::Tuber.singleton_class.define_method(:put) { |tube, payload, **| calls << [tube, payload] }
+    begin
+      yield
+    ensure
+      Ingest::Tuber.singleton_class.remove_method(:put)
+    end
+    calls
   end
 end
