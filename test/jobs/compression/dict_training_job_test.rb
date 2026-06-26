@@ -40,14 +40,21 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
   test "trains and promotes a first dictionary for events" do
     seed_events(150)
 
+    result = nil
     assert_difference -> { Compression::IssuesEventsDict.where(segment: "events", active: true).count }, 1 do
-      Compression::DictTrainingJob.new.perform("events")
+      result = Compression::DictTrainingJob.new.perform("events")
     end
 
     run = last_run
     assert_equal 1, run["promoted"]
     assert_operator run["samples"], :>=, 100
     assert_operator run["candidate_ratio"].to_f, :>, 0.0
+
+    # perform returns a usable score summary (not a raw ActiveRecord::Result).
+    assert_operator result[:promoted_version], :>=, 1
+    assert_operator result[:candidate_ratio], :>, 0.0
+    assert_operator result[:candidate_ratio], :<, 1.0
+    assert_equal run["samples"], result[:samples]
   end
 
   test "skips and logs when there are too few samples" do

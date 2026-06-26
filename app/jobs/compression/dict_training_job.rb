@@ -68,7 +68,9 @@ module Compression
           train_dir: train_dir, eval_dir: eval_dir)
         if total < 100
           log_run(db: db, segment: segment, samples: total, notes: "skipped: too few samples")
-          next
+          result = {segment: segment, samples: total, promoted_version: nil, notes: "too few samples"}
+          Rails.logger.info "[DictTrainingJob] #{segment}: #{total} samples — skipped (need ≥100)"
+          next result
         end
 
         candidate_bytes = train_candidate(train_dir)
@@ -78,28 +80,55 @@ module Compression
         current = active_dict_bytes(db, segment)
         current_size = current ? compressed_size(eval_files, current) : nil
         candidate_size = compressed_size(eval_files, candidate_bytes)
+        current_ratio = current ? current_size.to_f / eval_total : nil
+        candidate_ratio = candidate_size.to_f / eval_total
         gain = current.nil? ? 1.0 : (current_size - candidate_size).to_f / current_size
 
         promoted_version = nil
         if gain > GAIN_THRESHOLD
           promoted_version = promote!(db: db, segment: segment, bytes: candidate_bytes,
-            baseline_ratio: candidate_size.to_f / eval_total,
-            sample_count: total)
+            baseline_ratio: candidate_ratio, sample_count: total)
         end
 
         log_run(
           db: db, segment: segment,
           samples: total,
-          current_ratio: current ? current_size.to_f / eval_total : nil,
-          candidate_ratio: candidate_size.to_f / eval_total,
+          current_ratio: current_ratio,
+          candidate_ratio: candidate_ratio,
           gain: gain,
           promoted: !promoted_version.nil?,
           promoted_to_version: promoted_version
         )
+
+        result = {segment: segment, samples: total, current_ratio: current_ratio,
+                  candidate_ratio: candidate_ratio, gain: gain, promoted_version: promoted_version}
+        Rails.logger.info summarize(result)
+        next result
       end
     end
 
     private
+
+    # One-line human summary of a completed run, e.g.
+    #   events: 405 samples → 3.85% of original (26.0×), +20.9% vs current, promoted v4
+    #   logs:  1200 samples → 4.10% of original (24.4×), +2.1% vs current, kept current (<10%)
+    def summarize(r)
+      ratio_pct = (r[:candidate_ratio] * 100).round(2)
+      fold = (1.0 / r[:candidate_ratio]).round(1)
+      delta =
+        if r[:current_ratio].nil?
+          "first dict"
+        else
+          "#{(r[:gain] * 100).round(1)}% vs current"
+        end
+      outcome =
+        if r[:promoted_version]
+          "promoted v#{r[:promoted_version]}"
+        else
+          "kept current (<#{(GAIN_THRESHOLD * 100).round}%)"
+        end
+      "[DictTrainingJob] #{r[:segment]}: #{r[:samples]} samples → #{ratio_pct}% of original (#{fold}×), #{delta}, #{outcome}"
+    end
 
     # Pull a random pool of rows, decode each one at a time, and write it
     # straight to the train or eval dir — peak memory is one decoded payload
