@@ -54,7 +54,8 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
     assert_operator result[:promoted_version], :>=, 1
     assert_operator result[:candidate_ratio], :>, 0.0
     assert_operator result[:candidate_ratio], :<, 1.0
-    assert_equal run["samples"], result[:samples]
+    assert_equal run["samples"], result[:samples]   # samples == training-set size
+    assert_operator result[:eval_samples], :>, 0
   end
 
   test "skips and logs when there are too few samples" do
@@ -68,18 +69,47 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
   end
 
   test "bounds the training set by bytes rather than holding the whole corpus" do
-    # Each payload decodes to >40 KB; with a tiny byte budget the job must stop
-    # well before consuming all rows, proving it streams + caps instead of
-    # materialising everything (the OOM that took down the ingest worker).
+    # Each payload decodes to >40 KB; with a tiny byte budget the training set
+    # must stop well before consuming all rows, proving it streams + caps the
+    # *training* corpus instead of materialising everything (the OOM that took
+    # down the ingest worker). 200 KB / ~40 KB-per-sample ⇒ a handful of train
+    # samples, so the logged (training) sample count stays far below 120.
     seed_events(120, value_bytes: 40_000)
 
-    cap = 200_000 # 200 KB training budget
-    with_const(Compression::DictTrainingJob, :TRAIN_MAX_BYTES, cap) do
+    with_const(Compression::DictTrainingJob, :TRAIN_MAX_BYTES, 200_000) do
       Compression::DictTrainingJob.new.perform("events")
     end
 
-    # 200 KB budget / ~40 KB-per-train-sample ⇒ only a handful of train samples,
-    # so the logged sample count stays far below the 120 rows available.
     assert_operator last_run["samples"], :<, 60
+  end
+
+  test "eval set is decoupled from the training cap and grows to EVAL_TARGET" do
+    # The wobble fix: the training set is memory-bounded (small), but eval keeps
+    # filling past where training stopped — up to EVAL_TARGET — so the score is
+    # measured on many more samples. stream_samples is exercised directly (no
+    # zstd) to assert the split sizes precisely.
+    seed_events(350)
+    job = Compression::DictTrainingJob.new
+
+    Dir.mktmpdir do |dir|
+      train_dir = File.join(dir, "train")
+      eval_dir = File.join(dir, "eval")
+      Dir.mkdir(train_dir)
+      Dir.mkdir(eval_dir)
+
+      counts =
+        with_const(Compression::DictTrainingJob, :TRAIN_MAX_BYTES, 60_000) do
+          with_const(Compression::DictTrainingJob, :EVAL_TARGET, 200) do
+            job.send(:stream_samples, db: :issues_events, table: "events", segment: "events",
+              train_dir: train_dir, eval_dir: eval_dir)
+          end
+        end
+
+      assert_operator counts[:eval], :>=, 200            # eval reached its own target...
+      assert_operator counts[:eval], :>, counts[:train]  # ...past where training stopped
+      assert_operator counts[:train], :>=, 1
+      assert_equal counts[:train], Dir.children(train_dir).size
+      assert_equal counts[:eval], Dir.children(eval_dir).size
+    end
   end
 end

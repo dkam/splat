@@ -31,7 +31,14 @@ module Compression
   class DictTrainingJob
     SAMPLES = 10_000               # max rows to pull into the random pool
     TRAIN_MAX_BYTES = 24 * 1024 * 1024  # decoded-byte budget for the training set
-    EVAL_RATIO = 5                 # every Nth sample goes to eval (≈20%)
+    EVAL_RATIO = 5                 # while training fills, every Nth sample → eval (≈20%)
+    # Target eval-set size. The training set is capped by *memory* (zstd --train
+    # loads it whole), but eval samples are read back one file at a time, so a
+    # big eval set costs disk + a little time, not RAM. Decoupling the two and
+    # growing eval well past the training cut-off is what makes the gain/ratio
+    # scores steady: ratio-estimate noise scales ~1/√N, so ~1500 eval samples is
+    # roughly 4× steadier than the ~75 we got when eval stopped with training.
+    EVAL_TARGET = 1500
     # `zstd --train` reads only the first 128 KB of each sample (ZDICT's
     # per-sample window — facebook/zstd#3111) and warns on "very large"
     # samples. Truncating training samples to that window is therefore free —
@@ -64,12 +71,13 @@ module Compression
         Dir.mkdir(train_dir)
         Dir.mkdir(eval_dir)
 
-        total = stream_samples(db: db, table: table, segment: segment,
+        counts = stream_samples(db: db, table: table, segment: segment,
           train_dir: train_dir, eval_dir: eval_dir)
-        if total < 100
-          log_run(db: db, segment: segment, samples: total, notes: "skipped: too few samples")
-          result = {segment: segment, samples: total, promoted_version: nil, notes: "too few samples"}
-          Rails.logger.info "[DictTrainingJob] #{segment}: #{total} samples — skipped (need ≥100)"
+        if counts[:train] < 100
+          log_run(db: db, segment: segment, samples: counts[:train], notes: "skipped: too few samples")
+          result = {segment: segment, samples: counts[:train], eval_samples: counts[:eval],
+                    promoted_version: nil, notes: "too few samples"}
+          Rails.logger.info "[DictTrainingJob] #{segment}: #{counts[:train]} train samples — skipped (need ≥100)"
           next result
         end
 
@@ -87,12 +95,12 @@ module Compression
         promoted_version = nil
         if gain > GAIN_THRESHOLD
           promoted_version = promote!(db: db, segment: segment, bytes: candidate_bytes,
-            baseline_ratio: candidate_ratio, sample_count: total)
+            baseline_ratio: candidate_ratio, sample_count: counts[:train])
         end
 
         log_run(
           db: db, segment: segment,
-          samples: total,
+          samples: counts[:train],
           current_ratio: current_ratio,
           candidate_ratio: candidate_ratio,
           gain: gain,
@@ -100,8 +108,9 @@ module Compression
           promoted_to_version: promoted_version
         )
 
-        result = {segment: segment, samples: total, current_ratio: current_ratio,
-                  candidate_ratio: candidate_ratio, gain: gain, promoted_version: promoted_version}
+        result = {segment: segment, samples: counts[:train], eval_samples: counts[:eval],
+                  current_ratio: current_ratio, candidate_ratio: candidate_ratio,
+                  gain: gain, promoted_version: promoted_version}
         Rails.logger.info summarize(result)
         next result
       end
@@ -110,8 +119,8 @@ module Compression
     private
 
     # One-line human summary of a completed run, e.g.
-    #   events: 405 samples → 3.85% of original (26.0×), +20.9% vs current, promoted v4
-    #   logs:  1200 samples → 4.10% of original (24.4×), +2.1% vs current, kept current (<10%)
+    #   events: 305 train / 1503 eval → 3.85% of original (26.0×), +20.9% vs current, promoted v4
+    #   logs:  8000 train / 1500 eval → 4.10% of original (24.4×), +2.1% vs current, kept current (<10%)
     def summarize(r)
       ratio_pct = (r[:candidate_ratio] * 100).round(2)
       fold = (1.0 / r[:candidate_ratio]).round(1)
@@ -127,14 +136,21 @@ module Compression
         else
           "kept current (<#{(GAIN_THRESHOLD * 100).round}%)"
         end
-      "[DictTrainingJob] #{r[:segment]}: #{r[:samples]} samples → #{ratio_pct}% of original (#{fold}×), #{delta}, #{outcome}"
+      "[DictTrainingJob] #{r[:segment]}: #{r[:samples]} train / #{r[:eval_samples]} eval → " \
+        "#{ratio_pct}% of original (#{fold}×), #{delta}, #{outcome}"
     end
 
     # Pull a random pool of rows, decode each one at a time, and write it
     # straight to the train or eval dir — peak memory is one decoded payload
-    # plus the (compressed) result set, never the whole decoded corpus. Stops
-    # once the training set reaches TRAIN_MAX_BYTES of decoded data. Returns the
-    # number of samples written (train + eval).
+    # plus the (compressed) result set, never the whole decoded corpus.
+    #
+    # Two independent stop conditions, because the two sets have different cost
+    # ceilings. Training is bounded by *memory* (TRAIN_MAX_BYTES — zstd --train
+    # loads it whole), so while it's filling we peel off every EVAL_RATIO-th
+    # sample for eval. Once training is full we keep going, pouring the rest of
+    # the pool into eval until it reaches EVAL_TARGET — eval costs only disk +
+    # one-at-a-time reads, so a large eval set is cheap and makes the scores
+    # steady. Returns {train:, eval:} counts.
     def stream_samples(db:, table:, segment:, train_dir:, eval_dir:)
       conn = REGISTRY.fetch(table)[:record].constantize.connection
       since = LOOKBACK_DAYS.days.ago
@@ -160,8 +176,10 @@ module Compression
         payload = Compression::Codec.decode(blob, db: db, dict_id: dict_id)
         next if payload.nil?
 
-        written = train_n + eval_n
-        if (written % EVAL_RATIO).zero?
+        train_full = train_bytes >= TRAIN_MAX_BYTES
+        # Once training is full, everything goes to eval; until then, peel off
+        # every EVAL_RATIO-th row for eval and send the rest to training.
+        if train_full || ((train_n + eval_n) % EVAL_RATIO).zero?
           File.binwrite(File.join(eval_dir, "s-#{eval_n}.json"), payload)
           eval_n += 1
         else
@@ -170,9 +188,9 @@ module Compression
           train_n += 1
           train_bytes += sample.bytesize
         end
-        break if train_bytes >= TRAIN_MAX_BYTES
+        break if train_full && eval_n >= EVAL_TARGET
       end
-      train_n + eval_n
+      {train: train_n, eval: eval_n}
     end
 
     # Translate a segment qualifier into a SQL fragment + bind. The "platform"
