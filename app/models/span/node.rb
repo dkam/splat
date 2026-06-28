@@ -42,7 +42,7 @@ class Span
     def description = @raw["description"]
     def depth = @raw["depth"].to_i
     def sequence = @raw["sequence"].to_i
-    def trace_id = @trace_id
+    attr_reader :trace_id
     def tags = @raw["tags"] || {}
     def data = @raw["data"] || {}
 

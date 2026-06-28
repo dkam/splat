@@ -18,10 +18,10 @@
 require "open3"
 require "tmpdir"
 
-SAMPLE_TXNS    = Integer(ENV.fetch("SPANS_SAMPLE", "4000"))
-TRAIN_RATIO    = 0.8
+SAMPLE_TXNS = Integer(ENV.fetch("SPANS_SAMPLE", "4000"))
+TRAIN_RATIO = 0.8
 DICT_MAX_BYTES = Compression::DictTrainingJob::DICT_MAX_BYTES
-LEVEL          = Compression::Codec::LEVEL
+LEVEL = Compression::Codec::LEVEL
 
 def gb(bytes) = format("%.2f GB", bytes / 1024.0**3)
 def mb(bytes) = format("%.1f MB", bytes / 1024.0**2)
@@ -40,9 +40,9 @@ puts "=" * 72
            MIN(created_at) AS min_cre, MAX(created_at) AS max_cre
       FROM #{table}
   SQL
-  puts "\n#{table}: #{row['n']} rows"
-  puts "  timestamp : #{row['min_ts']}  →  #{row['max_ts']}"
-  puts "  created_at: #{row['min_cre']}  →  #{row['max_cre']}"
+  puts "\n#{table}: #{row["n"]} rows"
+  puts "  timestamp : #{row["min_ts"]}  →  #{row["max_ts"]}"
+  puts "  created_at: #{row["min_cre"]}  →  #{row["max_cre"]}"
 end
 
 # ── 2. On-disk now, straight from dbstat (what the dashboard shows) ───────────
@@ -53,7 +53,7 @@ begin
   rows = conn.exec_query(<<~SQL)
     SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name ORDER BY bytes DESC
   SQL
-  rows.each { |r| puts "  #{r['name'].ljust(48)} #{gb(r['bytes'].to_i)}" }
+  rows.each { |r| puts "  #{r["name"].ljust(48)} #{gb(r["bytes"].to_i)}" }
 rescue => e
   puts "  (dbstat unavailable: #{e.class}: #{e.message})"
 end
@@ -76,7 +76,10 @@ Transaction
   .order(Arel.sql("RANDOM()"))
   .limit(SAMPLE_TXNS * 3)
   .pluck(:transaction_id, :timestamp, :project_id)
-  .each { |id, ts, pid| ts_for[id] = ts; ids_by_project[pid] << id }
+  .each { |id, ts, pid|
+  ts_for[id] = ts
+  ids_by_project[pid] << id
+}
 
 # Serialise one tree the way a per-transaction blob would: trace_id hoisted
 # once (it's constant per tree), the per-span fields that vary kept inline.
@@ -101,10 +104,10 @@ catch(:enough) do
   ids_by_project.each do |pid, ids|
     ids.each_slice(500) do |slice|
       Span.where(project_id: pid, transaction_id: slice)
-          .order(:transaction_id, :sequence)
-          .group_by(&:transaction_id).each do |txn_id, spans|
+        .order(:transaction_id, :sequence)
+        .group_by(&:transaction_id).each do |txn_id, spans|
         next if spans.empty?
-        samples << { ts: ts_for[txn_id], json: tree_json(spans, spans.first.trace_id) }
+        samples << {ts: ts_for[txn_id], json: tree_json(spans, spans.first.trace_id)}
         throw :enough if samples.size >= SAMPLE_TXNS
       end
     end
@@ -115,7 +118,7 @@ if samples.size < 200
   abort "Only #{samples.size} sampled trees — too few to train a dict. Is the spans table populated?"
 end
 
-raw_total  = samples.sum { |s| s[:json].bytesize }
+raw_total = samples.sum { |s| s[:json].bytesize }
 span_total = samples.sum { |s| JSON.parse(s[:json])["spans"].size }
 puts "  trees sampled     : #{samples.size}"
 puts "  spans in sample   : #{span_total}  (avg #{(span_total.to_f / samples.size).round(1)}/txn)"
@@ -135,9 +138,9 @@ dict_bytes = Dir.mktmpdir("spans-train-") do |dir|
   File.binread(out)
 end
 
-eval_raw    = eval_set.sum { |s| s[:json].bytesize }
-eval_plain  = eval_set.sum { |s| Zstd.compress(s[:json], level: LEVEL).bytesize }
-eval_dict   = eval_set.sum { |s| Zstd.compress(s[:json], level: LEVEL, dict: dict_bytes).bytesize }
+eval_raw = eval_set.sum { |s| s[:json].bytesize }
+eval_plain = eval_set.sum { |s| Zstd.compress(s[:json], level: LEVEL).bytesize }
+eval_dict = eval_set.sum { |s| Zstd.compress(s[:json], level: LEVEL, dict: dict_bytes).bytesize }
 
 puts "\n" + "=" * 72
 puts "COMPRESSION  (held-out eval set: #{eval_set.size} trees)"
@@ -158,10 +161,10 @@ eval_set.group_by { |s| s[:ts]&.to_date }.sort_by { |d, _| d.to_s }.each do |day
 end
 
 # ── 6. Projection ────────────────────────────────────────────────────────────
-dict_ratio       = eval_raw.to_f / eval_dict
-blob_per_txn     = eval_dict.to_f / eval_set.size
-txn_count        = Transaction.count
-projected_data   = blob_per_txn * txn_count
+dict_ratio = eval_raw.to_f / eval_dict
+blob_per_txn = eval_dict.to_f / eval_set.size
+txn_count = Transaction.count
+projected_data = blob_per_txn * txn_count
 
 puts "\n" + "=" * 72
 puts "PROJECTION  (assumes every transaction gets one blob)"
