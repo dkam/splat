@@ -152,9 +152,6 @@ x-common-variables: &common-variables
   SENTRY_DSN: ${SENTRY_DSN}
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
 
-  # Token shared with any upstream Splat that forwards envelopes to this one.
-  SPLAT_FORWARDER_TOKEN: ${SPLAT_FORWARDER_TOKEN}
-
   # Send Rails logs to stdout so `docker compose logs <service>` works without
   # fiddling with bind-mount permissions on log/production.log.
   RAILS_LOG_TO_STDOUT: "true"

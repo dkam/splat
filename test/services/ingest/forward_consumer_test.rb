@@ -63,16 +63,21 @@ class Ingest::ForwardConsumerTest < ActiveSupport::TestCase
 
   private
 
+  # Override deliver, then *restore the saved original* in ensure. The old
+  # define_method/remove_method version deleted deliver outright, leaving it
+  # undefined for the rest of the worker process and intermittently breaking
+  # EnvelopeForwarderTest. (Minitest 6 has no #stub.)
   def capture_deliveries
     calls = []
-    EnvelopeForwarder.singleton_class.define_method(:deliver) do |raw_body, dsn:, project:, content_type: nil|
+    original = EnvelopeForwarder.method(:deliver)
+    EnvelopeForwarder.define_singleton_method(:deliver) do |raw_body, dsn:, project:, content_type: nil|
       calls << {raw_body: raw_body, dsn: dsn, project: project, content_type: content_type}
       true
     end
     begin
       yield
     ensure
-      EnvelopeForwarder.singleton_class.remove_method(:deliver)
+      EnvelopeForwarder.define_singleton_method(:deliver, original)
     end
     calls
   end
