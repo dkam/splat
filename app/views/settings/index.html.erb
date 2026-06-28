@@ -308,25 +308,31 @@
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Counts</h2>
+      <%# Counts come from the StorageStats snapshot (refreshed every ~15 min by %>
+      <%# the job) — never a live scan on the request path. "—" until the first %>
+      <%# snapshot lands after a deploy. Spans is the true total: legacy spans %>
+      <%# rows + the spans packed inside span_trees blobs. %>
+      <% counts = @storage&.dig(:counts) %>
+      <% show = ->(key) { counts ? number_with_delimiter(counts[key]) : "—" } %>
       <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= number_with_delimiter(Issue.count) %></div>
+          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= show.call(:issues) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Issues</div>
         </div>
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= number_with_delimiter(Event.count) %></div>
+          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= show.call(:events) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Events</div>
         </div>
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-green-600 dark:text-green-400"><%= number_with_delimiter(Transaction.count) %></div>
+          <div class="text-2xl font-bold text-green-600 dark:text-green-400"><%= show.call(:transactions) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Transactions</div>
         </div>
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= number_with_delimiter(Span.count) %></div>
+          <div class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= show.call(:spans) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Spans</div>
         </div>
         <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-purple-600 dark:text-purple-400"><%= number_with_delimiter(Log.count) %></div>
+          <div class="text-2xl font-bold text-purple-600 dark:text-purple-400"><%= show.call(:logs) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Logs</div>
         </div>
       </div>

@@ -57,10 +57,34 @@ class StorageStats
     def refresh!
       groups = sqlite_tables_grouped
       total = groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
-      snap = {groups: groups, total: total, compression: compression_estimate,
-              dictionaries: dictionary_status, collected_at: Time.current}
+      snap = {groups: groups, total: total, counts: counts(groups),
+              compression: compression_estimate, dictionaries: dictionary_status,
+              collected_at: Time.current}
       Rails.cache.write(CACHE_KEY, snap)
       snap
+    end
+
+    # Headline row counts for the settings "Counts" block — read off the
+    # snapshot so the request path never scans these tables. Derived from the
+    # row_estimates already gathered for `groups` (no re-count), except spans:
+    # new spans live *inside* span_trees blobs (one row per transaction, each
+    # carrying a span_count), not as `spans` rows, so the true span total is the
+    # legacy spans rows plus the sum of span_count across span_trees. As the
+    # legacy rows age out of retention this trends to "all from span_trees"
+    # rather than counting down to zero.
+    def counts(groups)
+      rows = {}
+      groups.each { |g| g[:tables].each { |t| rows[t[:name]] = t[:row_estimate] } }
+      {
+        issues: rows["issues"].to_i,
+        events: rows["events"].to_i,
+        transactions: rows["transactions"].to_i,
+        spans: rows["spans"].to_i + SpanTree.sum(:span_count).to_i,
+        logs: rows["logs"].to_i
+      }
+    rescue => e
+      Rails.logger.warn("StorageStats.counts failed: #{e.class}: #{e.message}")
+      {}
     end
 
     # Estimate storage saved by zstd payload compression, per compressed table.
