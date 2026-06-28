@@ -89,14 +89,10 @@ class EnvelopeForwarderTest < ActiveSupport::TestCase
   test "forward never raises into the ingest path" do
     @project.update!(forward_dsns: ["https://k@a.example/1"])
 
-    original = Ingest::Tuber.method(:put)
-    Ingest::Tuber.define_singleton_method(:put) { |*, **| raise "boom" }
-    begin
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise "boom" }) do
       assert_nothing_raised do
         EnvelopeForwarder.forward("raw-body", project: @project)
       end
-    ensure
-      Ingest::Tuber.define_singleton_method(:put, original)
     end
   end
 
@@ -107,17 +103,10 @@ class EnvelopeForwarderTest < ActiveSupport::TestCase
   private
 
   # Capture Ingest::Tuber.put calls as [tube, payload] pairs without touching
-  # beanstalkd. Override then restore the saved original in ensure (Minitest 6
-  # has no #stub, and remove_method would delete put for the rest of the run).
+  # beanstalkd.
   def capture_tuber_puts
     calls = []
-    original = Ingest::Tuber.method(:put)
-    Ingest::Tuber.define_singleton_method(:put) { |tube, payload, **| calls << [tube, payload] }
-    begin
-      yield
-    ensure
-      Ingest::Tuber.define_singleton_method(:put, original)
-    end
+    with_stub(Ingest::Tuber, :put, ->(tube, payload, **) { calls << [tube, payload] }) { yield }
     calls
   end
 end

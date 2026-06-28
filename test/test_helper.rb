@@ -28,6 +28,19 @@ module ActiveSupport
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
-    # Add more helper methods to be used by all tests here...
+    # Temporarily replace a singleton (class) method, restoring the *real* one
+    # afterward. Minitest 6 dropped #stub, and the obvious
+    # `singleton_class.define_method` + `remove_method` dance deletes the
+    # original method for the rest of the worker process — which silently broke
+    # whichever test ran next in the same parallel worker (e.g. "undefined
+    # method 'put' for Ingest::Tuber"). Capturing and re-installing the original
+    # Method object avoids that.
+    def with_stub(owner, name, replacement)
+      original = owner.method(name)
+      owner.singleton_class.define_method(name, replacement)
+      yield
+    ensure
+      owner.singleton_class.define_method(name, original)
+    end
   end
 end

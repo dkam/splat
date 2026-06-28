@@ -104,12 +104,7 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
 
   def capture_tuber_puts
     calls = []
-    Ingest::Tuber.singleton_class.define_method(:put) { |tube, payload, **| calls << [tube, payload] }
-    begin
-      yield
-    ensure
-      Ingest::Tuber.singleton_class.remove_method(:put)
-    end
+    with_stub(Ingest::Tuber, :put, ->(tube, payload, **) { calls << [tube, payload] }) { yield }
     calls
   end
 

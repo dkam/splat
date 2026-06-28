@@ -219,12 +219,9 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
       )
 
       put_calls = []
-      Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
-      begin
+      with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
         processor = SentryProtocol::EnvelopeProcessor.new(envelope_body, @project)
         assert processor.process
-      ensure
-        Ingest::Tuber.singleton_class.remove_method(:put)
       end
       assert_equal [], put_calls.select { |args, _| args.first == Ingest::Tuber::TRANSACTIONS_TUBE }
     end
@@ -242,11 +239,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     )
 
     put_calls = []
-    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
-    begin
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
       assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
-    ensure
-      Ingest::Tuber.singleton_class.remove_method(:put)
     end
 
     logs_puts = put_calls.select { |args, _| args.first == Ingest::Tuber::LOGS_TUBE }
@@ -261,11 +255,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     )
 
     put_calls = []
-    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
-    begin
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
       assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
-    ensure
-      Ingest::Tuber.singleton_class.remove_method(:put)
     end
 
     assert_equal [], put_calls.select { |args, _| args.first == Ingest::Tuber::LOGS_TUBE }
@@ -281,11 +272,8 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     )
 
     put_calls = []
-    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| put_calls << [args, kw] }
-    begin
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
       assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
-    ensure
-      Ingest::Tuber.singleton_class.remove_method(:put)
     end
 
     assert_equal [], put_calls.select { |args, _| args.first == Ingest::Tuber::EVENTS_TUBE }

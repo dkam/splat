@@ -7,11 +7,8 @@ class Compression::DictDriftJobTest < ActiveSupport::TestCase
     Compression::LogsDict.create!(segment: "logs:platform:sentry", version: 1, dict: "z", trained_at: Time.current, active: true)
 
     fanned = []
-    Ingest::Tuber.singleton_class.define_method(:put) { |tube, body, **| fanned << body["args"].first }
-    begin
+    with_stub(Ingest::Tuber, :put, ->(tube, body, **) { fanned << body["args"].first }) do
       Compression::DictDriftJob.new.perform
-    ensure
-      Ingest::Tuber.singleton_class.remove_method(:put)
     end
 
     assert_includes fanned, "events"
