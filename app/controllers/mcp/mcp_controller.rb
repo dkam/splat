@@ -146,6 +146,8 @@ module Mcp
       arguments = params["arguments"] || {}
 
       case tool_name
+      when "get_status"
+        get_status(arguments)
       when "list_recent_issues"
         list_recent_issues(arguments)
       when "search_issues"
@@ -201,6 +203,14 @@ module Mcp
     # Tool definitions
     def tools_list
       [
+        {
+          name: "get_status",
+          description: "Report this Splat instance's running version and environment, its storage breakdown (rows + bytes per table, including the legacy spans vs new span_trees split), and payload-compression ratios/savings. Use it to confirm which version is deployed and whether compression is working. The version is live; storage/compression come from a snapshot refreshed every ~15 min (collected_at is included).",
+          inputSchema: {
+            type: "object",
+            properties: {}
+          }
+        },
         {
           name: "list_recent_issues",
           description: "List the most recent issues, optionally filtered by status",
@@ -677,6 +687,54 @@ module Mcp
     end
 
     # Tool implementations
+    def get_status(_args)
+      snapshot = StorageStats.snapshot
+      StorageStats.enqueue_refresh if snapshot.nil?
+      render_text(format_status(snapshot))
+    end
+
+    def format_status(snapshot)
+      result = "## Splat Status\n\n"
+      result += "- **Version:** #{Splat::VERSION}\n"
+      result += "- **Environment:** #{Rails.env}\n"
+
+      if snapshot.nil?
+        result += "\n_Storage snapshot not built yet (cold cache) — a refresh has been enqueued. Try again shortly._\n"
+        return result
+      end
+
+      result += "- **Storage total:** #{human_size(snapshot[:total])}\n"
+      result += "- **Stats collected:** #{snapshot[:collected_at]&.utc&.iso8601 || "unknown"} (refreshes every ~15 min)\n\n"
+
+      result += "### Storage by database\n\n"
+      Array(snapshot[:groups]).each do |group|
+        group_total = group[:tables].sum { |t| t[:total_bytes] }
+        result += "**#{group[:name]}** — #{human_size(group_total)}\n\n"
+        result += "| Table | Rows | Size |\n|---|---:|---:|\n"
+        group[:tables].each do |t|
+          result += "| #{t[:name]} | #{t[:row_estimate]} | #{human_size(t[:total_bytes])} |\n"
+        end
+        result += "\n"
+      end
+
+      compression = snapshot[:compression]
+      if compression&.any?
+        total_saved = compression.sum { |c| c[:saved_bytes] }
+        result += "### Compression — ~#{human_size(total_saved)} saved\n\n"
+        result += "| Segment | Rows | Ratio | Stored | Saved |\n|---|---:|---:|---:|---:|\n"
+        compression.each do |c|
+          result += "| #{c[:name]} | #{c[:rows]} | #{c[:ratio].round(1)}× | #{human_size(c[:stored_bytes])} | #{human_size(c[:saved_bytes])} |\n"
+        end
+        result += "\n"
+      end
+
+      result
+    end
+
+    def human_size(bytes)
+      ActiveSupport::NumberHelper.number_to_human_size(bytes.to_i)
+    end
+
     def list_recent_issues(args)
       status = args["status"] || "open"
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)

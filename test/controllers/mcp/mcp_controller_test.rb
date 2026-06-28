@@ -13,6 +13,30 @@ module Mcp
       ENV.delete("MCP_AUTH_TOKEN")
     end
 
+    test "get_status reports version, storage, and compression from the snapshot" do
+      fake = {
+        total: 700_000_000,
+        collected_at: Time.utc(2026, 6, 28, 6, 20),
+        groups: [{name: "Transactions + Spans", base: "TransactionsSpansRecord", tables: [
+          {name: "spans", row_estimate: 1_111_915, table_bytes: 503_000_000, index_bytes: 166_000_000, total_bytes: 669_000_000},
+          {name: "span_trees", row_estimate: 302, table_bytes: 1_300_000, index_bytes: 36_000, total_bytes: 1_336_000}
+        ]}],
+        compression: [{name: "Spans", rows: 302, sample: 100, ratio: 9.8,
+                       stored_bytes: 1_336_000, original_bytes: 13_092_800, saved_bytes: 11_756_800}]
+      }
+
+      with_stub(StorageStats, :snapshot, -> { fake }) do
+        call_tool("get_status", {})
+      end
+
+      assert_response :success
+      text = JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+      assert_match(/\*\*Version:\*\* #{Regexp.escape(Splat::VERSION)}/o, text)
+      assert_match(/span_trees/, text)
+      assert_match(/### Compression/, text)
+      assert_match(/9\.8×/, text)
+    end
+
     test "search_slow_transactions passes valid tags hash through to Transaction.slow" do
       with_slow_stub do |captured|
         call_tool("search_slow_transactions", {"tags" => {"user_id" => "123", "feature" => "x"}})
