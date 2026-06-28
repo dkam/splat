@@ -1,6 +1,3 @@
-Use use the oauth
-
-
 # Splat - Lightweight Error Tracker & APM
 
 Splat is a simple error tracker and lightweight backend APM. It's a fast, reliable alternative to Sentry for applications that need error monitoring and performance insight without the overhead.
