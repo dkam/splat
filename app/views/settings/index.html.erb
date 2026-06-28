@@ -346,6 +346,39 @@
     </div>
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Queues</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Live tube backlog from tuber (not cached). A growing <strong>Ready</strong> count means jobs are arriving faster than they're processed; <strong>Buried</strong> &gt; 0 means poison-pill jobs need attention.</p>
+      <% if @queues.blank? %>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Tuber unreachable.</p>
+      <% else %>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                <th class="py-2 pr-4 font-medium">Tube</th>
+                <th class="py-2 px-4 font-medium text-right">Ready</th>
+                <th class="py-2 px-4 font-medium text-right">Reserved</th>
+                <th class="py-2 px-4 font-medium text-right">Buried</th>
+                <th class="py-2 pl-4 font-medium text-right">Delayed</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% @queues.each do |name, d| %>
+                <tr class="border-b border-gray-100 dark:border-gray-800">
+                  <td class="py-2 pr-4 font-mono text-gray-800 dark:text-gray-200"><%= name %></td>
+                  <td class="py-2 px-4 text-right <%= "font-semibold text-amber-600 dark:text-amber-400" if d[:ready].to_i > 0 %>"><%= number_with_delimiter(d[:ready]) %></td>
+                  <td class="py-2 px-4 text-right text-gray-600 dark:text-gray-400"><%= number_with_delimiter(d[:reserved]) %></td>
+                  <td class="py-2 px-4 text-right <%= "font-semibold text-red-600 dark:text-red-400" if d[:buried].to_i > 0 %>"><%= number_with_delimiter(d[:buried]) %></td>
+                  <td class="py-2 pl-4 text-right text-gray-600 dark:text-gray-400"><%= number_with_delimiter(d[:delayed]) %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Alerting</h2>
       <p class="text-gray-600 dark:text-gray-400 mb-4">
         When an open issue emits at least the burst threshold of events in an hour, Splat

@@ -25,8 +25,11 @@ module Mcp
                        stored_bytes: 1_336_000, original_bytes: 13_092_800, saved_bytes: 11_756_800}]
       }
 
+      queues = {"splat.events" => {ready: 5, reserved: 1, buried: 0, delayed: 0}}
       with_stub(StorageStats, :snapshot, -> { fake }) do
-        call_tool("get_status", {})
+        with_stub(Ingest::Tuber, :queue_depths, -> { queues }) do
+          call_tool("get_status", {})
+        end
       end
 
       assert_response :success
@@ -35,6 +38,8 @@ module Mcp
       assert_match(/span_trees/, text)
       assert_match(/### Compression/, text)
       assert_match(/9\.8×/, text)
+      assert_match(/### Queues/, text)
+      assert_match(/splat\.events/, text)
     end
 
     test "search_slow_transactions passes valid tags hash through to Transaction.slow" do

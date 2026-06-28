@@ -690,16 +690,20 @@ module Mcp
     def get_status(_args)
       snapshot = StorageStats.snapshot
       StorageStats.enqueue_refresh if snapshot.nil?
-      render_text(format_status(snapshot))
+      render_text(format_status(snapshot, Ingest::Tuber.queue_depths))
     end
 
-    def format_status(snapshot)
+    def format_status(snapshot, queues)
       result = "## Splat Status\n\n"
       result += "- **Version:** #{Splat::VERSION}\n"
-      result += "- **Environment:** #{Rails.env}\n"
+      result += "- **Environment:** #{Rails.env}\n\n"
+
+      # Queues are live (tuber stats), independent of the storage snapshot —
+      # show them even when the snapshot is still cold.
+      result += format_queues(queues)
 
       if snapshot.nil?
-        result += "\n_Storage snapshot not built yet (cold cache) — a refresh has been enqueued. Try again shortly._\n"
+        result += "_Storage snapshot not built yet (cold cache) — a refresh has been enqueued. Try again shortly._\n"
         return result
       end
 
@@ -729,6 +733,17 @@ module Mcp
       end
 
       result
+    end
+
+    def format_queues(queues)
+      return "### Queues\n\n_Tuber unreachable._\n\n" if queues.blank?
+
+      result = "### Queues (live)\n\n"
+      result += "| Tube | Ready | Reserved | Buried |\n|---|---:|---:|---:|\n"
+      queues.each do |name, d|
+        result += "| #{name} | #{d[:ready]} | #{d[:reserved]} | #{d[:buried]} |\n"
+      end
+      result + "\n"
     end
 
     def human_size(bytes)

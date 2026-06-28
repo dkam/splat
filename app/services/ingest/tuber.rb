@@ -9,6 +9,13 @@ module Ingest
     MAINTENANCE_TUBE = "splat.maintenance"
     ACTIVEJOB_TUBE = "splat.activejob"
 
+    # Every pipeline tube, in display order. (INGEST_TUBES, used for the single
+    # backlog number, intentionally omits logs; this is the full per-tube view.)
+    ALL_TUBES = [
+      EVENTS_TUBE, TRANSACTIONS_TUBE, LOGS_TUBE,
+      FORWARD_TUBE, ACTIVEJOB_TUBE, MAINTENANCE_TUBE
+    ].freeze
+
     # TTR covers one full message round-trip (AR write into the cluster DB
     # plus any per-row work). With dictionary-compressed inserts and no
     # secondary cold-tier fan-out, processing is well under a second;
@@ -59,6 +66,23 @@ module Ingest
         end
       rescue
         0
+      end
+
+      # Per-tube backlog for the settings page + MCP get_status. Fetched live —
+      # tuber stats are in-memory, so there's nothing to gain from the 15-min
+      # snapshot. A tube tuber hasn't created yet reports zeros; an unreachable
+      # tuber yields {} rather than raising into the request path.
+      def queue_depths
+        ALL_TUBES.to_h do |name|
+          s = producer.tubes[name].stats
+          [name, {ready: s.current_jobs_ready.to_i, reserved: s.current_jobs_reserved.to_i,
+                  buried: s.current_jobs_buried.to_i, delayed: s.current_jobs_delayed.to_i}]
+        rescue ::Beaneater::NotFoundError
+          [name, {ready: 0, reserved: 0, buried: 0, delayed: 0}]
+        end
+      rescue => e
+        Rails.logger.warn("Ingest::Tuber.queue_depths failed: #{e.class}: #{e.message}")
+        {}
       end
     end
   end
