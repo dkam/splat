@@ -1,7 +1,7 @@
 # Recurring jobs read by bin/scheduler. Each entry pushes a body of
 #   { "class": "<class_name>", "args": [] }
-# onto the named tube on the given schedule. The maintenance consumer in
-# ingest_worker dispatches by class name.
+# onto the named tube on the given schedule. The maintenance worker
+# (bin/worker maintenance) drains splat.maintenance and dispatches by class name.
 #
 # Schedules accept rufus syntax: "every Xs/m/h/d" or cron strings.
 #

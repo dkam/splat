@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/dkam/beaneater.git
-  revision: c576814498ac7ba796ff813f4ffd65be83103d24
+  revision: 6cb1dd2b415b22ce6c0f837849e6131f6947712b
   branch: tuber
   specs:
     beaneater (1.1.4)

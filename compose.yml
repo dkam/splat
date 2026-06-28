@@ -87,12 +87,26 @@ services:
         max-size: "100m"
         max-file: "5"
 
+  # Real-time ingestion: the data tubes (events, transactions, logs, forward,
+  # activejob). Kept separate from maintenance so a heavy background job can
+  # never freeze ingestion.
   ingest:
     <<: *splat-worker
-    command: bin/ingest_worker
+    command: bin/worker ingest
     volumes:
       - ./storage:/rails/storage
       - ./storage/logs/ingest:/rails/log
+    mem_limit: 512M
+
+  # Background jobs (splat.maintenance: storage stats, retention, dict
+  # training). Its own process + mem_limit so its heavy DB scans / training
+  # runs can't starve the ingest worker.
+  maintenance:
+    <<: *splat-worker
+    command: bin/worker maintenance
+    volumes:
+      - ./storage:/rails/storage
+      - ./storage/logs/maintenance:/rails/log
     mem_limit: 512M
 
   scheduler:

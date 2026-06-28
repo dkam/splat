@@ -204,15 +204,27 @@ services:
         max-size: "100m"
         max-file: "5"
 
-  # Drains the Tuber tubes: ingestion (events/transactions/spans/logs) plus the
-  # maintenance tube (retention, histogram rollups, dictionary training, storage
-  # stats). Safe to scale to multiple replicas.
-  worker:
+  # Real-time ingestion: the data tubes (events/transactions/logs/forward/
+  # activejob). Safe to scale to multiple replicas — though SQLite serialises
+  # writes per DB, so extra replicas help only when per-job CPU (zstd) is the
+  # bottleneck, not the write.
+  ingest:
     <<: *splat-worker
-    command: bin/ingest_worker
+    command: bin/worker ingest
     volumes:
       - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/worker:/rails/log
+      - /storage/splat/logs/ingest:/rails/log
+    mem_limit: 512M
+
+  # Background jobs (splat.maintenance: retention, histogram rollups, dictionary
+  # training, storage stats). Its own process so a heavy scan or training run
+  # can never freeze ingestion.
+  maintenance:
+    <<: *splat-worker
+    command: bin/worker maintenance
+    volumes:
+      - /storage/splat/storage:/rails/storage
+      - /storage/splat/logs/maintenance:/rails/log
     mem_limit: 512M
 
   # Fires recurring jobs (config/schedule.yml) onto the maintenance tube. Run
@@ -372,7 +384,7 @@ Raw rows and aggregates have separate retention windows, so you can prune the hi
 
 ### Ingestion Queue: Tuber
 
-Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. A worker (`bin/ingest_worker`) drains the tubes through per-type consumers (events, transactions, spans, logs, plus a maintenance tube and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. A separate `bin/scheduler` process runs the recurring jobs (retention, aggregation, dictionary training).
+Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. The **ingest** worker (`bin/worker ingest`) drains the data tubes through per-type consumers (events, transactions, logs, forward, and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. A separate **maintenance** worker (`bin/worker maintenance`) drains `splat.maintenance` (retention, aggregation, dictionary training, storage stats) in its own process, so a heavy background job can't freeze ingestion. A `bin/scheduler` process fires the recurring jobs onto the maintenance tube.
 
 [Tuber](https://github.com/tuberq/tuber) is a single Rust binary — a Beanstalkd rewrite — that keeps job *metadata* in RAM with a write-ahead log for durability, and offloads larger job *bodies* to disk (a TOAST-style scheme), so memory stays bounded by job *count* rather than payload size. That gives Splat a durable, RAM-speed ingest buffer with no extra database to tune. See the [Tuber project](https://github.com/tuberq/tuber) for the server.
 
@@ -560,8 +572,8 @@ Configure Uptime Kuma to send alerts via:
 
 **When queue_status is "warning":**
 - Jobs are processing but slower than ingestion rate
-- Check the ingest worker status (`bin/ingest_worker`) and Tuber
-- Consider scaling workers if sustained
+- Check the ingest worker status (`bin/worker ingest`) and Tuber
+- Consider scaling the ingest worker (replicas) if sustained
 
 **When queue_status is "critical":**
 - Significant backlog, data delayed
@@ -852,7 +864,7 @@ OIDC_PROVIDER_NAME=Your Provider
 ### Development
 
 #### Services
-- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/ingest_worker`; recurring jobs scheduled by `bin/scheduler`
+- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/worker ingest` (data tubes) and `bin/worker maintenance` (background); recurring jobs scheduled by `bin/scheduler`
 - **Solid Cache**: In-memory caching
 - **Solid Cable**: Real-time updates (optional)
 
