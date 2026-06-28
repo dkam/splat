@@ -38,11 +38,15 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-  # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  config.assume_ssl = true
+  # Assume all access is through a TLS-terminating reverse proxy (the default —
+  # how splat.booko.info runs behind Caddy). A bare-HTTP deployment reached
+  # directly on :3030 with no proxy must set both to false: otherwise Rails
+  # builds https:// base URLs while the browser sends an http:// Origin, and
+  # the CSRF origin check 422s every form POST.
+  config.assume_ssl = ENV.fetch("SPLAT_ASSUME_SSL", "true") != "false"
 
-  # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = true
+  # Force all access over SSL, use Strict-Transport-Security and secure cookies.
+  config.force_ssl = ENV.fetch("SPLAT_FORCE_SSL", "true") != "false"
 
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }

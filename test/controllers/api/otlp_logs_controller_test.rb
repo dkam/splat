@@ -15,10 +15,7 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
 
   def with_tuber_stub
     calls = []
-    Ingest::Tuber.singleton_class.define_method(:put) { |*args, **kw| calls << [args, kw] }
-    yield calls
-  ensure
-    Ingest::Tuber.singleton_class.remove_method(:put)
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { calls << [args, kw] }) { yield calls }
   end
 
   test "queues OTLP logs with a valid public key" do

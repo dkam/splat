@@ -28,6 +28,13 @@ x-common-variables: &common-variables
   SENTRY_DSN: ${SENTRY_DSN}
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE}
 
+  # Default true: we sit behind a TLS-terminating proxy (Caddy). Set both to
+  # "false" for a bare-HTTP deployment reached directly on :3030 with no proxy,
+  # or every form POST 422s on the CSRF origin check (https base_url vs http
+  # Origin). Empty/unset counts as true.
+  SPLAT_ASSUME_SSL: ${SPLAT_ASSUME_SSL:-true}
+  SPLAT_FORCE_SSL: ${SPLAT_FORCE_SSL:-true}
+
   # Send Rails logs to stdout so `docker compose logs <service>` shows
   # them. Without this, Rails writes to log/production.log and the bind-
   # mounted host dir needs UID 1000 perms — easy to get wrong on a fresh
