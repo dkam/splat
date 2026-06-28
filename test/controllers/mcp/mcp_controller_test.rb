@@ -124,18 +124,50 @@ module Mcp
       assert_match "trace line 1", tool_text
     end
 
-    test "get_transaction surfaces the trace_id from spans so logs can be cross-referenced" do
+    test "get_transaction surfaces the promoted trace_id so logs can be cross-referenced" do
       project = projects(:one)
       txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
-        timestamp: Time.current, transaction_name: "ProductsController#show", duration: 120)
-      Span.create!(project_id: project.id, transaction_id: txn.transaction_id,
-        span_id: SecureRandom.hex(8), trace_id: "txn-trace-xyz",
-        timestamp: Time.current, sequence: 0, depth: 0)
+        timestamp: Time.current, transaction_name: "ProductsController#show", duration: 120,
+        trace_id: "txn-trace-xyz")
 
       call_tool("get_transaction", {"transaction_id" => txn.id})
       assert_response :success
       assert_match "txn-trace-xyz", tool_text
       assert_match "get_trace_logs", tool_text
+    end
+
+    test "get_transaction_spans renders the waterfall from the span_tree blob" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "ProductsController#show", duration: 120)
+      t0 = Time.current
+      tree = {"trace_id" => "tr", "spans" => [
+        {"span_id" => "s1", "parent_span_id" => nil, "op" => "db.sql.active_record", "status" => "ok",
+         "description" => "SELECT * FROM products", "ts" => t0, "end_ts" => t0 + 0.03,
+         "depth" => 0, "sequence" => 0, "tags" => {}, "data" => {}}
+      ]}
+      SpanTree.create_from_tree!(project_id: project.id, transaction_id: txn.transaction_id,
+        timestamp: txn.timestamp, tree: tree, span_count: 1, spans_truncated: false)
+
+      call_tool("get_transaction_spans", {"transaction_id" => txn.id})
+      assert_response :success
+      assert_match "db.sql.active_record", tool_text
+      assert_match "SELECT * FROM products", tool_text
+    end
+
+    test "get_transaction_spans falls back to legacy span rows during the dual-read window" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "ProductsController#show", duration: 120)
+      t0 = Time.current
+      Span.create!(project_id: project.id, transaction_id: txn.transaction_id,
+        span_id: "s1", op: "http.client", description: "GET https://api.example",
+        timestamp: t0, end_timestamp: t0 + 0.04, depth: 0, sequence: 0)
+
+      call_tool("get_transaction_spans", {"transaction_id" => txn.id})
+      assert_response :success
+      assert_match "http.client", tool_text
+      assert_match "GET https://api.example", tool_text
     end
 
     def tool_text

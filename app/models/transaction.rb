@@ -75,6 +75,9 @@ class Transaction < TransactionsSpansRecord
       timestamp: timestamp || Time.current,
       transaction_name: payload["transaction"],
       op: payload.dig("contexts", "trace", "op"),
+      # Promoted from spans so log↔transaction correlation is a transaction-table
+      # lookup (see LogsController#related_transaction), not a span query.
+      trace_id: payload.dig("contexts", "trace", "trace_id"),
       duration: duration || 0,
       db_time: db_time,
       view_time: view_time,

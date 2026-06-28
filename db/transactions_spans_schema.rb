@@ -10,7 +10,20 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_25_000003) do
+  create_table "span_trees", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "dict_id"
+    t.binary "payload_blob", null: false
+    t.integer "project_id", null: false
+    t.integer "span_count", default: 0, null: false
+    t.boolean "spans_truncated", default: false, null: false
+    t.datetime "timestamp", null: false
+    t.string "transaction_id", null: false
+    t.index ["project_id", "transaction_id"], name: "index_span_trees_on_project_id_and_transaction_id", unique: true
+    t.index ["timestamp"], name: "index_span_trees_on_timestamp"
+  end
+
   create_table "spans", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.json "data"
@@ -28,7 +41,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
     t.string "trace_id"
     t.string "transaction_id", null: false
     t.index ["project_id", "op", "timestamp"], name: "index_spans_on_project_id_and_op_and_timestamp"
-    t.index ["project_id", "trace_id"], name: "index_spans_on_project_id_and_trace_id"
     t.index ["project_id", "transaction_id", "sequence"], name: "index_spans_on_project_id_and_transaction_id_and_sequence"
     t.index ["timestamp"], name: "index_spans_on_timestamp"
   end
@@ -83,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
     t.boolean "spans_truncated", default: false, null: false
     t.json "tags"
     t.datetime "timestamp", null: false
+    t.string "trace_id"
     t.string "transaction_id", null: false
     t.string "transaction_name", null: false
     t.datetime "updated_at", null: false
@@ -90,6 +103,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000001) do
     t.index ["duration"], name: "index_transactions_on_duration"
     t.index ["project_id", "environment"], name: "index_transactions_on_project_id_and_environment"
     t.index ["project_id", "timestamp"], name: "index_transactions_on_project_id_and_timestamp"
+    t.index ["project_id", "trace_id"], name: "index_transactions_on_project_id_and_trace_id"
     t.index ["project_id", "transaction_id"], name: "index_transactions_on_project_id_and_transaction_id", unique: true
     t.index ["timestamp"], name: "index_transactions_on_timestamp"
     t.index ["transaction_name", "timestamp"], name: "index_transactions_on_transaction_name_and_timestamp"

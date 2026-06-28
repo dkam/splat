@@ -15,7 +15,7 @@ module Maintenance
       setting = Setting.instance
 
       events_deleted = retire_events(setting.events_data_cutoff_date)
-      transactions_deleted, spans_deleted = retire_transactions_and_spans(
+      transactions_deleted, spans_deleted, span_trees_deleted = retire_transactions_and_spans(
         transactions_cutoff: setting.transactions_data_cutoff_date,
         spans_cutoff: setting.spans_data_cutoff_date
       )
@@ -30,12 +30,13 @@ module Maintenance
       vacuum(LogsRecord)
 
       duration = (Time.current - start).round(2)
-      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}"
+      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, span_trees:#{span_trees_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}"
       {
         duration: duration,
         events_deleted: events_deleted,
         transactions_deleted: transactions_deleted,
         spans_deleted: spans_deleted,
+        span_trees_deleted: span_trees_deleted,
         logs_deleted: logs_deleted,
         histograms_deleted: histograms_deleted,
         hourly_stats_deleted: hourly_stats_deleted
@@ -56,26 +57,32 @@ module Maintenance
       deleted
     end
 
-    # Delete aged transactions (and the spans tied to them by transaction_id)
-    # plus any orphan-aged spans. Spans are typically retained for a shorter
-    # window than transactions, so we drop those first by their own cutoff.
+    # Delete aged transactions, the span-tree blobs tied to them, and (during the
+    # dual-read window) any legacy per-span rows. Spans/span_trees share the
+    # shorter span retention window, so we drop those first by their own cutoff.
+    #
+    # The legacy `Span` pruning stays until the blob cutover's transactions have
+    # fully aged out (~30 days); after that, drop the Span branches here, the
+    # `spans` table, and the from_record fallback in Span.for_transaction.
     def retire_transactions_and_spans(transactions_cutoff:, spans_cutoff:)
       spans_deleted = batched_delete_all(Span.where("timestamp < ?", spans_cutoff))
+      span_trees_deleted = batched_delete_all(SpanTree.where("timestamp < ?", spans_cutoff))
 
       txn_scope = Transaction.where("timestamp < ?", transactions_cutoff)
-      # Drop any remaining spans linked to retiring transactions, regardless of span cutoff.
-      # Stream (project_id, transaction_id) pairs in batches — avoids materialising
-      # every retiring UUID at once, and keeps the span delete scoped to the
-      # transaction's project (transaction_id is not globally unique across projects).
+      # Drop any remaining spans/span_trees linked to retiring transactions,
+      # regardless of span cutoff. Stream (project_id, transaction_id) pairs in
+      # batches — avoids materialising every retiring UUID at once, and keeps the
+      # delete scoped to the project (transaction_id is not globally unique).
       txn_scope.in_batches(of: BATCH_SIZE) do |batch|
         batch.pluck(:project_id, :transaction_id).group_by(&:first).each do |project_id, pairs|
           ids = pairs.map(&:last)
           spans_deleted += Span.where(project_id: project_id, transaction_id: ids).delete_all
+          span_trees_deleted += SpanTree.where(project_id: project_id, transaction_id: ids).delete_all
         end
         sleep SLEEP_BETWEEN_BATCHES
       end
       txn_deleted = batched_delete_all(txn_scope)
-      [txn_deleted, spans_deleted]
+      [txn_deleted, spans_deleted, span_trees_deleted]
     end
 
     def retire_histograms(cutoff)
