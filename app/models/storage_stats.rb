@@ -10,9 +10,11 @@ class StorageStats
 
   # Where the precomputed snapshot lives. SolidCache is SQLite-backed and
   # survives restarts, so the snapshot is the refresher's responsibility, not
-  # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule. Bump the
-  # version suffix if the snapshot shape changes.
-  CACHE_KEY = "storage_stats/snapshot/v3"
+  # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule. Keyed on
+  # Splat::VERSION so every release auto-invalidates it: a deploy that changes
+  # the snapshot's shape (new table, new compressed segment) shows fresh data
+  # immediately instead of serving a stale cross-version snapshot.
+  CACHE_KEY = "storage_stats/snapshot/#{Splat::VERSION}"
 
   # Compressed payload tables: [ui label, AR base class, codec db, table].
   # Defined on the class (not in `class << self`) so the settings view can
@@ -20,7 +22,11 @@ class StorageStats
   # resolve the bare constants via lexical nesting.
   COMPRESSED = [
     ["Events", "IssuesEventsRecord", :issues_events, "events"],
-    ["Logs", "LogsRecord", :logs, "logs"]
+    ["Logs", "LogsRecord", :logs, "logs"],
+    # Spans: one plain-zstd blob per transaction (span_trees). dict_id is nil
+    # (no trained dict yet), so Compression::Codec falls back to plain zstd —
+    # same code path, no DictStore needed for this DB.
+    ["Spans", "TransactionsSpansRecord", :transactions_spans, "span_trees"]
   ].freeze
 
   # Rows to decode per table to estimate the compression ratio. A few hundred
