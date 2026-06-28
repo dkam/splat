@@ -3,7 +3,7 @@
 require "base64"
 
 module Ingest
-  # Drains splat.forward, mirroring each raw envelope to every downstream DSN
+  # Drains splat.forward, relaying each raw envelope to every downstream DSN
   # the project has configured (Project#forward_dsns). Delivery is best-effort:
   # per-DSN failures are logged inside EnvelopeForwarder.deliver but the job is
   # always finalized :ok, so a flaky downstream never re-sends to the targets

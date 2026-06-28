@@ -21,7 +21,8 @@ class Project < ApplicationRecord
   before_validation :generate_public_key, if: -> { public_key.blank? }
 
   # Forwarding targets: zero or more downstream DSNs this project's envelopes
-  # are mirrored to (see EnvelopeForwarder). Stored as a JSON array of strings.
+  # are relayed to (see EnvelopeForwarder). Each DSN names its own downstream
+  # project + key. Stored as a JSON array of strings.
   def forwarding?
     forward_dsns.present?
   end
@@ -142,9 +143,10 @@ class Project < ApplicationRecord
 
   private
 
-  # Each forward DSN must be a parseable http(s) DSN. Only scheme/host/port are
-  # used at forward time, but we validate the whole string here so a typo is
-  # caught at save instead of silently failing in the background consumer.
+  # Each forward DSN must be a complete http(s) Sentry DSN —
+  # scheme://public_key@host[:port]/project — since the relay uses every part.
+  # Validate at save so a typo (or a host-only entry) is caught here instead of
+  # silently failing in the background consumer.
   def forward_dsns_parseable
     Array(forward_dsns).each do |dsn|
       EnvelopeForwarder.parse_dsn(dsn)
