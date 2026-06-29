@@ -41,7 +41,7 @@ gem "rufus-scheduler", "~> 3.9"
 gem "dotenv-rails", groups: [:development, :test]
 
 # Pagination
-gem "pagy", "~> 9.0"
+gem "pagy", "~> 43.0"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false

@@ -9,7 +9,7 @@
 #
 # Single-transaction drill-down still lives at TransactionsController#show.
 class EndpointsController < ApplicationController
-  include Pagy::Backend
+  include Pagy::Method
 
   before_action :set_project
 

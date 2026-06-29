@@ -1,5 +1,4 @@
 module ApplicationHelper
-  include Pagy::Frontend
 
   # Maps each section of the project-level tab strip to the controllers
   # that belong to it. Used by `_project_nav` to highlight the active tab.
@@ -143,10 +142,13 @@ module ApplicationHelper
   def pagy_nav_tailwind(pagy)
     return "".html_safe if pagy.pages <= 1
 
-    items = pagy.series.map do |item|
+    # Pagy 43 made #series protected (only #series_nav is public), but the
+    # array contract — Integers, a String for the current page, and :gap — is
+    # unchanged, and we want our own Tailwind markup rather than Pagy's nav.
+    items = pagy.send(:series).map do |item|
       case item
       when Integer
-        link_to(item, pagy_url_for(pagy, item), class: PAGY_ITEM_INACTIVE)
+        link_to(item, pagy.page_url(item), class: PAGY_ITEM_INACTIVE)
       when String # the current page is yielded as a String
         tag.span(item, class: PAGY_ITEM_ACTIVE, "aria-current": "page")
       when :gap
@@ -162,7 +164,7 @@ module ApplicationHelper
   # Styled prev/next pagination for countless Pagy objects (the logs feed),
   # which have no total page count — just a current page and whether more exist.
   def pagy_nav_countless_tailwind(pagy)
-    return "".html_safe if pagy.prev.nil? && pagy.next.nil?
+    return "".html_safe if pagy.previous.nil? && pagy.next.nil?
 
     tag.nav("aria-label": "Pagination", class: "flex items-center justify-center gap-3") do
       safe_join([
@@ -176,8 +178,8 @@ module ApplicationHelper
   # Prev/next controls shared by both nav helpers; render as a disabled label
   # when there's no page to go to.
   def pagy_prev_tag(pagy)
-    if pagy.prev
-      link_to("‹ Prev", pagy_url_for(pagy, pagy.prev), class: PAGY_ITEM_INACTIVE, rel: "prev", "aria-label": "Previous page")
+    if pagy.previous
+      link_to("‹ Prev", pagy.page_url(:previous), class: PAGY_ITEM_INACTIVE, rel: "prev", "aria-label": "Previous page")
     else
       tag.span("‹ Prev", class: PAGY_ITEM_DISABLED, "aria-disabled": "true")
     end
@@ -185,7 +187,7 @@ module ApplicationHelper
 
   def pagy_next_tag(pagy)
     if pagy.next
-      link_to("Next ›", pagy_url_for(pagy, pagy.next), class: PAGY_ITEM_INACTIVE, rel: "next", "aria-label": "Next page")
+      link_to("Next ›", pagy.page_url(:next), class: PAGY_ITEM_INACTIVE, rel: "next", "aria-label": "Next page")
     else
       tag.span("Next ›", class: PAGY_ITEM_DISABLED, "aria-disabled": "true")
     end

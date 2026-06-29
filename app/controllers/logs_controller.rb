@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class LogsController < ApplicationController
-  include Pagy::Backend
+  include Pagy::Method
 
   # How long the environment-filter facet is cached. A distinct scan over the
   # logs table is expensive; staleness here only delays a new environment
@@ -27,7 +27,7 @@ class LogsController < ApplicationController
 
     # Countless: avoids a SELECT COUNT(*) over the ~1M-row logs table (~7s) —
     # an append-only feed only needs prev/next, not a total page count.
-    @pagy, @logs = pagy_countless(logs, limit: 50)
+    @pagy, @logs = pagy(:countless, logs, limit: 50)
 
     # Distinct environments for the filter dropdown. A DISTINCT over a
     # high-volume table is too costly to run on every page load, so cache it

@@ -34,6 +34,26 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     assert_match "controller test log", response.body
   end
 
+  test "index paginates with countless prev/next nav across pages" do
+    # One page holds 50; create enough to force a second page.
+    60.times do |i|
+      Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: i.seconds.ago,
+        level: :info, source: "sentry", body: "page fill #{i}", payload: {})
+    end
+
+    # Page 1: a Next link, Prev disabled.
+    get project_logs_url(@project.slug)
+    assert_response :success
+    assert_match "Next ›", response.body
+    assert_select "a[rel=next]", 1
+    assert_select "span[aria-disabled=true]", text: /Prev/
+
+    # Page 2: a working Prev link back.
+    get project_logs_url(@project.slug, page: 2)
+    assert_response :success
+    assert_select "a[rel=prev]", 1
+  end
+
   test "show renders a single log with attributes" do
     get project_log_url(@project.slug, @log)
     assert_response :success

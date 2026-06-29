@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class IssuesController < ApplicationController
-  include Pagy::Backend
+  include Pagy::Method
 
   before_action :set_project
   before_action :set_issue, only: [:show, :resolve, :ignore, :reopen]
