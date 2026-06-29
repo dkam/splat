@@ -97,11 +97,9 @@
       <% end %>
     </div>
 
-    <% if @pagy.pages > 1 %>
-      <div class="mt-6 flex justify-center">
-        <%== pagy_nav(@pagy) %>
-      </div>
-    <% end %>
+    <div class="mt-6 flex justify-center">
+      <%= pagy_nav_tailwind(@pagy) %>
+    </div>
   <% else %>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-12 text-center border border-gray-200 dark:border-gray-800">
       <% if @status == "open" %>

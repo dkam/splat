@@ -131,6 +131,66 @@ module ApplicationHelper
     truncate(release, length: 20)
   end
 
+  # Shared Tailwind classes for a single pagination control (link or label).
+  PAGY_ITEM_BASE = "inline-flex items-center justify-center min-w-[2.25rem] h-9 px-3 rounded-md text-sm font-medium border transition-colors"
+  PAGY_ITEM_INACTIVE = "#{PAGY_ITEM_BASE} border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+  PAGY_ITEM_ACTIVE = "#{PAGY_ITEM_BASE} border-blue-600 bg-blue-600 text-white"
+  PAGY_ITEM_DISABLED = "#{PAGY_ITEM_BASE} border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+
+  # Styled, page-numbered pagination for regular (counted) Pagy objects. Drop-in
+  # replacement for `pagy_nav`, whose unstyled output renders as a row of jammed
+  # numbers under Tailwind. Used by the endpoints and issues lists.
+  def pagy_nav_tailwind(pagy)
+    return "".html_safe if pagy.pages <= 1
+
+    items = pagy.series.map do |item|
+      case item
+      when Integer
+        link_to(item, pagy_url_for(pagy, item), class: PAGY_ITEM_INACTIVE)
+      when String # the current page is yielded as a String
+        tag.span(item, class: PAGY_ITEM_ACTIVE, "aria-current": "page")
+      when :gap
+        tag.span("…", class: "inline-flex items-center justify-center h-9 px-2 text-gray-400 dark:text-gray-600")
+      end
+    end
+
+    tag.nav("aria-label": "Pagination", class: "flex flex-wrap items-center gap-1.5") do
+      safe_join([pagy_prev_tag(pagy), *items, pagy_next_tag(pagy)])
+    end
+  end
+
+  # Styled prev/next pagination for countless Pagy objects (the logs feed),
+  # which have no total page count — just a current page and whether more exist.
+  def pagy_nav_countless_tailwind(pagy)
+    return "".html_safe if pagy.prev.nil? && pagy.next.nil?
+
+    tag.nav("aria-label": "Pagination", class: "flex items-center justify-center gap-3") do
+      safe_join([
+        pagy_prev_tag(pagy),
+        tag.span("Page #{pagy.page}", class: "text-sm text-gray-500 dark:text-gray-400 tabular-nums"),
+        pagy_next_tag(pagy)
+      ])
+    end
+  end
+
+  # Prev/next controls shared by both nav helpers; render as a disabled label
+  # when there's no page to go to.
+  def pagy_prev_tag(pagy)
+    if pagy.prev
+      link_to("‹ Prev", pagy_url_for(pagy, pagy.prev), class: PAGY_ITEM_INACTIVE, rel: "prev", "aria-label": "Previous page")
+    else
+      tag.span("‹ Prev", class: PAGY_ITEM_DISABLED, "aria-disabled": "true")
+    end
+  end
+
+  def pagy_next_tag(pagy)
+    if pagy.next
+      link_to("Next ›", pagy_url_for(pagy, pagy.next), class: PAGY_ITEM_INACTIVE, rel: "next", "aria-label": "Next page")
+    else
+      tag.span("Next ›", class: PAGY_ITEM_DISABLED, "aria-disabled": "true")
+    end
+  end
+
   # Return CSS class based on duration performance
   def duration_color_class(ms)
     return "text-gray-400 dark:text-gray-500" if ms.nil?

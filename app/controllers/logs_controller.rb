@@ -25,7 +25,9 @@ class LogsController < ApplicationController
     logs = logs.by_environment(@environment) if @environment
     logs = logs.search_text(@query) if @query
 
-    @pagy, @logs = pagy(logs, limit: 50)
+    # Countless: avoids a SELECT COUNT(*) over the ~1M-row logs table (~7s) —
+    # an append-only feed only needs prev/next, not a total page count.
+    @pagy, @logs = pagy_countless(logs, limit: 50)
 
     # Distinct environments for the filter dropdown. A DISTINCT over a
     # high-volume table is too costly to run on every page load, so cache it

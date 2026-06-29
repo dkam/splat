@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_22_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_29_000001) do
   create_table "compression_dictionaries", force: :cascade do |t|
     t.boolean "active", default: false, null: false
     t.float "baseline_ratio"
@@ -60,6 +60,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_22_000004) do
     t.index ["environment"], name: "index_logs_on_environment"
     t.index ["level"], name: "index_logs_on_level"
     t.index ["log_id"], name: "index_logs_on_log_id"
+    t.index ["project_id", "environment"], name: "index_logs_on_project_id_and_environment"
     t.index ["project_id", "timestamp"], name: "index_logs_on_project_id_and_timestamp"
     t.index ["timestamp"], name: "index_logs_on_timestamp"
     t.index ["trace_id"], name: "index_logs_on_trace_id"
