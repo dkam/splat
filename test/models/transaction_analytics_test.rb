@@ -132,4 +132,36 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     assert_equal 50, populated.sum { |b| b["count"] }
     populated.each { |b| assert_in_delta 300, b["p95"], 4 }
   end
+
+  test "batched merged_percentiles_by_name matches per-endpoint merged_percentiles" do
+    # Three endpoints with distinct distributions; mix completed-hour rows (read
+    # from the histogram arm) with current-hour rows (read from the raw union
+    # arm) so both branches of the batched query are exercised.
+    60.times { create_txn(name: "GET /a", duration: 100) }
+    40.times { create_txn(name: "GET /a", duration: 900, at: 1.minute.ago) }
+    100.times { create_txn(name: "GET /b", duration: 50) }
+    30.times { create_txn(name: "GET /c", duration: 1500, at: 1.minute.ago) }
+    names = ["GET /a", "GET /b", "GET /c"]
+
+    batched = Transaction.send(:merged_percentiles_by_name,
+      transaction_names: names, time_range: @range, project_id: @project.id)
+
+    names.each do |name|
+      single = Transaction.send(:merged_percentiles,
+        time_range: @range, project_id: @project.id, transaction_name: name)
+      assert_equal single, batched[name], "#{name} batched percentiles must equal the per-endpoint query"
+    end
+  end
+
+  test "stats_by_endpoint_with_impact percentiles match the single-endpoint reader" do
+    50.times { create_txn(name: "GET /slow", duration: 800) }
+    100.times { create_txn(name: "GET /fast", duration: 30, at: 1.minute.ago) }
+
+    ranked = Transaction.stats_by_endpoint_with_impact(@range, project_id: @project.id)
+    ranked.each do |r|
+      single = Transaction.percentiles_for_endpoint(r["transaction_name"], @range, project_id: @project.id)
+      assert_equal single["p95_duration"], r["p95_duration"], "#{r["transaction_name"]} p95 mismatch"
+      assert_equal single["p50_duration"], r["p50_duration"], "#{r["transaction_name"]} p50 mismatch"
+    end
+  end
 end

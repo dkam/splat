@@ -116,9 +116,10 @@ module TransactionAnalytics
       end.sort_by { |r| -r["time_spent"] }
       ranked = ranked.first(limit) if limit
 
-      ranked.each do |r|
-        r.merge!(endpoint_percentiles(r["transaction_name"], time_range, project_id: project_id, environment: environment))
-      end
+      pcts = endpoint_percentiles_by_name(
+        ranked.map { |r| r["transaction_name"] }, time_range, project_id: project_id, environment: environment
+      )
+      ranked.each { |r| r.merge!(pcts[r["transaction_name"]] || {}) }
       ranked
     end
 
@@ -152,9 +153,10 @@ module TransactionAnalytics
         }
       end.sort_by { |r| -r["n_plus_one_count"] }.first(limit)
 
-      ranked.each do |r|
-        r.merge!(endpoint_percentiles(r["transaction_name"], time_range, project_id: project_id, environment: environment))
-      end
+      pcts = endpoint_percentiles_by_name(
+        ranked.map { |r| r["transaction_name"] }, time_range, project_id: project_id, environment: environment
+      )
+      ranked.each { |r| r.merge!(pcts[r["transaction_name"]] || {}) }
       ranked
     end
 
@@ -239,15 +241,23 @@ module TransactionAnalytics
 
     private
 
-    # Histogram-backed p50/p95/p99 for one endpoint over a window, keyed to
-    # match the dashboard/MCP consumers (p50_duration/p95_duration/p99_duration).
-    def endpoint_percentiles(name, time_range, project_id:, environment:)
-      pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, transaction_name: name)
-      {
-        "p50_duration" => pcts[:p50],
-        "p95_duration" => pcts[:p95],
-        "p99_duration" => pcts[:p99]
-      }
+    # Histogram-backed p50/p95/p99 for many endpoints at once, keyed by name and
+    # shaped to match the dashboard/MCP consumers (p50_duration/p95_duration/
+    # p99_duration). Batches what used to be one merged_percentiles call per row
+    # (the EndpointsController#index N+1) into a single grouped query.
+    # Returns { name => { "p50_duration" =>, "p95_duration" =>, "p99_duration" => } }.
+    def endpoint_percentiles_by_name(names, time_range, project_id:, environment:)
+      by_name = merged_percentiles_by_name(
+        transaction_names: names, time_range: time_range, project_id: project_id, environment: environment
+      )
+      names.each_with_object({}) do |name, out|
+        pcts = by_name[name] || {}
+        out[name] = {
+          "p50_duration" => pcts[:p50],
+          "p95_duration" => pcts[:p95],
+          "p99_duration" => pcts[:p99]
+        }
+      end
     end
 
     def round_or_nil(value)
@@ -545,6 +555,76 @@ module TransactionAnalytics
         p95: p95 && Analytics::Histogram.index_to_ms(p95.to_i),
         p99: p99 && Analytics::Histogram.index_to_ms(p99.to_i)
       }
+    end
+
+    # Batched merged_percentiles: p50/p95/p99 for many endpoints in ONE query,
+    # grouped by transaction_name, instead of one CTE per endpoint. Same
+    # histogram + in-progress-hour (raw) union and same DDSketch bucket→ms
+    # reconstruction as merged_percentiles; only the grouping and the per-name
+    # percentile pick differ. Because the cumulative count is monotonic in
+    # bucket_index within a name, MIN(bucket_index WHERE cum >= q*total) per name
+    # is exactly the single-endpoint query's `... ORDER BY bucket_index LIMIT 1`.
+    # Returns { name => { p50:, p95:, p99: } } in ms (key absent when no data).
+    def merged_percentiles_by_name(transaction_names:, time_range:, project_id: nil, environment: nil)
+      return {} if transaction_names.blank?
+
+      hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
+      until_hour = Analytics::Histogram.hour_bucket(time_range.end)
+      proj_filter = project_id.present? ? "AND project_id = ?" : ""
+      env_filter = environment.present? ? "AND environment = ?" : ""
+      names_filter = "AND transaction_name IN (#{(["?"] * transaction_names.size).join(", ")})"
+      bucket_sql = Analytics::Histogram.bucket_index_sql
+
+      sql = <<~SQL
+        WITH merged AS (
+          SELECT transaction_name AS name, bucket_index, SUM(count) AS c
+            FROM transaction_histograms
+           WHERE hour_bucket >= ? AND hour_bucket < ?
+             #{proj_filter}
+             #{names_filter}
+             #{env_filter}
+           GROUP BY 1, 2
+          UNION ALL
+          SELECT transaction_name AS name, #{bucket_sql} AS bucket_index, COUNT(*) AS c
+            FROM transactions
+           WHERE timestamp >= ? AND timestamp < ?
+             #{proj_filter}
+             #{names_filter}
+             #{env_filter}
+           GROUP BY 1, 2
+        ), reduced AS (
+          SELECT name, bucket_index, SUM(c) AS c FROM merged GROUP BY name, bucket_index
+        ), running AS (
+          SELECT name, bucket_index,
+                 SUM(c) OVER (PARTITION BY name ORDER BY bucket_index) AS cum,
+                 SUM(c) OVER (PARTITION BY name) AS total
+            FROM reduced
+        )
+        SELECT name,
+               MIN(CASE WHEN cum >= 0.50 * total THEN bucket_index END),
+               MIN(CASE WHEN cum >= 0.95 * total THEN bucket_index END),
+               MIN(CASE WHEN cum >= 0.99 * total THEN bucket_index END)
+          FROM running
+         GROUP BY name
+      SQL
+
+      raw_lower = [time_range.begin, until_hour].max
+      binds = [hour_start, until_hour]
+      binds << project_id if project_id.present?
+      binds.concat(transaction_names)
+      binds << environment if environment.present?
+      binds.push(raw_lower, time_range.end)
+      binds << project_id if project_id.present?
+      binds.concat(transaction_names)
+      binds << environment if environment.present?
+
+      connection.select_rows(sanitize_sql_array([sql, *binds])).each_with_object({}) do |(name, p50, p95, p99), acc|
+        acc[name] = {
+          p50: p50 && Analytics::Histogram.index_to_ms(p50.to_i),
+          p95: p95 && Analytics::Histogram.index_to_ms(p95.to_i),
+          p99: p99 && Analytics::Histogram.index_to_ms(p99.to_i)
+        }
+      end
     end
 
     def time_series_for_endpoint_global(time_range, project_id:, buckets:)
