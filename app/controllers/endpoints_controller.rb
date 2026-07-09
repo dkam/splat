@@ -81,7 +81,10 @@ class EndpointsController < ApplicationController
       .where("timestamp > ?", time_ago)
       .order(timestamp: :desc)
 
-    @pagy, @transactions = pagy(transactions, limit: 50)
+    # Countless pagination: this endpoint can have ~80k transactions/day, so a
+    # counted paginator would run a COUNT(*) over the whole window on every page
+    # load. Countless drops the count and the jump-to-page links (next/prev only).
+    @pagy, @transactions = pagy(:countless, transactions, limit: 50)
   end
 
   def n_plus_one
