@@ -205,7 +205,7 @@ module Mcp
       [
         {
           name: "get_status",
-          description: "Report this Splat instance's running version and environment, its storage breakdown (rows + bytes per table, including the legacy spans vs new span_trees split), and payload-compression ratios/savings. Use it to confirm which version is deployed and whether compression is working. The version is live; storage/compression come from a snapshot refreshed every ~15 min (collected_at is included).",
+          description: "Report this Splat instance's running version and environment, its storage breakdown (rows + bytes per table, including the legacy spans vs new span_trees split), the data span / retention window per data table (oldest + newest row for events, transactions, span_trees, logs, and the histogram/hourly_stats tables the performance sparklines read — this answers 'how many days of data/spark do we actually keep?'), and payload-compression ratios/savings. Use it to confirm which version is deployed, how far back data goes, and whether compression is working. The version is live; storage/retention/compression come from a snapshot refreshed every ~15 min (collected_at is included).",
           inputSchema: {
             type: "object",
             properties: {}
@@ -717,6 +717,19 @@ module Mcp
         result += "| Table | Rows | Size |\n|---|---:|---:|\n"
         group[:tables].each do |t|
           result += "| #{t[:name]} | #{t[:row_estimate]} | #{human_size(t[:total_bytes])} |\n"
+        end
+        result += "\n"
+      end
+
+      data_span = snapshot[:data_span]
+      if data_span&.any?
+        result += "### Data span (retention)\n\n"
+        result += "| Table | Oldest | Newest | Span |\n|---|---|---|---:|\n"
+        data_span.each do |d|
+          oldest = d[:oldest]&.utc&.iso8601 || "—"
+          newest = d[:newest]&.utc&.iso8601 || "—"
+          span = d[:days] ? "#{d[:days]} days" : "—"
+          result += "| #{d[:name]} | #{oldest} | #{newest} | #{span} |\n"
         end
         result += "\n"
       end

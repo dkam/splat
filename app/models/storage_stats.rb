@@ -43,6 +43,20 @@ class StorageStats
   # How many recent training runs to keep per DB in the snapshot.
   RECENT_TRAINING_RUNS = 10
 
+  # Data tables whose time span answers "how far back do we actually keep X?".
+  # [ui label, AR base class, table, time column]. All four columns are indexed,
+  # so MIN/MAX are cheap index seeks. The histogram/hourly_stats rows are what
+  # the performance sparklines read, so their span is the real "days of spark
+  # data" answer — distinct from raw transaction retention.
+  DATA_SPAN = [
+    ["Events", "IssuesEventsRecord", "events", "timestamp"],
+    ["Transactions", "TransactionsSpansRecord", "transactions", "timestamp"],
+    ["Span trees", "TransactionsSpansRecord", "span_trees", "timestamp"],
+    ["Transaction histograms (spark)", "TransactionsSpansRecord", "transaction_histograms", "hour_bucket"],
+    ["Transaction hourly stats", "TransactionsSpansRecord", "transaction_hourly_stats", "hour_bucket"],
+    ["Logs", "LogsRecord", "logs", "timestamp"]
+  ].freeze
+
   class << self
     # The precomputed snapshot the settings page renders, or nil if one has
     # never been built (fresh deploy with a cold cache). Cheap — a single
@@ -59,7 +73,7 @@ class StorageStats
       total = groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
       snap = {groups: groups, total: total, counts: counts(groups),
               compression: compression_estimate, dictionaries: dictionary_status,
-              collected_at: Time.current}
+              data_span: data_span, collected_at: Time.current}
       Rails.cache.write(CACHE_KEY, snap)
       snap
     end
@@ -85,6 +99,24 @@ class StorageStats
     rescue => e
       Rails.logger.warn("StorageStats.counts failed: #{e.class}: #{e.message}")
       {}
+    end
+
+    # Oldest/newest row per data table → the real retention window. MIN/MAX on
+    # indexed time columns are cheap seeks, but this still only runs from the
+    # 15-min StorageStatsJob, never on the request path. Empty tables yield nil
+    # bounds (rendered as "—"); a missing table is skipped, not fatal.
+    def data_span
+      DATA_SPAN.filter_map do |label, base_name, table, column|
+        conn = base_name.constantize.connection
+        row = conn.select_one("SELECT MIN(#{column}) AS oldest, MAX(#{column}) AS newest FROM #{table}")
+        oldest = parse_time(row&.fetch("oldest", nil))
+        newest = parse_time(row&.fetch("newest", nil))
+        days = (oldest && newest) ? ((newest - oldest) / 1.day.to_f).round(1) : nil
+        {name: label, table: table, oldest: oldest, newest: newest, days: days}
+      rescue => e
+        Rails.logger.warn("StorageStats.data_span(#{table}) failed: #{e.class}: #{e.message}")
+        nil
+      end
     end
 
     # Estimate storage saved by zstd payload compression, per compressed table.
