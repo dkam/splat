@@ -18,12 +18,14 @@ class LogsController < ApplicationController
     @level = params[:level].presence
     @trace_id = params[:trace_id].presence
     @environment = params[:environment].presence
+    @service = params[:service].presence
     @source = params[:source].presence
     @query = params[:q].presence
 
     logs = logs.by_level(@level) if @level && Log.levels.key?(@level)
     logs = logs.for_trace(@trace_id).reorder(timestamp: :desc) if @trace_id
     logs = logs.by_environment(@environment) if @environment
+    logs = logs.by_service(@service) if @service
     logs = logs.by_source(@source) if @source
     logs = logs.search_text(@query) if @query
 
@@ -44,6 +46,13 @@ class LogsController < ApplicationController
     # too costly per request; brief staleness in the dropdown is fine).
     @sources = Rails.cache.fetch("project_#{@project.id}_log_sources", expires_in: ENVIRONMENTS_TTL) do
       Log.where(project_id: @project.id).distinct.pluck(:source).compact.sort
+    end
+
+    # Services (postgresql / booko / …) — the "what system" facet. Cached
+    # distinct like environments; the partial index on service keeps the scan
+    # to the non-null slice.
+    @services = Rails.cache.fetch("project_#{@project.id}_log_services", expires_in: ENVIRONMENTS_TTL) do
+      Log.where(project_id: @project.id).distinct.pluck(:service).compact.sort
     end
   end
 

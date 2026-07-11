@@ -70,6 +70,8 @@ module Logs
         environment: resource_attrs["deployment.environment"] || attrs["deployment.environment"],
         release: resource_attrs["service.version"],
         server_name: resource_attrs["host.name"] || resource_attrs["server.address"] || resource_attrs["service.name"],
+        service: resource_attrs["service.name"],
+        duration_ms: coerce_ms(attrs["duration_ms"]),
         source: SOURCE,
         attrs_text: Logs::AttrsText.build(resource_attrs.merge(attrs)),
         payload: rec
@@ -103,6 +105,15 @@ module Logs
       rescue
         nil
       end
+    end
+
+    # duration_ms arrives from the collector's regex_parser as a string
+    # attribute ("1835.535"); promote it to a Float, or nil if absent/unparseable.
+    def coerce_ms(value)
+      return nil if value.nil?
+      Float(value)
+    rescue ArgumentError, TypeError
+      nil
     end
 
     def parse_nanos(nanos)

@@ -66,6 +66,8 @@ module Ingest
         environment: rec[:environment],
         release: rec[:release],
         server_name: rec[:server_name],
+        service: rec[:service],
+        duration_ms: rec[:duration_ms],
         source: rec[:source],
         attrs_text: rec[:attrs_text],
         payload_blob: Compression::Codec.encode(rec[:payload].to_json, db: DB, dict_id: dict_id),

@@ -25,6 +25,11 @@ class Log < LogsRecord
   scope :by_logger, ->(name) { where(logger_name: name) }
   scope :by_environment, ->(env) { where(environment: env) }
   scope :by_source, ->(source) { where(source: source) }
+  scope :by_service, ->(service) { where(service: service) }
+  # duration_ms is populated from a source-provided attribute (e.g. Postgres
+  # slow-query duration via the OTLP collector). Backs a future "min duration"
+  # filter; the partial index covers the non-null slice.
+  scope :slower_than, ->(ms) { where("duration_ms >= ?", ms) }
   # Free-text search over message body + flattened attributes via the logs_fts
   # FTS5 index (see config/initializers/logs_fts.rb). Falls back to all when the
   # query has no usable terms.

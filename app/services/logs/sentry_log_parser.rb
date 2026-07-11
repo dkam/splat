@@ -43,6 +43,8 @@ module Logs
         environment: attr(attrs, "sentry.environment"),
         release: attr(attrs, "sentry.release"),
         server_name: attr(attrs, "server.address") || attr(attrs, "sentry.server_name"),
+        service: attr(attrs, "service.name"),
+        duration_ms: coerce_ms(attr(attrs, "duration_ms")),
         source: SOURCE,
         attrs_text: Logs::AttrsText.build(attrs),
         payload: rec
@@ -53,6 +55,15 @@ module Logs
     # tolerate a bare scalar too.
     def attr(attrs, key)
       Logs::AttributeValue.unwrap(attrs[key])
+    end
+
+    # Sentry logs rarely carry a duration, but promote it to a Float when present
+    # so the duration_ms column is populated consistently across sources.
+    def coerce_ms(value)
+      return nil if value.nil?
+      Float(value)
+    rescue ArgumentError, TypeError
+      nil
     end
 
     def parse_ts(ts)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_11_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_11_000002) do
   create_table "compression_dictionaries", force: :cascade do |t|
     t.boolean "active", default: false, null: false
     t.float "baseline_ratio"
@@ -43,6 +43,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000001) do
     t.text "body"
     t.datetime "created_at", null: false
     t.bigint "dict_id"
+    t.float "duration_ms"
     t.string "environment"
     t.integer "level"
     t.string "log_id"
@@ -51,6 +52,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000001) do
     t.integer "project_id", null: false
     t.string "release"
     t.string "server_name"
+    t.string "service"
     t.integer "severity_number"
     t.string "source"
     t.string "span_id"
@@ -60,7 +62,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000001) do
     t.index ["environment"], name: "index_logs_on_environment"
     t.index ["level"], name: "index_logs_on_level"
     t.index ["log_id"], name: "index_logs_on_log_id"
+    t.index ["project_id", "duration_ms"], name: "index_logs_on_project_id_and_duration_ms", where: "duration_ms IS NOT NULL"
     t.index ["project_id", "environment"], name: "index_logs_on_project_id_and_environment"
+    t.index ["project_id", "service"], name: "index_logs_on_project_id_and_service", where: "service IS NOT NULL"
     t.index ["project_id", "timestamp"], name: "index_logs_on_project_id_and_timestamp"
     t.index ["project_id", "trace_id"], name: "index_logs_on_project_id_and_trace_id"
     t.index ["timestamp"], name: "index_logs_on_timestamp"
