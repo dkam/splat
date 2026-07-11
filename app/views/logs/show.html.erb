@@ -3,25 +3,64 @@
     <%= link_to "← Logs", project_logs_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
   </div>
 
+  <% parts = parse_log_message(@log.body) %>
+
   <!-- Log Header -->
-  <div class="flex justify-between items-start mb-8">
-    <div class="flex-1">
-      <div class="flex items-center gap-3 mb-2">
+  <div class="mb-6">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <% if @log.level.present? %>
         <span class="px-2 py-1 rounded text-xs font-semibold uppercase <%= log_level_badge_class(@log.level) %>"><%= @log.level %></span>
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 font-mono break-all"><%= @log.body.presence || "(no message)" %></h1>
-      </div>
-      <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
-        <% if @log.environment.present? %>
-          <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded"><%= @log.environment %></span>
+      <% else %>
+        <span class="px-2 py-1 rounded text-xs font-semibold uppercase bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500" title="No severity level was mapped for this log">no level</span>
+      <% end %>
+      <% if parts[:duration_ms] %>
+        <span class="px-2 py-1 rounded text-xs font-semibold font-mono bg-gray-100 dark:bg-gray-800 <%= duration_color_class(parts[:duration_ms]) %>"><%= format_duration(parts[:duration_ms]) %></span>
+      <% end %>
+      <% if @log.environment.present? %>
+        <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded"><%= @log.environment %></span>
+      <% end %>
+      <% if @log.source.present? %>
+        <span class="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded"><%= @log.source %></span>
+      <% end %>
+      <span class="text-sm text-gray-500 dark:text-gray-400">
+        <%= @log.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %>
+        <span>&mdash; <%= time_ago_in_words(@log.timestamp) %> ago</span>
+      </span>
+    </div>
+    <h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100 font-mono break-words"><%= truncate(parts[:message].presence || "(no message)", length: 120) %></h1>
+  </div>
+
+  <!-- Message / Statement -->
+  <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 mb-6">
+    <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><%= parts[:statement] ? "Statement" : "Message" %></h2>
+      <% if parts[:statement] %><span class="text-xs text-gray-400 dark:text-gray-500 font-mono uppercase tracking-wide">SQL</span><% end %>
+    </div>
+
+    <div class="px-6 py-4">
+      <% if parts[:statement] %>
+        <% collapsed = collapse_sql_in_lists(parts[:statement]) %>
+        <pre class="text-sm text-gray-800 dark:text-gray-200 font-mono whitespace-pre-wrap break-words"><%= collapsed %></pre>
+        <% if collapsed != parts[:statement] %>
+          <details class="mt-3">
+            <summary class="cursor-pointer text-sm text-blue-600 dark:text-blue-400 hover:underline select-none">Show full statement</summary>
+            <pre class="mt-2 text-xs text-gray-700 dark:text-gray-300 font-mono whitespace-pre-wrap break-words max-h-96 overflow-auto bg-gray-50 dark:bg-gray-950 rounded p-3 border border-gray-100 dark:border-gray-800"><%= parts[:statement] %></pre>
+          </details>
         <% end %>
-        <% if @log.source.present? %>
-          <span class="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded"><%= @log.source %></span>
-        <% end %>
-        <span>
-          <%= @log.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %>
-          <span class="text-gray-500 dark:text-gray-500">&mdash; <%= time_ago_in_words(@log.timestamp) %> ago</span>
-        </span>
-      </div>
+      <% else %>
+        <pre class="text-sm text-gray-800 dark:text-gray-200 font-mono whitespace-pre-wrap break-words"><%= parts[:message].presence || "(no message)" %></pre>
+      <% end %>
+
+      <% if parts[:tags].any? %>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <% parts[:tags].each do |k, v| %>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+              <span class="text-gray-500 dark:text-gray-400 font-medium"><%= k %></span>
+              <span class="text-gray-800 dark:text-gray-200 font-mono"><%= v %></span>
+            </span>
+          <% end %>
+        </div>
+      <% end %>
     </div>
   </div>
 

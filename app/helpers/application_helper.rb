@@ -23,6 +23,54 @@ module ApplicationHelper
     LOG_LEVEL_BADGE_CLASSES.fetch(level.to_s, LOG_LEVEL_BADGE_CLASSES["debug"])
   end
 
+  # Pull structure out of a log body for nicer display. Handles Postgres's
+  # "duration: <n> ms  statement: <sql>" shape and a trailing sqlcommenter/
+  # marginalia comment (/* key='value',... */). Everything is optional — a
+  # plain message just comes back as {message: body}. Purely presentational and
+  # never raises, so a weird body degrades to showing the raw text.
+  def parse_log_message(body)
+    body = body.to_s
+    tags = {}
+
+    # Trailing sqlcommenter comment: /* action='show',application='Booko',... */
+    if (m = body.match(%r{\s*/\*\s*(.+?)\s*\*/\s*\z}m))
+      scanned = m[1].scan(/(\w+)='([^']*)'/).to_h
+      if scanned.any?
+        tags = scanned
+        body = body[0...m.begin(0)].rstrip
+      end
+    end
+
+    duration_ms = nil
+    statement = nil
+    # "duration: 12.3 ms  statement: SELECT ..." (also execute/bind/parse forms)
+    if (m = body.match(/\Aduration:\s*([\d.]+)\s*ms\b\s*(.*)\z/m))
+      duration_ms = m[1].to_f
+      rest = m[2].to_s.strip
+      statement = if (s = rest.match(/\A(?:statement|execute[^:]*|bind[^:]*|parse[^:]*):\s*(.+)\z/m))
+        s[1].strip
+      elsif rest.present?
+        rest
+      end
+    end
+
+    {duration_ms: duration_ms, statement: statement, tags: tags, message: (statement || body).strip}
+  end
+
+  # Collapse long `IN (...)` value lists so a statement's shape stays readable.
+  # "IN (1, 2, 3, … 234 values …)" instead of a 200-number wall. Only touches
+  # flat lists (no nested parens), so `IN (SELECT ...)` subqueries are left alone.
+  def collapse_sql_in_lists(sql, threshold: 8, keep: 3)
+    sql.to_s.gsub(/\bIN\s*\(\s*([^()]*?)\s*\)/i) do
+      items = Regexp.last_match(1).split(",")
+      if items.size > threshold
+        "IN (#{items.first(keep).map(&:strip).join(", ")}, … #{items.size} values …)"
+      else
+        Regexp.last_match(0)
+      end
+    end
+  end
+
   def project_nav_active?(section)
     return false unless @project
     controllers = PROJECT_NAV_SECTIONS.fetch(section, [])
