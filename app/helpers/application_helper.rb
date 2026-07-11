@@ -23,6 +23,17 @@ module ApplicationHelper
     LOG_LEVEL_BADGE_CLASSES.fetch(level.to_s, LOG_LEVEL_BADGE_CLASSES["debug"])
   end
 
+  # Human label for a log's ingest protocol (the `source` column, which records
+  # the wire format a log arrived on, not the system that produced it). "OTLP"
+  # and "Sentry" are proper nouns; anything else is title-cased.
+  def protocol_label(source)
+    case source.to_s
+    when "otlp" then "OTLP"
+    when "sentry" then "Sentry"
+    else source.to_s.titleize.presence || source.to_s
+    end
+  end
+
   # Pull structure out of a log body for nicer display. Handles Postgres's
   # "duration: <n> ms  statement: <sql>" shape and a trailing sqlcommenter/
   # marginalia comment (/* key='value',... */). Everything is optional — a
