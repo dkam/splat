@@ -66,7 +66,12 @@ module Ingest
         environment: rec[:environment],
         release: rec[:release],
         server_name: rec[:server_name],
-        service: rec[:service],
+        # Default a missing service to the project slug: a log with no explicit
+        # service.name is the project's own app (e.g. Booko's Sentry request
+        # logs → "booko"), which gives the Service facet a value to sit beside
+        # self-identifying sources like "postgresql". Sources that DO send
+        # service.name (postgres/nginx/…) keep it.
+        service: rec[:service].presence || project.slug,
         duration_ms: rec[:duration_ms],
         source: rec[:source],
         attrs_text: rec[:attrs_text],

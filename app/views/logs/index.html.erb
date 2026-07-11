@@ -74,8 +74,9 @@
           <% else %>
             <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase w-14 text-center bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600" title="No severity level mapped">—</span>
           <% end %>
-          <% if parts[:duration_ms] %>
-            <span class="shrink-0 text-xs font-semibold tabular-nums <%= duration_color_class(parts[:duration_ms]) %>" title="<%= parts[:duration_ms] %> ms"><%= format_duration(parts[:duration_ms]) %></span>
+          <% dur = log.duration_ms || parts[:duration_ms] %>
+          <% if dur %>
+            <span class="shrink-0 text-xs font-semibold tabular-nums <%= duration_color_class(dur) %>" title="<%= dur %> ms"><%= format_duration(dur) %></span>
           <% end %>
           <% if log.logger_name.present? %>
             <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400 max-w-[12rem] truncate"><%= log.logger_name %></span>

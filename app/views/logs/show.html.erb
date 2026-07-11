@@ -13,8 +13,9 @@
       <% else %>
         <span class="px-2 py-1 rounded text-xs font-semibold uppercase bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500" title="No severity level was mapped for this log">no level</span>
       <% end %>
-      <% if parts[:duration_ms] %>
-        <span class="px-2 py-1 rounded text-xs font-semibold font-mono bg-gray-100 dark:bg-gray-800 <%= duration_color_class(parts[:duration_ms]) %>"><%= format_duration(parts[:duration_ms]) %></span>
+      <% dur = @log.duration_ms || parts[:duration_ms] %>
+      <% if dur %>
+        <span class="px-2 py-1 rounded text-xs font-semibold font-mono bg-gray-100 dark:bg-gray-800 <%= duration_color_class(dur) %>"><%= format_duration(dur) %></span>
       <% end %>
       <% if @log.environment.present? %>
         <span class="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded"><%= @log.environment %></span>
