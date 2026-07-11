@@ -18,11 +18,13 @@ class LogsController < ApplicationController
     @level = params[:level].presence
     @trace_id = params[:trace_id].presence
     @environment = params[:environment].presence
+    @source = params[:source].presence
     @query = params[:q].presence
 
     logs = logs.by_level(@level) if @level && Log.levels.key?(@level)
     logs = logs.for_trace(@trace_id).reorder(timestamp: :desc) if @trace_id
     logs = logs.by_environment(@environment) if @environment
+    logs = logs.by_source(@source) if @source
     logs = logs.search_text(@query) if @query
 
     # Countless: avoids a SELECT COUNT(*) over the ~1M-row logs table (~7s) —
@@ -35,6 +37,13 @@ class LogsController < ApplicationController
     # environment showing up a few minutes late in the dropdown is fine.
     @environments = Rails.cache.fetch("project_#{@project.id}_log_environments", expires_in: ENVIRONMENTS_TTL) do
       Log.where(project_id: @project.id).distinct.pluck(:environment).compact.sort
+    end
+
+    # Sources are a tiny fixed set ("otlp"/"sentry"), but cache the distinct scan
+    # anyway — same rationale as environments (a DISTINCT over the logs table is
+    # too costly per request; brief staleness in the dropdown is fine).
+    @sources = Rails.cache.fetch("project_#{@project.id}_log_sources", expires_in: ENVIRONMENTS_TTL) do
+      Log.where(project_id: @project.id).distinct.pluck(:source).compact.sort
     end
   end
 

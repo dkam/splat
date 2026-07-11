@@ -24,6 +24,7 @@ class Log < LogsRecord
   scope :by_level, ->(level) { where(level: level) }
   scope :by_logger, ->(name) { where(logger_name: name) }
   scope :by_environment, ->(env) { where(environment: env) }
+  scope :by_source, ->(source) { where(source: source) }
   # Free-text search over message body + flattened attributes via the logs_fts
   # FTS5 index (see config/initializers/logs_fts.rb). Falls back to all when the
   # query has no usable terms.
