@@ -15,7 +15,10 @@ class TransactionsController < ApplicationController
 
     # trace_id is promoted onto the transaction row; use it to link
     # transaction → logs (the reverse of the log detail's trace link).
-    @trace_id = @transaction.trace_id
+    # .presence guards against a blank trace_id matching every untraced log
+    # in the project (an O(table) COUNT); the count itself is served by
+    # index_logs_on_project_id_and_trace_id.
+    @trace_id = @transaction.trace_id.presence
     @trace_log_count = @trace_id ? Log.where(project_id: @project.id, trace_id: @trace_id).count : 0
 
     respond_to do |format|
