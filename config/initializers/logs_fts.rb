@@ -15,6 +15,14 @@
 # the same approach config/initializers/sqlite_auto_vacuum.rb uses for the
 # auto_vacuum pragma. See Logs::Fts.ensure! for the shared logic (also invoked
 # per worker in parallel tests).
+# Keep the FTS5 virtual table and its shadow tables (logs_fts, logs_fts_data,
+# _idx, _docsize, _config) out of the :ruby schema dump. They can't be
+# represented there — and worse, AR 8.1's SQLite dumper crashes on an
+# external-content FTS5 table (its `arguments` come back nil → `nil.split`),
+# truncating db/logs_schema.rb mid-write on every `db:migrate`. Logs::Fts.ensure!
+# owns them at boot instead, so nothing is lost by omitting them here.
+ActiveRecord::SchemaDumper.ignore_tables |= [/\Alogs_fts(_|\z)/]
+
 Rails.application.config.after_initialize do
   Logs::Fts.ensure!
 rescue => e
