@@ -53,7 +53,10 @@ class EndpointsController < ApplicationController
       )
     end
 
-    @pagy, @transactions = pagy(base_scope.order(timestamp: :desc), limit: 50)
+    # Countless: this feed is the whole project's transactions, which runs to
+    # thousands of pages. A counted paginator would COUNT(*) the lot on every
+    # load (and render a bogus "last page"); countless drops both.
+    @pagy, @transactions = pagy(:countless, base_scope.order(timestamp: :desc), limit: 50)
 
     @environments = cached_environments
   end
@@ -69,10 +72,15 @@ class EndpointsController < ApplicationController
     @p95_duration = stats["p95_duration"]&.to_f&.round || 0
     @p99_duration = stats["p99_duration"]&.to_f&.round || 0
 
+    # The P95 trend always spans a full 7 days for long-range context, regardless
+    # of the filter window above. Hourly buckets (168 over 7d) read directly from
+    # the pre-aggregated histograms, so this stays cheap.
+    @p95_sparkline_days = 7
+    sparkline_range = @p95_sparkline_days.days.ago..Time.current
     @p95_sparkline = Transaction.p95_by_bucket(
       transaction_names: [@endpoint],
-      time_range: time_range,
-      buckets: 24,
+      time_range: sparkline_range,
+      buckets: 168,
       project_id: @project.id
     )[@endpoint] || []
 
