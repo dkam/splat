@@ -1136,7 +1136,7 @@ module Mcp
       }
     end
 
-    # Returns a sorted array of durations from DuckLake, ready for percentile calc.
+    # Returns a sorted array of durations from the transactions DB, ready for percentile calc.
     def get_transactions_by_filters(endpoint, hours, environment, release)
       durations_for(
         endpoint,
