@@ -29,13 +29,28 @@ class Api::OtlpLogsController < ApplicationController
     end
 
     payload = JSON.parse(decompressed_body)
-    Ingest::Tuber.put(
-      Ingest::Tuber::LOGS_TUBE,
-      {format: "otlp", payload: payload, project_id: project.id}
-    )
+
+    # Big collector batches are split so each tuber job stays under the tube's
+    # max job size (Logs::OtlpChunker). Anything still too big — a single
+    # enormous logRecord — is reported as rejected in partialSuccess rather
+    # than 500ing, so the collector drops it instead of retrying it forever.
+    rejected = 0
+    Logs::OtlpChunker.chunks(payload).each do |chunk|
+      Ingest::Tuber.put(
+        Ingest::Tuber::LOGS_TUBE,
+        {format: "otlp", payload: chunk, project_id: project.id}
+      )
+    rescue Beaneater::JobTooBigError
+      rejected += Logs::OtlpChunker.record_count(chunk)
+    end
 
     # OTLP success response shape (empty partialSuccess = all accepted).
-    render json: {partialSuccess: {}}, status: :ok
+    partial = {}
+    if rejected.positive?
+      Rails.logger.warn "[OtlpLogs] rejected #{rejected} log record(s) exceeding the ingest job size limit"
+      partial = {rejectedLogRecords: rejected, errorMessage: "log records exceeded the ingest job size limit"}
+    end
+    render json: {partialSuccess: partial}, status: :ok
   rescue JSON::ParserError => e
     Rails.logger.warn "[OtlpLogs] bad JSON: #{e.message}"
     render json: {error: "invalid JSON"}, status: :bad_request
