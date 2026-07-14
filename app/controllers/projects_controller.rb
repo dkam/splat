@@ -8,17 +8,22 @@ class ProjectsController < ApplicationController
 
     # Last error (issues.last_seen) and last transaction (transactions.timestamp)
     # are surfaced separately so a project sending only performance data still
-    # reads as active. Both queries are cheap: the issues table is small, and the
-    # grouped MAX over transactions rides the (project_id, timestamp) composite
-    # index as a per-project seek, not a scan. (Events are excluded —
+    # reads as active. The last-transaction MAX must be one query per project,
+    # not Transaction.group(:project_id).maximum(:timestamp): SQLite has no
+    # loose index scan, so the grouped form walks the entire (project_id,
+    # timestamp) index (~9s at 260k rows), while MAX with an equality prefix on
+    # that index is a single seek per project. (Events are excluded —
     # Event.group(:project_id) is a full scan over a potentially huge table and
     # was hanging the page; the issues table covers error recency.) Transactions
-    # live in a separate DB, hence a second query rather than a join.
-    counts = Rails.cache.fetch("projects_index_counts/v3", expires_in: 30.seconds, race_condition_ttl: 10.seconds) do
+    # live in a separate DB, hence separate queries rather than a join.
+    counts = Rails.cache.fetch("projects_index_counts/v4", expires_in: 30.seconds, race_condition_ttl: 10.seconds) do
       {
         open_issues: Issue.open.group(:project_id).count,
         last_error: Issue.group(:project_id).maximum(:last_seen),
-        last_transaction: Transaction.group(:project_id).maximum(:timestamp)
+        last_transaction: @projects.each_with_object({}) do |project, latest|
+          timestamp = Transaction.where(project_id: project.id).maximum(:timestamp)
+          latest[project.id] = timestamp if timestamp
+        end
       }
     end
     @open_issue_counts = counts[:open_issues]
@@ -26,17 +31,15 @@ class ProjectsController < ApplicationController
     @last_transaction_at = counts[:last_transaction]
   end
 
-  # Show is a dashboard — six DuckLake aggregates per page load was beating
-  # the columnar reads to death (especially on Docker volumes), and made the
-  # whole app contend on the shared DuckLake connection. We now compute the
-  # DuckLake-derived ivars once per cache window per project and stash them in
-  # Rails cache. SQLite-backed lookups (recent_issues, recent_events) and the
-  # queue depth stay live since they're cheap.
+  # Show is a dashboard — the metrics bundle runs a handful of aggregate
+  # queries (hourly stats, histograms, event counts) per page load, so it's
+  # computed once per cache window per project and stashed in Rails cache.
+  # Row lookups (recent_issues, recent_events) and the queue depth stay live
+  # since they're cheap.
   #
-  # TTL is generous (5 min) because cold-miss latency is ~minutes when DuckLake
-  # is busy; a 30s TTL meant a misfortunate cron + cache expiry tag-team could
-  # take the dashboard to >2-minute responses. The data is for human eyeballs
-  # on a dashboard, freshness within 5 minutes is fine.
+  # TTL is generous (5 min) because a cold miss costs seconds on a busy
+  # instance; the data is for human eyeballs on a dashboard, freshness within
+  # 5 minutes is fine.
   SHOW_METRICS_TTL = 5.minutes
 
   def show
