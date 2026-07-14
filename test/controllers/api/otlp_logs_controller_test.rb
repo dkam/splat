@@ -74,16 +74,27 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "reports undeliverable records as rejected instead of 500ing" do
+  test "reports undeliverable records as rejected instead of 500ing, and alerts the operator" do
     Setting.instance.update!(store_logs: true)
+    captured = []
     raiser = ->(*, **) { raise Beaneater::JobTooBigError.new("JOB_TOO_BIG", "put") }
     with_stub(Ingest::Tuber, :put, raiser) do
-      post "/v1/logs", params: @payload.to_json,
-        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@project.public_key}"}
-      assert_response :success
-      partial = JSON.parse(response.body)["partialSuccess"]
-      assert_equal 1, partial["rejectedLogRecords"]
-      assert_match(/size limit/, partial["errorMessage"])
+      with_stub(Sentry, :capture_message, ->(msg, **kw) { captured << [msg, kw] }) do
+        post "/v1/logs", params: @payload.to_json,
+          headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@project.public_key}"}
+        assert_response :success
+        partial = JSON.parse(response.body)["partialSuccess"]
+        assert_equal 1, partial["rejectedLogRecords"]
+        assert_match(/size limit/, partial["errorMessage"])
+
+        # The drop is surfaced to the operator via Sentry self-monitoring with
+        # a stable fingerprint (one issue, reopens on recurrence) and the fix.
+        assert_equal 1, captured.size
+        msg, kw = captured.first
+        assert_match(/TUBER_MAX_JOB_SIZE/, msg)
+        assert_equal ["otlp_logs", "job_too_big"], kw[:fingerprint]
+        assert_equal 1, kw.dig(:extra, :records_dropped)
+      end
     end
   end
 

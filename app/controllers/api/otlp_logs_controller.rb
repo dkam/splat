@@ -41,13 +41,14 @@ class Api::OtlpLogsController < ApplicationController
         {format: "otlp", payload: chunk, project_id: project.id}
       )
     rescue Beaneater::JobTooBigError
-      rejected += Logs::OtlpChunker.record_count(chunk)
+      dropped = Logs::OtlpChunker.record_count(chunk)
+      rejected += dropped
+      report_undeliverable_chunk(chunk, dropped, project)
     end
 
     # OTLP success response shape (empty partialSuccess = all accepted).
     partial = {}
     if rejected.positive?
-      Rails.logger.warn "[OtlpLogs] rejected #{rejected} log record(s) exceeding the ingest job size limit"
       partial = {rejectedLogRecords: rejected, errorMessage: "log records exceeded the ingest job size limit"}
     end
     render json: {partialSuccess: partial}, status: :ok
@@ -71,5 +72,22 @@ class Api::OtlpLogsController < ApplicationController
 
   def decompressed_body
     Ingest::Decompression.maybe_gunzip(request.body.read, request.headers["Content-Encoding"])
+  end
+
+  # A chunk that still exceeds the tuber server's max job size is a single
+  # oversized logRecord — splitting can't save it, so the data is dropped.
+  # That must not be silent: report it through Splat's own Sentry DSN so it
+  # lands in splat-splat as one fingerprint-stable issue (reopening on
+  # recurrence, notifying via ntfy) that names the knob to turn.
+  def report_undeliverable_chunk(chunk, dropped, project)
+    bytes = JSON.generate(chunk).bytesize
+    Rails.logger.warn "[OtlpLogs] dropped #{dropped} log record(s) (#{bytes} bytes) exceeding tuber's max job size"
+    Sentry.capture_message(
+      "OTLP log record dropped: #{bytes} bytes exceeds tuber's max job size. " \
+        "Raise TUBER_MAX_JOB_SIZE or shrink the collector's log records.",
+      level: :warning,
+      fingerprint: ["otlp_logs", "job_too_big"],
+      extra: {chunk_bytes: bytes, records_dropped: dropped, project: project.slug}
+    )
   end
 end
