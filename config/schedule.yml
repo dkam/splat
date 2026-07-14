@@ -34,6 +34,17 @@ data_retention:
   schedule: cron 0 2 * * *
   con: 1
 
+# Nightly FTS5 segment merge on the logs search index, plus vacuum. Retention
+# deletes only write delete-markers into logs_fts; without an explicit
+# 'optimize' the index grows without bound. Runs after data_retention so the
+# night's deletes are merged away immediately.
+logs_fts_optimize:
+  class: Maintenance::LogsFtsOptimizeJob
+  tube: splat.maintenance
+  schedule: cron 40 2 * * *
+  con: 1
+  idp: logs_fts_optimize
+
 # Daily dictionary-drift check. Per-segment enumeration job that fans out
 # Compression::DictTrainingJob — trains a candidate against recent samples,
 # promotes if it beats the current dict by more than the gain threshold.
