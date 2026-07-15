@@ -582,17 +582,23 @@ Configure Uptime Kuma to send alerts via:
 
 ## Backup
 
-Splat uses SQLite databases. Two recommended backup strategies:
+Splat splits its data across **six separate SQLite database files**, and backup tools operate per-file — backing up `production.sqlite3` alone captures only projects and settings, not your errors, transactions, or logs. Every database you care about needs its own backup configuration.
+
+Two recommended backup strategies:
 
 **[Litestream](https://litestream.io/)** - Continuous replication to S3-compatible storage
 - Real-time backup with ~10-30 second lag
 - Supports AWS S3, Backblaze B2, Cloudflare R2, MinIO
 - Point-in-time recovery
+- Requires one `dbs:` entry per database file — a single entry replicates a single file
 
-**[sqlite3_rsync](https://github.com/cannadayr/git/blob/master/sqlite3_rsync)** - Efficient incremental backups
+**[sqlite3_rsync](https://sqlite.org/rsync.html)** - Efficient incremental backups (official SQLite utility)
 - Creates byte-for-byte clones of live databases
 - Works while database is in use
 - Smaller incremental transfers than full copies
+- Run it once per database file
+
+Do **not** back up a live database with plain `cp` or `rsync` — the databases run in WAL mode, and copying the `.sqlite3` file without a consistent snapshot of its `-wal` file produces a corrupt or stale copy. Use one of the tools above, or `sqlite3 <db> ".backup <dest>"`.
 
 ### What to Backup
 - `storage/production.sqlite3` - Application data: projects, settings, releases (critical)
@@ -601,6 +607,27 @@ Splat uses SQLite databases. Two recommended backup strategies:
 - `storage/production_logs.sqlite3` - Structured logs (critical if you rely on them)
 - `storage/production_cache.sqlite3` / `storage/production_cable.sqlite3` - Solid Cache / Cable (optional, regenerated at runtime)
 - `storage/tuber/` - Tuber's write-ahead log — only holds in-flight ingest jobs; not needed for a point-in-time restore
+
+Example Litestream config covering all four critical databases:
+
+```yaml
+# /etc/litestream.yml
+dbs:
+  - path: /app/storage/production.sqlite3
+    replicas: [{ url: s3://your-bucket/splat/production }]
+  - path: /app/storage/production_issues_events.sqlite3
+    replicas: [{ url: s3://your-bucket/splat/issues_events }]
+  - path: /app/storage/production_transactions_spans.sqlite3
+    replicas: [{ url: s3://your-bucket/splat/transactions_spans }]
+  - path: /app/storage/production_logs.sqlite3
+    replicas: [{ url: s3://your-bucket/splat/logs }]
+```
+
+### Restoring
+
+Restore all critical databases from (roughly) the same point in time. The issues/events, transactions/spans, and logs databases reference project IDs in the primary database, so wildly mismatched restore points leave rows pointing at projects that don't exist yet. There's no cross-file transaction to preserve, so second-level alignment is fine — just don't mix a week-old primary with today's events.
+
+Each backup is self-contained: the zstd compression dictionaries used for event and log payloads are stored inside the same database file as the rows they compress, so a restored file is always readable on its own.
 
 ## Model Context Protocol (MCP) Integration
 
