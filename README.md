@@ -10,6 +10,49 @@ I've only used Splat with Rails, but there's no reason it shouldn't work with ot
 
 If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & Telebugs. 
 
+## Run a local Splat instance
+
+Want your own Splat to point your apps at — on your laptop or a box on your network? This gets one running in a couple of minutes. (Hacking on Splat itself is the same steps.)
+
+**Prerequisites**
+- Ruby — see [`.ruby-version`](.ruby-version) (currently 4.0.6)
+- SQLite3
+- Tuber — the work queue behind ingestion (install below)
+
+### 1. Install Tuber
+
+Splat enqueues every incoming event onto [Tuber](https://github.com/tuberq/tuber), a small single-binary work queue. Pick whichever suits you:
+
+- **Homebrew** (macOS / Linux):
+  ```bash
+  brew install tuberq/tuber/tuber
+  ```
+- **Docker** — nothing to install on the host; let `Procfile.dev` run Tuber in a container. Replace the `tuber:` line in `Procfile.dev` with:
+  ```
+  tuber: docker run --rm -e TUBER_LISTEN=0.0.0.0 -p 11330:11300 --name splat-dev-tuber ghcr.io/tuberq/tuber:latest server
+  ```
+  (Host port `11330` maps to the container's `11300`, matching the `TUBER_URL=localhost:11330` in `.env.example`.)
+- **Release binary** — download one from [Tuber releases](https://github.com/tuberq/tuber/releases) and put `tuber` on your `PATH`.
+
+### 2. Start Splat
+
+```bash
+git clone <repository-url>
+cd splat
+cp .env.example .env      # sane dev defaults, incl. TUBER_URL
+bin/setup                 # bundle install + db:prepare, then boots the stack
+```
+
+Open **http://localhost:3030**.
+
+`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the ingest and maintenance workers, the recurring-job scheduler, Tailwind's watcher, and Tuber (native binary or the Docker line above). Boot it again later with just `bin/dev`.
+
+### 3. Point an app at it
+
+There's no project out of the box. In the Splat UI, create a project — Splat generates its public key, and the project page has a **Copy External DSN** button. Paste that DSN into your app's Sentry config (e.g. `SENTRY_DSN`), and its errors, transactions, and logs start landing in your local Splat.
+
+See [Deployment](#deployment) for running it for real, and [Authentication](#authentication) to put a login in front of the UI.
+
 ## Overview
 
 **Named after Ruby's splat operator and the satisfying sound of squashing bugs**, Splat accepts Sentry-compatible error events and transaction data via a simple API endpoint, processes them asynchronously, and presents them in a clean, fast web interface.
@@ -642,7 +685,7 @@ There are three kinds of token. Which of the first two applies depends on whethe
 | Where it comes from | **Settings → MCP**, one per signed-in user | **Settings → MCP**, one shared | An environment variable |
 | Active when | OIDC is configured | OIDC is **not** configured | Always, if set |
 | Regenerate | Button on the settings page | Button on the settings page | Edit the variable, restart |
-| Revoking it | Remove the address from `SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS` — dies on the next request | Regenerate it | Unset the variable, restart |
+| Revoking it | Leave the allowlist, get logged out at the IdP, or stop signing in — see below | Regenerate it | Unset the variable, restart |
 | Good for | People | A Splat with no users | Cron, CI, scripts |
 
 Either way, open **Settings → MCP**: it shows the whole `claude mcp add` command with host, port and token filled in, plus copy and regenerate buttons. Paste it and you're done — skip to step 3.
@@ -651,7 +694,13 @@ Either way, open **Settings → MCP**: it shows the whole `claude mcp add` comma
 
 **`MCP_AUTH_TOKEN` is different: it is accepted in every configuration**, OIDC or not. It's the headless path — cron, CI, a script — where there's no user to attribute a token to, and an environment variable can't be regenerated from a web page. The trade-off is that it's unattributed and the allowlist can't revoke it; the settings page says so when it's set. Unset it to turn it off.
 
-Per-user tokens are re-checked against the allowlist on *every* request, so removing someone's address revokes their MCP access immediately without touching the database. All tokens are stored in the clear, like project DSN public keys — anyone who can read the database can already read everything the tokens reach.
+**A per-user token has the same lifespan as web access.** Three things end it, matching how you lose the web UI:
+
+- **Leave the allowlist** — checked on every request, so removing an address kills its token on the next call.
+- **Get logged out at your IdP** — a backchannel logout revokes the token immediately, the same moment it ends your web session.
+- **Stop signing in** — a token expires a configurable number of days after its owner last used the web UI (**Settings → MCP**, default 7, `0` to disable). Any visit to Splat renews it, so an active user never notices; someone who has quietly left stops working within the window even if their address still matches a domain allowlist. When a token expires this way, the MCP error tells the client to sign in again and gives the URL.
+
+All tokens are stored in the clear, like project DSN public keys — anyone who can read the database can already read everything the tokens reach.
 
 On an instance with no OIDC, the settings page has no sign-in in front of it, so the shared token is visible to anyone who can load the page — but so are the Resolve and Ignore buttons next to it. Guard such deployments at the network or with the basic-auth recipe above.
 

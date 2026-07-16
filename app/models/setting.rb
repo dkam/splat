@@ -76,6 +76,8 @@ class Setting < ApplicationRecord
   validates :logs_data_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :histograms_retention_days, numericality: {greater_than: 0, less_than_or_equal_to: 3650}
   validates :burst_threshold, numericality: {greater_than: 0, less_than_or_equal_to: 1_000_000}
+  # 0 means "never expire" — see McpToken#authentication_expired?.
+  validates :mcp_token_ttl_days, numericality: {greater_than_or_equal_to: 0, less_than_or_equal_to: 3650}
   validates :ntfy_priority, inclusion: {in: NtfyNotifier::VALID_PRIORITIES}, allow_blank: true
   validate :ntfy_url_parseable
 

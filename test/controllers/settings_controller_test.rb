@@ -93,6 +93,22 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_nil Setting.instance.reload.mcp_token, "the shared token is retired under OIDC"
   end
 
+  test "an authenticated web visit renews the MCP token's authentication stamp" do
+    with_oidc do
+      with_allowlist("dev@example.com") do
+        signed_in_as("dev@example.com") do
+          token = McpToken.for("dev@example.com")
+          token.update_column(:last_authenticated_at, 3.days.ago)
+
+          get settings_url
+
+          assert token.reload.last_authenticated_at > 1.minute.ago,
+            "loading a page while signed in should push the stamp forward"
+        end
+      end
+    end
+  end
+
   test "index withholds the token from a signed-in user who has left the allowlist" do
     with_oidc do
       with_allowlist("someone-else@example.com") do

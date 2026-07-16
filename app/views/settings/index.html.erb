@@ -421,6 +421,23 @@
       </div>
     </div>
 
+    <% if SplatAuthorization.oidc_configured? %>
+      <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800 mb-6">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">MCP tokens</h2>
+        <div>
+          <%= form.label :mcp_token_ttl_days, "Expire after last sign-in", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <div class="flex items-center space-x-2">
+            <%= form.number_field :mcp_token_ttl_days, min: 0, max: 3650, class: "block w-32 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+            <span class="text-gray-600 dark:text-gray-400">days</span>
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            A user's MCP token stops working this many days after they last used the Splat web UI; any visit renews it.
+            Default: 7. Set to 0 to never expire (allowlist only). A backchannel logout revokes immediately regardless.
+          </p>
+        </div>
+      </div>
+    <% end %>
+
     <div class="flex justify-end">
       <%= form.submit "Update Settings", class: "bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white font-bold py-2 px-6 rounded focus:outline-none focus:shadow-outline" %>
     </div>
@@ -434,9 +451,20 @@
         Your personal token for <code class="font-mono">/mcp</code>, tied to <span class="font-mono"><%= @mcp_token.user_email %></span>.
         It carries the same access you have here — including the tools that resolve, ignore and reopen issues.
         Access is re-checked on every request, so it stops working as soon as your address leaves the allowlist.
+        <% if @setting.mcp_token_ttl_days.to_i.positive? %>
+          It also expires <%= pluralize(@setting.mcp_token_ttl_days, "day") %> after your last sign-in; visiting Splat renews it.
+        <% end %>
       </p>
 
       <%= render "settings/mcp_token", token: @mcp_token.token, last_used_at: @mcp_token.last_used_at %>
+
+      <% if @setting.mcp_token_ttl_days.to_i.positive? && @mcp_token.last_authenticated_at %>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mt-3">
+          <% expires_at = @mcp_token.last_authenticated_at + @setting.mcp_token_ttl_days.days %>
+          Renews on each visit — currently valid for another <%= distance_of_time_in_words(Time.current, expires_at) %>
+          (until <%= expires_at.strftime("%-d %b %Y") %>).
+        </p>
+      <% end %>
     <% elsif @instance_mcp_token %>
       <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
         This instance has no OIDC, so there are no users to issue tokens to and <code class="font-mono">/mcp</code>

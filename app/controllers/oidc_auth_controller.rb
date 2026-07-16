@@ -363,6 +363,11 @@ class OidcAuthController < ApplicationController
       oidc_session.invalidate!
       terminated_count += 1
 
+      # A backchannel logout is IdP-initiated revocation, so revoke MCP on the
+      # same footing — immediately, not after the TTL. (A session merely lapsing
+      # is different: that's covered by the TTL window, not this path.)
+      McpToken.find_by(user_email: oidc_session.user_email)&.expire_authentication!
+
       Rails.logger.info "Invalidated OIDC session: sid=#{oidc_session.oidc_sid}, email=#{oidc_session.user_email}"
     end
 

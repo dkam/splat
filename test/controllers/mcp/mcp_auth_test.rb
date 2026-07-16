@@ -84,6 +84,30 @@ module Mcp
       assert_equal(-32001, json.dig("error", "code"))
     end
 
+    test "an expired per-user token is refused with an actionable renewal message" do
+      token = McpToken.for("dev@example.com")
+      Setting.instance.update_column(:mcp_token_ttl_days, 7)
+      token.update_column(:last_authenticated_at, 8.days.ago)
+
+      with_oidc { call_with(token.token) }
+
+      assert_response :unauthorized
+      message = json.dig("error", "message")
+      # The client surfaces this to the human — it must say what to do and where.
+      assert_match(/expired/i, message)
+      assert_match(%r{/settings}, message)
+    end
+
+    test "an off-allowlist token is refused without leaking specifics" do
+      token = McpToken.for("dev@example.com")
+      ENV["SPLAT_ALLOWED_USERS"] = "someone-else@example.com"
+      reset_allowlist_memo!
+
+      with_oidc { call_with(token.token) }
+
+      assert_no_match(/expired/i, json.dig("error", "message"))
+    end
+
     test "an empty bearer is refused when no instance token has been minted" do
       # Setting.mcp_token is nil until the panel is opened; a blank stored token
       # must never compare equal to a blank presented one.

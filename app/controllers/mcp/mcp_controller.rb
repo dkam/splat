@@ -83,16 +83,29 @@ module Mcp
 
     def authenticate_mcp_token
       token = request.headers["Authorization"]&.remove(/^Bearer\s+/i)
+      outcome = mcp_auth_outcome(token)
+      return if outcome == :ok
 
-      unless valid_mcp_token?(token)
-        render json: {
-          jsonrpc: "2.0",
-          error: {
-            code: -32001,
-            message: "Unauthorized: Invalid or missing authentication token"
-          },
-          id: nil
-        }, status: :unauthorized
+      render json: {
+        jsonrpc: "2.0",
+        error: {
+          code: -32001,
+          message: mcp_auth_error_message(outcome)
+        },
+        id: nil
+      }, status: :unauthorized
+    end
+
+    # The :expired message is deliberately actionable — it's surfaced to the
+    # human by the MCP client — and names the URL to renew at. Every other
+    # failure stays generic: an unrecognised caller is told nothing specific.
+    def mcp_auth_error_message(outcome)
+      if outcome == :expired
+        "MCP token expired — its owner hasn't signed in to Splat lately. " \
+          "Renew it by visiting #{Current.external_base_url}/settings and signing in, " \
+          "then re-run the `claude mcp add` command shown there."
+      else
+        "Unauthorized: invalid or missing authentication token"
       end
     end
 
@@ -112,18 +125,24 @@ module Mcp
     # 2 and 3 are deliberately exclusive. Turning OIDC on retires the shared
     # token rather than leaving a second, unattributed way in — anyone who needs
     # one after that uses the env var, on purpose.
-    def valid_mcp_token?(token)
-      return false if token.blank?
+    #
+    # Returns :ok, :expired (a real per-user token past its TTL), or :invalid.
+    def mcp_auth_outcome(token)
+      return :invalid if token.blank?
 
       env_token = ENV["MCP_AUTH_TOKEN"]
       if env_token.present? && ActiveSupport::SecurityUtils.secure_compare(token, env_token)
-        return true
+        return :ok
       end
 
       if SplatAuthorization.oidc_configured?
-        McpToken.authenticate(token).present?
+        result = McpToken.authenticate(token)
+        return :ok if result.is_a?(McpToken)
+        return :expired if result == :expired
+
+        :invalid
       else
-        instance_token_matches?(token)
+        instance_token_matches?(token) ? :ok : :invalid
       end
     end
 

@@ -23,6 +23,23 @@ class ApplicationController < ActionController::Base
     # ENV (see Current.splat_host).
     Current.splat_host = ENV["SPLAT_HOST"].presence || request.host_with_port
     Current.splat_internal_host = ENV.fetch("SPLAT_INTERNAL_HOST", nil)
+
+    refresh_mcp_authentication
+  end
+
+  # Any authenticated web request renews the user's MCP token, so "have you used
+  # Splat lately" — the same signal that keeps a web session alive — is what
+  # keeps MCP alive. require_authentication runs first and has already bounced
+  # anyone without a valid session, so reaching here means the session is good.
+  #
+  # Refresh only, never mint: a token appears when the user opens Settings → MCP,
+  # not on every page. No-ops without OIDC (no per-user tokens) and for the
+  # token-authenticated MCP endpoint (no session, current_user_email blank).
+  def refresh_mcp_authentication
+    return unless SplatAuthorization.oidc_configured?
+    return if current_user_email.blank?
+
+    McpToken.find_by(user_email: current_user_email)&.touch_authenticated!
   end
 
   def queue_depth

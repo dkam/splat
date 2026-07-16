@@ -80,7 +80,80 @@ class McpTokenTest < ActiveSupport::TestCase
     assert token.reload.last_used_at > first_use - 1.second
   end
 
+  # --- expiry: lifespan tied to web sign-in -----------------------------------
+
+  test "for stamps last_authenticated_at when minting" do
+    token = McpToken.for(@allowed)
+    assert_not_nil token.last_authenticated_at
+  end
+
+  test "authenticate returns :expired past the TTL and the record within it" do
+    with_ttl(7) do
+      token = McpToken.for(@allowed)
+
+      token.update_column(:last_authenticated_at, 3.days.ago)
+      assert_equal token, McpToken.authenticate(token.token)
+
+      token.update_column(:last_authenticated_at, 8.days.ago)
+      assert_equal :expired, McpToken.authenticate(token.token)
+    end
+  end
+
+  test "a TTL of zero never expires" do
+    with_ttl(0) do
+      token = McpToken.for(@allowed)
+      token.update_column(:last_authenticated_at, 5.years.ago)
+
+      assert_equal token, McpToken.authenticate(token.token)
+    end
+  end
+
+  test "a never-stamped token is treated as expired, not eternal" do
+    with_ttl(7) do
+      token = McpToken.for(@allowed)
+      token.update_column(:last_authenticated_at, nil)
+
+      assert_equal :expired, McpToken.authenticate(token.token)
+    end
+  end
+
+  test "touch_authenticated! renews, throttled" do
+    with_ttl(7) do
+      token = McpToken.for(@allowed)
+      token.update_column(:last_authenticated_at, 3.days.ago)
+
+      # Within the refresh throttle of a 3-day-old stamp? No — 3 days > 1 hour,
+      # so it advances.
+      token.touch_authenticated!
+      assert token.reload.last_authenticated_at > 1.minute.ago
+
+      # A fresh stamp is not rewritten.
+      fresh = token.last_authenticated_at
+      token.touch_authenticated!
+      assert_equal fresh, token.reload.last_authenticated_at
+    end
+  end
+
+  test "expire_authentication! revokes immediately" do
+    with_ttl(7) do
+      token = McpToken.for(@allowed)
+      assert_equal token, McpToken.authenticate(token.token)
+
+      token.expire_authentication!
+
+      assert_nil token.reload.last_authenticated_at
+      assert_equal :expired, McpToken.authenticate(token.token)
+    end
+  end
+
   private
+
+  def with_ttl(days)
+    Setting.instance.update_column(:mcp_token_ttl_days, days)
+    yield
+  ensure
+    Setting.instance.update_column(:mcp_token_ttl_days, 7)
+  end
 
   # SplatAuthorization memoizes the parsed allowlist across requests.
   def reset_allowlist_memo!

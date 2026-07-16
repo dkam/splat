@@ -92,6 +92,7 @@ class SettingsController < ApplicationController
       :store_transactions,
       :store_logs,
       :burst_threshold,
+      :mcp_token_ttl_days,
       :ntfy_url,
       :ntfy_token,
       :ntfy_priority
