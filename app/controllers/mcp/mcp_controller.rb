@@ -102,8 +102,8 @@ module Mcp
     def mcp_auth_error_message(outcome)
       if outcome == :expired
         "MCP token expired — its owner hasn't signed in to Splat lately. " \
-          "Renew it by visiting #{Current.external_base_url}/settings and signing in, " \
-          "then re-run the `claude mcp add` command shown there."
+          "Sign in at #{Current.external_base_url}/settings to renew it, then reconnect. " \
+          "The token value doesn't change, so there's no need to re-add the server."
       else
         "Unauthorized: invalid or missing authentication token"
       end

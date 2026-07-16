@@ -17,24 +17,9 @@ Want your own Splat to point your apps at — on your laptop or a box on your ne
 **Prerequisites**
 - Ruby — see [`.ruby-version`](.ruby-version) (currently 4.0.6)
 - SQLite3
-- Tuber — the work queue behind ingestion (install below)
+- Docker — `bin/dev` runs [Tuber](https://github.com/tuberq/tuber) (the ingestion work queue) in a container, so there's nothing else to install. Prefer a native binary? The `tuber:` line in `Procfile.dev` shows how.
 
-### 1. Install Tuber
-
-Splat enqueues every incoming event onto [Tuber](https://github.com/tuberq/tuber), a small single-binary work queue. Pick whichever suits you:
-
-- **Homebrew** (macOS / Linux):
-  ```bash
-  brew install tuberq/tuber/tuber
-  ```
-- **Docker** — nothing to install on the host; let `Procfile.dev` run Tuber in a container. Replace the `tuber:` line in `Procfile.dev` with:
-  ```
-  tuber: docker run --rm -e TUBER_LISTEN=0.0.0.0 -p 11330:11300 --name splat-dev-tuber ghcr.io/tuberq/tuber:latest server
-  ```
-  (Host port `11330` maps to the container's `11300`, matching the `TUBER_URL=localhost:11330` in `.env.example`.)
-- **Release binary** — download one from [Tuber releases](https://github.com/tuberq/tuber/releases) and put `tuber` on your `PATH`.
-
-### 2. Start Splat
+### 1. Start Splat
 
 ```bash
 git clone <repository-url>
@@ -45,9 +30,9 @@ bin/setup                 # bundle install + db:prepare, then boots the stack
 
 Open **http://localhost:3030**.
 
-`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the ingest and maintenance workers, the recurring-job scheduler, Tailwind's watcher, and Tuber (native binary or the Docker line above). Boot it again later with just `bin/dev`.
+`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the ingest and maintenance workers, the recurring-job scheduler, Tailwind's watcher, and Tuber. Boot it again later with just `bin/dev`.
 
-### 3. Point an app at it
+### 2. Point an app at it
 
 There's no project out of the box. In the Splat UI, create a project — Splat generates its public key, and the project page has a **Copy External DSN** button. Paste that DSN into your app's Sentry config (e.g. `SENTRY_DSN`), and its errors, transactions, and logs start landing in your local Splat.
 
@@ -698,7 +683,7 @@ Either way, open **Settings → MCP**: it shows the whole `claude mcp add` comma
 
 - **Leave the allowlist** — checked on every request, so removing an address kills its token on the next call.
 - **Get logged out at your IdP** — a backchannel logout revokes the token immediately, the same moment it ends your web session.
-- **Stop signing in** — a token expires a configurable number of days after its owner last used the web UI (**Settings → MCP**, default 7, `0` to disable). Any visit to Splat renews it, so an active user never notices; someone who has quietly left stops working within the window even if their address still matches a domain allowlist. When a token expires this way, the MCP error tells the client to sign in again and gives the URL.
+- **Stop signing in** — a token expires a configurable number of days after its owner last used the web UI (**Settings → MCP**, default 7, `0` to disable). Any visit to Splat renews it, so an active user never notices; someone who has quietly left stops working within the window even if their address still matches a domain allowlist. Renewal doesn't change the token value — signing in reactivates the same token, so the client just reconnects. When a token expires this way the MCP error says so and gives the URL to sign in at.
 
 All tokens are stored in the clear, like project DSN public keys — anyone who can read the database can already read everything the tokens reach.
 
@@ -964,5 +949,5 @@ OIDC_PROVIDER_NAME=Your Provider
 - **Solid Cable**: Real-time updates (optional)
 
 #### Email Previews
-View email templates at `http://localhost:3000/rails/mailers`
+View email templates at `http://localhost:3030/rails/mailers`
 

@@ -3,5 +3,9 @@ ingest: bin/worker ingest
 maintenance: bin/worker maintenance
 scheduler: bin/scheduler
 css: bin/rails tailwindcss:watch
-tuber: tuber server -p 11330 --name "Splat Tuber"
+# Tuber (the ingestion work queue) runs in Docker so there's nothing to install.
+# Prefer a native binary? `brew install tuberq/tuber/tuber`, then comment out the
+# docker line and uncomment this one:
+#   tuber: tuber server -p 11330 --name "Splat Tuber"
+tuber: docker run --rm -e TUBER_LISTEN=0.0.0.0 -p 11330:11300 --name splat-dev-tuber ghcr.io/tuberq/tuber:latest server
 

@@ -96,6 +96,22 @@ module Mcp
       # The client surfaces this to the human — it must say what to do and where.
       assert_match(/expired/i, message)
       assert_match(%r{/settings}, message)
+      # Renewal reactivates the same token, so it must not tell people to rotate it.
+      assert_no_match(/claude mcp add/, message)
+    end
+
+    test "renewing an expired token does not change its value" do
+      token = McpToken.for("dev@example.com")
+      original = token.token
+      Setting.instance.update_column(:mcp_token_ttl_days, 7)
+      token.update_column(:last_authenticated_at, 8.days.ago)
+
+      # Simulate the web renewal: an authenticated visit bumps the stamp.
+      token.touch_authenticated!
+
+      assert_equal original, token.reload.token, "renewal must not rotate the token"
+      with_oidc { call_with(token.token) }
+      assert_response :success, "the same token works again once renewed"
     end
 
     test "an off-allowlist token is refused without leaking specifics" do
