@@ -15,6 +15,20 @@ class SettingsController < ApplicationController
     # Queue depths are live (tuber stats are in-memory and cheap) — unlike the
     # dbstat snapshot, no point caching them. Degrades to {} if tuber is down.
     @queues = Ingest::Tuber.queue_depths
+
+    @mcp_token = mcp_token_for_current_user
+  end
+
+  def reset_mcp_token
+    token = mcp_token_for_current_user
+
+    if token.nil?
+      redirect_to settings_path, alert: "Sign in to manage your MCP token."
+      return
+    end
+
+    token.reset!
+    redirect_to settings_path, notice: "MCP token reset. Update any client using the old token."
   end
 
   def update
@@ -26,6 +40,22 @@ class SettingsController < ApplicationController
   end
 
   private
+
+  # Nil unless there's a signed-in, still-allowlisted user to mint a token for.
+  #
+  # This is the gate that keeps the token off a public page: require_authentication
+  # is a no-op when OIDC isn't configured, so on such an instance the settings
+  # page is world-readable and authenticated? is false — nothing is rendered and
+  # no row is created. Those instances use ENV["MCP_AUTH_TOKEN"] instead.
+  #
+  # The allowlist is re-checked rather than trusted from the session, which may
+  # predate an SPLAT_ALLOWED_USERS change.
+  def mcp_token_for_current_user
+    return nil unless authenticated?
+    return nil unless SplatAuthorization.authorized?(current_user_email)
+
+    McpToken.for(current_user_email)
+  end
 
   def set_setting
     @setting = Setting.instance

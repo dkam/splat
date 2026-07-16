@@ -96,13 +96,23 @@ module Mcp
       end
     end
 
+    # Two ways in, in order of cost:
+    #
+    # 1. ENV["MCP_AUTH_TOKEN"] — the instance token. Headless callers (cron, CI,
+    #    an instance with no OIDC and therefore no users) have no per-user token
+    #    to present, and existing clients were configured with this one.
+    # 2. A per-user McpToken, whose owner must still satisfy the allowlist. That
+    #    check runs per request, so dropping an email from SPLAT_ALLOWED_USERS /
+    #    SPLAT_ALLOWED_DOMAINS revokes their access at once.
     def valid_mcp_token?(token)
       return false if token.blank?
 
-      expected_token = ENV["MCP_AUTH_TOKEN"]
-      return false if expected_token.blank?
+      instance_token = ENV["MCP_AUTH_TOKEN"]
+      if instance_token.present? && ActiveSupport::SecurityUtils.secure_compare(token, instance_token)
+        return true
+      end
 
-      ActiveSupport::SecurityUtils.secure_compare(token, expected_token)
+      McpToken.authenticate(token).present?
     end
 
     def handle_initialize(rpc_request)

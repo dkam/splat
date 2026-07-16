@@ -21,6 +21,15 @@ class Current < ActiveSupport::CurrentAttributes
     super.presence || ENV.fetch("SPLAT_INTERNAL_HOST", nil)
   end
 
+  # Scheme + authority for URLs we hand to clients (project DSNs, the MCP
+  # endpoint). Local hosts are assumed plaintext; anything else is assumed to
+  # be fronted by TLS, which is true of every real deployment.
+  def self.external_base_url
+    host = splat_host
+    scheme = host.include?("localhost") ? "http" : "https"
+    "#{scheme}://#{host}"
+  end
+
   # Get current user information from encrypted cookies or fallback mechanisms
   def self.current_user_info(controller_context = nil)
     return @current_user_info if @current_user_info.present?

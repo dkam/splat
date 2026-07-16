@@ -66,4 +66,5 @@ Rails.application.routes.draw do
   # Settings (singleton resource)
   get "settings", to: "settings#index"
   put "settings", to: "settings#update"
+  post "settings/mcp_token/reset", to: "settings#reset_mcp_token", as: :reset_mcp_token
 end

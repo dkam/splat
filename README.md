@@ -635,7 +635,20 @@ Splat exposes an MCP server that allows Claude and other AI assistants to query 
 
 Note the tools are not read-only: `resolve_issue`, `ignore_issue` and `reopen_issue` change issue state. Treat the token as read/write.
 
-### Setup
+There are two kinds of token, and both work at once:
+
+| | Per-user token | `MCP_AUTH_TOKEN` |
+|---|---|---|
+| Where it comes from | **Settings → MCP**, minted per signed-in user | An environment variable |
+| Needs OIDC | Yes — it's tied to your login | No |
+| Revoking it | Remove the address from `SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS`; the token dies on the next request | Change the variable and restart |
+| Good for | People | Cron, CI, scripts, instances with no OIDC |
+
+**With OIDC configured**, sign in and open **Settings → MCP**. It shows the whole `claude mcp add` command — host, port and your token filled in — with a copy button and a Reset button. Skip to step 3 below and paste it.
+
+Per-user tokens are checked against the allowlist on *every* request, so removing someone's address revokes their MCP access immediately, without touching the database. Tokens are stored in the clear, like project DSN public keys — anyone who can read the database can already read everything the token reaches.
+
+**Without OIDC**, there's no login and so no per-user token — and Splat won't print a token on a page that has no sign-in in front of it. Use the environment variable:
 
 **1. Generate an authentication token:**
 

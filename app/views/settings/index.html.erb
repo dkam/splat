@@ -426,6 +426,49 @@
     </div>
   <% end %>
 
+  <h2 class="font-bold text-2xl text-gray-900 dark:text-gray-100 mb-4 mt-8">MCP</h2>
+
+  <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+    <% if @mcp_token %>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        Your personal token for <code class="font-mono">/mcp</code>, tied to <span class="font-mono"><%= @mcp_token.user_email %></span>.
+        It carries the same access you have here — including the tools that resolve, ignore and reopen issues.
+        Access is re-checked on every request, so it stops working as soon as your address leaves the allowlist.
+      </p>
+
+      <div class="flex items-center gap-3 mb-3">
+        <button type="button"
+                data-controller="clipboard"
+                data-action="click->clipboard#copy"
+                data-clipboard-text-value="<%= mcp_add_command(@mcp_token.token) %>"
+                class="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white text-sm font-semibold py-1.5 px-3 rounded-lg">
+          Copy <span class="font-mono">claude mcp add</span> command
+        </button>
+
+        <%= button_to "Reset token", reset_mcp_token_path,
+              method: :post,
+              form: {data: {turbo_confirm: "Reset your MCP token? Any client using the current one will stop working until you re-add it."}},
+              class: "bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-semibold py-1.5 px-3 rounded-lg cursor-pointer" %>
+
+        <span class="text-sm text-gray-500 dark:text-gray-400">
+          <% if @mcp_token.last_used_at %>
+            Last used <%= time_ago_in_words(@mcp_token.last_used_at) %> ago
+          <% else %>
+            Never used
+          <% end %>
+        </span>
+      </div>
+
+      <pre class="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code><%= mcp_add_command(@mcp_token.token) %></code></pre>
+    <% else %>
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        Per-user MCP tokens need OIDC, so this instance authenticates <code class="font-mono">/mcp</code> with the
+        <code class="font-mono">MCP_AUTH_TOKEN</code> environment variable instead. It isn't shown here: without OIDC
+        this page has no sign-in, so anything printed on it would be public.
+      </p>
+    <% end %>
+  </div>
+
   <h2 class="font-bold text-2xl text-gray-900 dark:text-gray-100 mb-4 mt-8">About</h2>
 
   <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">

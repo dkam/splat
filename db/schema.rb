@@ -10,7 +10,17 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
+  create_table "mcp_tokens", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "last_used_at"
+    t.string "token", null: false
+    t.datetime "updated_at", null: false
+    t.string "user_email", null: false
+    t.index ["token"], name: "index_mcp_tokens_on_token", unique: true
+    t.index ["user_email"], name: "index_mcp_tokens_on_user_email", unique: true
+  end
+
   create_table "oidc_sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "expires_at", null: false

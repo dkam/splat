@@ -67,9 +67,8 @@ class Project < ApplicationRecord
   end
 
   def dsn
-    host = Current.splat_host || "localhost:3000"
-    protocol = host.include?("localhost") ? "http" : "https"
-    "#{protocol}://#{public_key}@#{host}/#{slug}"
+    scheme, host = Current.external_base_url.split("://")
+    "#{scheme}://#{public_key}@#{host}/#{slug}"
   end
 
   def internal_dsn
