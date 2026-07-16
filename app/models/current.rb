@@ -7,12 +7,18 @@ class Current < ActiveSupport::CurrentAttributes
   attribute :ip
   attribute :current_user
 
-  def self.splat_host
-    @splat_host || ENV.fetch("SPLAT_HOST", "localhost:3000")
+  # Instance readers, so `super` reaches the attribute CurrentAttributes wrote.
+  # These used to be `def self.splat_host` reading an `@splat_host` class ivar,
+  # which nothing ever assigned — `Current.splat_host = ...` stores into the
+  # attributes hash — so the reader silently ignored whatever the request set
+  # and always answered from ENV. The ENV fallback still covers jobs, mailers
+  # and anything else running outside a request.
+  def splat_host
+    super.presence || ENV.fetch("SPLAT_HOST", "localhost:3000")
   end
 
-  def self.splat_internal_host
-    @splat_internal_host || ENV.fetch("SPLAT_INTERNAL_HOST", nil)
+  def splat_internal_host
+    super.presence || ENV.fetch("SPLAT_INTERNAL_HOST", nil)
   end
 
   # Get current user information from encrypted cookies or fallback mechanisms
