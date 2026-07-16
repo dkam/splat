@@ -631,7 +631,9 @@ Each backup is self-contained: the zstd compression dictionaries used for event 
 
 ## Model Context Protocol (MCP) Integration
 
-Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly. As Splat has no authentication system, we'll use an environment set value for an authentication token.
+Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly. The MCP endpoint carries its own bearer token and is independent of OIDC — `/mcp` skips browser auth either way, so this token is the only thing guarding it.
+
+Note the tools are not read-only: `resolve_issue`, `ignore_issue` and `reopen_issue` change issue state. Treat the token as read/write.
 
 ### Setup
 
@@ -652,9 +654,30 @@ ruby -r securerandom -e 'puts SecureRandom.hex(32)'
 MCP_AUTH_TOKEN=your-generated-token-here
 ```
 
-**3. Configure Claude Desktop:**
+**3. Add it to Claude Code:**
 
-**Note:** Claude Desktop currently only supports `stdio` transport (not HTTP). To use Splat's MCP server with Claude Desktop, you'll need to create a proxy script.
+Claude Code speaks HTTP directly, so this is a one-liner — no config file, no proxy:
+
+```bash
+claude mcp add --transport http splat-booko https://splat.booko.info/mcp \
+  --header "Authorization: Bearer your-generated-token-here"
+```
+
+Against a local dev server, use the port `Procfile.dev` serves on:
+
+```bash
+claude mcp add --transport http splat-dev http://localhost:3030/mcp \
+  --header "Authorization: Bearer your-generated-token-here"
+```
+
+The name (`splat-booko`, `splat-dev`) is yours to pick and is how you'll refer to the
+server; add one per Splat instance you want to query. Check it took with
+`claude mcp list`, and remove one with `claude mcp remove <name>`.
+
+**Claude Desktop (only if you need it):**
+
+Claude Desktop wants `stdio`, so it needs a shim that pumps stdin to the HTTP
+endpoint. Prefer the Claude Code route above if you have the choice.
 
 Create a file at `~/splat-mcp-proxy.sh`:
 
@@ -691,31 +714,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-**Alternative: Use from Claude Code (supports HTTP):**
-
-You can use command line like: 
-
-`claude mcp add --transport http splat http://localhost:3030/mcp --header "Authorization: Bearer your-generated-token-here"
-
-Claude Code (VS Code extension) supports HTTP transport. In your workspace, you can connect directly:
-
-```json
-{
-  "mcpServers": {
-    "splat": {
-      "url": "http://localhost:3030/mcp",
-      "transport": {
-        "type": "http",
-        "headers": {
-          "Authorization": "Bearer your-generated-token-here"
-        }
-      }
-    }
-  }
-}
-```
-
-**4. Restart Claude Desktop or VS Code**
+**4. Restart Claude Desktop** (Claude Code picks up `claude mcp add` immediately).
 
 ### Available MCP Tools
 
