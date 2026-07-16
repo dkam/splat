@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_000003) do
   create_table "mcp_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -68,6 +68,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
     t.integer "events_data_retention_days", default: 30, null: false
     t.integer "histograms_retention_days", default: 540, null: false
     t.integer "logs_data_retention_days", default: 14, null: false
+    t.string "mcp_token"
+    t.datetime "mcp_token_last_used_at"
     t.string "ntfy_priority", default: "default", null: false
     t.string "ntfy_token"
     t.string "ntfy_url"

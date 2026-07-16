@@ -19,22 +19,57 @@ module Mcp
       reset_allowlist_memo!
     end
 
-    test "the ENV instance token still authenticates" do
-      # Existing clients (cron, CI, an instance with no OIDC) were configured
-      # with this and must keep working.
+    test "the ENV token authenticates without OIDC" do
       call_with(@instance_token)
 
       assert_response :success
       assert_nil json.dig("error"), json.inspect
     end
 
-    test "a per-user token authenticates" do
+    test "the ENV token still authenticates with OIDC on" do
+      # It's explicit operator config and the only path for callers with no user
+      # (cron, CI). Enabling OIDC must not silently ignore a set variable.
+      with_oidc { call_with(@instance_token) }
+
+      assert_response :success
+      assert_nil json.dig("error"), json.inspect
+    end
+
+    test "the shared instance token authenticates without OIDC" do
+      shared = Setting.instance.mcp_token!
+
+      call_with(shared)
+
+      assert_response :success
+      assert_nil json.dig("error"), json.inspect
+    end
+
+    test "the shared instance token is refused once OIDC is on" do
+      # Turning OIDC on retires the shared credential rather than leaving a
+      # second, unattributed way in.
+      shared = Setting.instance.mcp_token!
+
+      with_oidc { call_with(shared) }
+
+      assert_response :unauthorized
+    end
+
+    test "a per-user token authenticates with OIDC on" do
+      token = McpToken.for("dev@example.com")
+
+      with_oidc { call_with(token.token) }
+
+      assert_response :success
+      assert_nil json.dig("error"), json.inspect
+    end
+
+    test "a per-user token is refused when there is no OIDC" do
+      # No OIDC means no users; a leftover row must not be a way in.
       token = McpToken.for("dev@example.com")
 
       call_with(token.token)
 
-      assert_response :success
-      assert_nil json.dig("error"), json.inspect
+      assert_response :unauthorized
     end
 
     test "a per-user token stops working once its owner leaves the allowlist" do
@@ -43,10 +78,21 @@ module Mcp
       ENV["SPLAT_ALLOWED_USERS"] = "someone-else@example.com"
       reset_allowlist_memo!
 
-      call_with(token.token)
+      with_oidc { call_with(token.token) }
 
       assert_response :unauthorized
       assert_equal(-32001, json.dig("error", "code"))
+    end
+
+    test "an empty bearer is refused when no instance token has been minted" do
+      # Setting.mcp_token is nil until the panel is opened; a blank stored token
+      # must never compare equal to a blank presented one.
+      assert_nil Setting.instance.mcp_token
+      ENV.delete("MCP_AUTH_TOKEN")
+
+      call_with("")
+
+      assert_response :unauthorized
     end
 
     test "an unknown token is rejected" do
@@ -90,6 +136,11 @@ module Mcp
     def reset_allowlist_memo!
       SplatAuthorization.instance_variable_set(:@allowed_emails, nil)
       SplatAuthorization.instance_variable_set(:@allowed_domains, nil)
+    end
+
+    # oidc_configured? reads ENV every call, so stubbing it is enough — no memo.
+    def with_oidc(&block)
+      with_stub(SplatAuthorization, :oidc_configured?, -> { true }, &block)
     end
   end
 end

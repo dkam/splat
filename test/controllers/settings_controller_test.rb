@@ -45,21 +45,44 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_match(/Error updating settings/, flash[:alert])
   end
 
-  test "index never prints a token when nobody is signed in" do
-    # The load-bearing case: with OIDC unconfigured require_authentication is a
-    # no-op, so this page is public. A token rendered here would be world-readable.
+  # --- MCP panel, without OIDC: one shared instance token ---------------------
+
+  test "index offers the shared instance token when there is no OIDC" do
     get settings_url
 
     assert_response :success
-    assert_match(/MCP_AUTH_TOKEN/, response.body)
-    assert_no_match(/claude mcp add/, response.body)
-    assert_equal 0, McpToken.count, "an anonymous view must not mint a token"
+    assert_match(/claude mcp add --transport http/, response.body)
+    assert_match(/#{Regexp.escape(Setting.instance.reload.mcp_token)}/, response.body)
+    assert_equal 0, McpToken.count, "no users, so no per-user rows"
   end
 
-  test "index shows the claude mcp add command for a signed-in user" do
-    with_allowlist("dev@example.com") do
-      signed_in_as("dev@example.com") do
-        get settings_url
+  test "index mints the instance token lazily, not before it is asked for" do
+    assert_nil Setting.instance.mcp_token
+
+    get settings_url
+
+    assert_not_nil Setting.instance.reload.mcp_token
+  end
+
+  test "reset_mcp_token regenerates the instance token without OIDC" do
+    get settings_url
+    was = Setting.instance.reload.mcp_token
+
+    post reset_mcp_token_url
+
+    assert_redirected_to settings_path
+    assert_match(/regenerated/, flash[:notice])
+    assert_not_equal was, Setting.instance.reload.mcp_token
+  end
+
+  # --- MCP panel, with OIDC: per-user tokens ----------------------------------
+
+  test "index shows a personal token, not the instance one, when OIDC is on" do
+    with_oidc do
+      with_allowlist("dev@example.com") do
+        signed_in_as("dev@example.com") do
+          get settings_url
+        end
       end
     end
 
@@ -67,12 +90,15 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     token = McpToken.sole
     assert_match(/claude mcp add --transport http/, response.body)
     assert_match(/#{Regexp.escape(token.token)}/, response.body)
+    assert_nil Setting.instance.reload.mcp_token, "the shared token is retired under OIDC"
   end
 
   test "index withholds the token from a signed-in user who has left the allowlist" do
-    with_allowlist("someone-else@example.com") do
-      signed_in_as("dev@example.com") do
-        get settings_url
+    with_oidc do
+      with_allowlist("someone-else@example.com") do
+        signed_in_as("dev@example.com") do
+          get settings_url
+        end
       end
     end
 
@@ -84,38 +110,62 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
   test "reset_mcp_token issues a new token for the signed-in user" do
     was = nil
 
-    with_allowlist("dev@example.com") do
-      signed_in_as("dev@example.com") do
-        was = McpToken.for("dev@example.com").token
-        post reset_mcp_token_url
+    with_oidc do
+      with_allowlist("dev@example.com") do
+        signed_in_as("dev@example.com") do
+          was = McpToken.for("dev@example.com").token
+          post reset_mcp_token_url
+        end
       end
     end
 
     assert_redirected_to settings_path
-    assert_match(/MCP token reset/, flash[:notice])
+    assert_match(/regenerated/, flash[:notice])
     assert_not_equal was, McpToken.sole.token
   end
 
-  test "reset_mcp_token refuses when nobody is signed in" do
-    post reset_mcp_token_url
+  test "reset_mcp_token sends an anonymous visitor to login when OIDC is on" do
+    with_oidc do
+      post reset_mcp_token_url
+    end
+
+    assert_redirected_to login_path
+    assert_equal 0, McpToken.count, "the action is never reached"
+  end
+
+  test "reset_mcp_token refuses a signed-in user who has left the allowlist" do
+    with_oidc do
+      with_allowlist("someone-else@example.com") do
+        signed_in_as("dev@example.com") do
+          post reset_mcp_token_url
+        end
+      end
+    end
 
     assert_redirected_to settings_path
-    assert_match(/Sign in/, flash[:alert])
+    assert_match(/allowlist/, flash[:alert])
     assert_equal 0, McpToken.count
   end
 
   private
 
   # Integration tests can't populate the session directly, and there's no login
-  # route without a real OIDC provider — so shadow the two Authentication
-  # methods the MCP panel consults, then restore.
+  # route without a real OIDC provider — so shadow the Authentication methods
+  # the MCP panel and require_authentication consult, then restore.
   def signed_in_as(email)
     SettingsController.define_method(:authenticated?) { true }
     SettingsController.define_method(:current_user_email) { email }
+    SettingsController.define_method(:oidc_session_valid?) { true }
     yield
   ensure
     SettingsController.remove_method(:authenticated?)
     SettingsController.remove_method(:current_user_email)
+    SettingsController.remove_method(:oidc_session_valid?)
+  end
+
+  # oidc_configured? reads ENV every call, so stubbing it is enough — no memo.
+  def with_oidc(&block)
+    with_stub(SplatAuthorization, :oidc_configured?, -> { true }, &block)
   end
 
   # SplatAuthorization memoizes the parsed allowlist across requests.

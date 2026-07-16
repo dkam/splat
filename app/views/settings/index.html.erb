@@ -436,37 +436,27 @@
         Access is re-checked on every request, so it stops working as soon as your address leaves the allowlist.
       </p>
 
-      <div class="flex items-center gap-3 mb-3">
-        <button type="button"
-                data-controller="clipboard"
-                data-action="click->clipboard#copy"
-                data-clipboard-text-value="<%= mcp_add_command(@mcp_token.token) %>"
-                class="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white text-sm font-semibold py-1.5 px-3 rounded-lg">
-          Copy <span class="font-mono">claude mcp add</span> command
-        </button>
+      <%= render "settings/mcp_token", token: @mcp_token.token, last_used_at: @mcp_token.last_used_at %>
+    <% elsif @instance_mcp_token %>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        This instance has no OIDC, so there are no users to issue tokens to and <code class="font-mono">/mcp</code>
+        uses one shared token. It carries the same access this page does, including resolving and ignoring issues —
+        anyone who can reach Splat can use it, so guard it at the network or proxy.
+        Configure OIDC and it's retired automatically in favour of per-user tokens.
+      </p>
 
-        <%= button_to "Reset token", reset_mcp_token_path,
-              method: :post,
-              form: {data: {turbo_confirm: "Reset your MCP token? Any client using the current one will stop working until you re-add it."}},
-              class: "bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-semibold py-1.5 px-3 rounded-lg cursor-pointer" %>
-
-        <span class="text-sm text-gray-500 dark:text-gray-400">
-          <% if @mcp_token.last_used_at %>
-            Last used <%= time_ago_in_words(@mcp_token.last_used_at) %> ago
-          <% else %>
-            Never used
-          <% end %>
-        </span>
-      </div>
-
-      <pre class="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code><%= mcp_add_command(@mcp_token.token) %></code></pre>
+      <%= render "settings/mcp_token", token: @instance_mcp_token, last_used_at: @setting.mcp_token_last_used_at %>
     <% else %>
       <p class="text-sm text-gray-500 dark:text-gray-400">
-        Per-user MCP tokens need OIDC, so this instance authenticates <code class="font-mono">/mcp</code> with the
-        <code class="font-mono">MCP_AUTH_TOKEN</code> environment variable instead. It isn't shown here: without OIDC
-        this page has no sign-in, so anything printed on it would be public.
+        Sign in to see your personal <code class="font-mono">/mcp</code> token.
       </p>
     <% end %>
+
+    <p class="text-xs text-gray-400 dark:text-gray-500 mt-4">
+      <code class="font-mono">MCP_AUTH_TOKEN</code><%= ENV["MCP_AUTH_TOKEN"].present? ? " is set and" : ", if set," %>
+      also authenticates <code class="font-mono">/mcp</code> in every configuration — it's the headless path for cron
+      and CI. It isn't shown or regenerated here; change it in the environment and restart.
+    </p>
   </div>
 
   <h2 class="font-bold text-2xl text-gray-900 dark:text-gray-100 mb-4 mt-8">About</h2>

@@ -1,0 +1,27 @@
+<%# Copy + Regenerate controls for one MCP token, shared by the per-user and
+    instance panels — they differ in who owns the token, not in what you do with it.
+    Locals: token (String), last_used_at (Time or nil). %>
+<div class="flex flex-wrap items-center gap-3 mb-3">
+  <button type="button"
+          data-controller="clipboard"
+          data-action="click->clipboard#copy"
+          data-clipboard-text-value="<%= mcp_add_command(token) %>"
+          class="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white text-sm font-semibold py-1.5 px-3 rounded-lg">
+    Copy <span class="font-mono">claude mcp add</span> command
+  </button>
+
+  <%= button_to "Regenerate", reset_mcp_token_path,
+        method: :post,
+        form: {data: {turbo_confirm: "Regenerate this MCP token? Any client using the current one will stop working until you re-add it."}},
+        class: "bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-semibold py-1.5 px-3 rounded-lg cursor-pointer" %>
+
+  <span class="text-sm text-gray-500 dark:text-gray-400">
+    <% if last_used_at %>
+      Last used <%= time_ago_in_words(last_used_at) %> ago
+    <% else %>
+      Never used
+    <% end %>
+  </span>
+</div>
+
+<pre class="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code><%= mcp_add_command(token) %></code></pre>

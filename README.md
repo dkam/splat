@@ -635,20 +635,27 @@ Splat exposes an MCP server that allows Claude and other AI assistants to query 
 
 Note the tools are not read-only: `resolve_issue`, `ignore_issue` and `reopen_issue` change issue state. Treat the token as read/write.
 
-There are two kinds of token, and both work at once:
+There are three kinds of token. Which of the first two applies depends on whether the instance has users; `MCP_AUTH_TOKEN` works alongside either.
 
-| | Per-user token | `MCP_AUTH_TOKEN` |
-|---|---|---|
-| Where it comes from | **Settings → MCP**, minted per signed-in user | An environment variable |
-| Needs OIDC | Yes — it's tied to your login | No |
-| Revoking it | Remove the address from `SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS`; the token dies on the next request | Change the variable and restart |
-| Good for | People | Cron, CI, scripts, instances with no OIDC |
+| | Per-user token | Instance token | `MCP_AUTH_TOKEN` |
+|---|---|---|---|
+| Where it comes from | **Settings → MCP**, one per signed-in user | **Settings → MCP**, one shared | An environment variable |
+| Active when | OIDC is configured | OIDC is **not** configured | Always, if set |
+| Regenerate | Button on the settings page | Button on the settings page | Edit the variable, restart |
+| Revoking it | Remove the address from `SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS` — dies on the next request | Regenerate it | Unset the variable, restart |
+| Good for | People | A Splat with no users | Cron, CI, scripts |
 
-**With OIDC configured**, sign in and open **Settings → MCP**. It shows the whole `claude mcp add` command — host, port and your token filled in — with a copy button and a Reset button. Skip to step 3 below and paste it.
+Either way, open **Settings → MCP**: it shows the whole `claude mcp add` command with host, port and token filled in, plus copy and regenerate buttons. Paste it and you're done — skip to step 3.
 
-Per-user tokens are checked against the allowlist on *every* request, so removing someone's address revokes their MCP access immediately, without touching the database. Tokens are stored in the clear, like project DSN public keys — anyone who can read the database can already read everything the token reaches.
+**The instance and per-user tokens are mutually exclusive.** Configure OIDC and the shared token stops being accepted, automatically, in favour of per-user ones — so switching on authentication retires the shared credential instead of leaving a second, unattributed way in. Take OIDC away again and it resumes.
 
-**Without OIDC**, there's no login and so no per-user token — and Splat won't print a token on a page that has no sign-in in front of it. Use the environment variable:
+**`MCP_AUTH_TOKEN` is different: it is accepted in every configuration**, OIDC or not. It's the headless path — cron, CI, a script — where there's no user to attribute a token to, and an environment variable can't be regenerated from a web page. The trade-off is that it's unattributed and the allowlist can't revoke it; the settings page says so when it's set. Unset it to turn it off.
+
+Per-user tokens are re-checked against the allowlist on *every* request, so removing someone's address revokes their MCP access immediately without touching the database. All tokens are stored in the clear, like project DSN public keys — anyone who can read the database can already read everything the tokens reach.
+
+On an instance with no OIDC, the settings page has no sign-in in front of it, so the shared token is visible to anyone who can load the page — but so are the Resolve and Ignore buttons next to it. Guard such deployments at the network or with the basic-auth recipe above.
+
+If you'd rather set the environment variable yourself:
 
 **1. Generate an authentication token:**
 

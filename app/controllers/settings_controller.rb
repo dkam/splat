@@ -16,19 +16,28 @@ class SettingsController < ApplicationController
     # dbstat snapshot, no point caching them. Degrades to {} if tuber is down.
     @queues = Ingest::Tuber.queue_depths
 
+    # Exactly one of these is ever set — see #mcp_token_for_current_user.
     @mcp_token = mcp_token_for_current_user
+    @instance_mcp_token = @setting.mcp_token! if instance_mcp_token?
   end
 
   def reset_mcp_token
-    token = mcp_token_for_current_user
+    if instance_mcp_token?
+      Setting.instance.reset_mcp_token!
+    else
+      token = mcp_token_for_current_user
 
-    if token.nil?
-      redirect_to settings_path, alert: "Sign in to manage your MCP token."
-      return
+      # require_authentication has already bounced anonymous visitors to /login,
+      # so the only way here is signed in but no longer on the allowlist.
+      if token.nil?
+        redirect_to settings_path, alert: "Your address isn't on the allowlist, so you have no MCP token."
+        return
+      end
+
+      token.reset!
     end
 
-    token.reset!
-    redirect_to settings_path, notice: "MCP token reset. Update any client using the old token."
+    redirect_to settings_path, notice: "MCP token regenerated. Update any client using the old one."
   end
 
   def update
@@ -41,16 +50,27 @@ class SettingsController < ApplicationController
 
   private
 
-  # Nil unless there's a signed-in, still-allowlisted user to mint a token for.
+  # No OIDC means no users, so /mcp authenticates with one shared instance token
+  # and that's what the panel offers.
   #
-  # This is the gate that keeps the token off a public page: require_authentication
-  # is a no-op when OIDC isn't configured, so on such an instance the settings
-  # page is world-readable and authenticated? is false — nothing is rendered and
-  # no row is created. Those instances use ENV["MCP_AUTH_TOKEN"] instead.
+  # Showing a credential on a page with no sign-in is deliberate here: without
+  # OIDC this page already hands anyone who can reach it the Resolve and Ignore
+  # buttons, so the token grants strictly less than the page around it. Such
+  # deployments are expected to be guarded at the network or proxy (see the
+  # README's basic-auth recipe), which protects this panel along with the rest.
+  def instance_mcp_token?
+    !SplatAuthorization.oidc_configured?
+  end
+
+  # Nil unless there's a signed-in, still-allowlisted user to mint a token for.
+  # Only consulted when OIDC is on, where require_authentication guarantees a
+  # session — so a token is never rendered to an anonymous visitor of an
+  # OIDC-protected instance.
   #
   # The allowlist is re-checked rather than trusted from the session, which may
   # predate an SPLAT_ALLOWED_USERS change.
   def mcp_token_for_current_user
+    return nil if instance_mcp_token?
     return nil unless authenticated?
     return nil unless SplatAuthorization.authorized?(current_user_email)
 
