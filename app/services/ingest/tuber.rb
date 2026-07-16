@@ -23,6 +23,16 @@ module Ingest
     DEFAULT_TTR = 120
     DEFAULT_PRI = 1024
 
+    # A dead socket: tuber was restarted or bounced under us. Beaneater retries
+    # these a few times inside a single command and then gives up with
+    # NotConnected — at which point the cached connection is holding a closed
+    # socket that never heals on its own. Consumers (TubeConsumer) and the
+    # producer helper below both key off this list to rebuild the connection.
+    CONNECTION_ERRORS = [
+      ::Beaneater::NotConnected, Errno::ECONNREFUSED, Errno::ECONNRESET,
+      Errno::EPIPE, EOFError, IOError, SocketError
+    ].freeze
+
     class << self
       def address
         ENV.fetch("TUBER_URL", "localhost:11330")
@@ -35,6 +45,33 @@ module Ingest
         Thread.current[:ingest_tuber_producer] ||= ::Beaneater.new(address)
       end
 
+      # Throw the per-thread connection away so the next #producer rebuilds it.
+      def reset_producer!
+        Thread.current[:ingest_tuber_producer]&.close
+      rescue
+        # Closing a dead socket can itself raise; we only care that it's gone.
+      ensure
+        Thread.current[:ingest_tuber_producer] = nil
+      end
+
+      # Run a block against the per-thread producer, rebuilding the connection
+      # once if it turns out to be dead. Lets producers (web ingest puts, the
+      # scheduler, ActiveJob enqueues) transparently survive tuber restarting:
+      # one clean retry against a fresh connection, then the error propagates
+      # to the caller. Fail-fast, not a blocking wait — a web request must not
+      # hang on a down queue.
+      def with_producer
+        tries = 0
+        begin
+          yield producer
+        rescue *CONNECTION_ERRORS
+          reset_producer!
+          tries += 1
+          retry if tries < 2
+          raise
+        end
+      end
+
       # con: / idp: are tuber server extensions (per-key concurrency cap +
       # idempotency suppression). Tuber rejects unknown opts on vanilla
       # beanstalkd, so callers omit them unless they want the behavior.
@@ -42,7 +79,9 @@ module Ingest
         opts = {ttr: ttr, pri: pri, delay: delay}
         opts[:con] = con unless con.nil?
         opts[:idp] = idp unless idp.nil?
-        producer.tubes[tube_name].put(JSON.generate(payload), **opts)
+        with_producer do |conn|
+          conn.tubes[tube_name].put(JSON.generate(payload), **opts)
+        end
       end
 
       # Consumers WATCH tubes; producers USE them. Keeping the consumer on its
@@ -59,10 +98,12 @@ module Ingest
       ].freeze
 
       def queue_depth
-        INGEST_TUBES.sum do |name|
-          producer.tubes[name].stats.current_jobs_ready.to_i
-        rescue ::Beaneater::NotFoundError
-          0
+        with_producer do |conn|
+          INGEST_TUBES.sum do |name|
+            conn.tubes[name].stats.current_jobs_ready.to_i
+          rescue ::Beaneater::NotFoundError
+            0
+          end
         end
       rescue
         0
@@ -73,12 +114,14 @@ module Ingest
       # snapshot. A tube tuber hasn't created yet reports zeros; an unreachable
       # tuber yields {} rather than raising into the request path.
       def queue_depths
-        ALL_TUBES.to_h do |name|
-          s = producer.tubes[name].stats
-          [name, {ready: s.current_jobs_ready.to_i, reserved: s.current_jobs_reserved.to_i,
-                  buried: s.current_jobs_buried.to_i, delayed: s.current_jobs_delayed.to_i}]
-        rescue ::Beaneater::NotFoundError
-          [name, {ready: 0, reserved: 0, buried: 0, delayed: 0}]
+        with_producer do |conn|
+          ALL_TUBES.to_h do |name|
+            s = conn.tubes[name].stats
+            [name, {ready: s.current_jobs_ready.to_i, reserved: s.current_jobs_reserved.to_i,
+                    buried: s.current_jobs_buried.to_i, delayed: s.current_jobs_delayed.to_i}]
+          rescue ::Beaneater::NotFoundError
+            [name, {ready: 0, reserved: 0, buried: 0, delayed: 0}]
+          end
         end
       rescue => e
         Rails.logger.warn("Ingest::Tuber.queue_depths failed: #{e.class}: #{e.message}")

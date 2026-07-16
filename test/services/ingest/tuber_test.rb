@@ -31,4 +31,36 @@ class Ingest::TuberTest < ActiveSupport::TestCase
 
     assert_equal({}, depths)
   end
+
+  test "with_producer rebuilds the connection once after tuber drops, then succeeds" do
+    calls = 0
+    fresh = Object.new
+    producer = -> {
+      calls += 1
+      raise Beaneater::NotConnected, "socket closed" if calls == 1
+      fresh
+    }
+
+    result = with_stub(Ingest::Tuber, :producer, producer) do
+      with_stub(Ingest::Tuber, :reset_producer!, -> {}) do
+        Ingest::Tuber.with_producer { |conn| conn }
+      end
+    end
+
+    assert_equal fresh, result, "should yield the rebuilt connection"
+    assert_equal 2, calls, "should retry exactly once on a dead socket"
+  end
+
+  test "with_producer gives up (raises) if the rebuilt connection is also dead" do
+    resets = 0
+    assert_raises(Beaneater::NotConnected) do
+      with_stub(Ingest::Tuber, :producer, -> { raise Beaneater::NotConnected, "still down" }) do
+        with_stub(Ingest::Tuber, :reset_producer!, -> { resets += 1 }) do
+          Ingest::Tuber.with_producer { |conn| conn }
+        end
+      end
+    end
+
+    assert_equal 2, resets, "should reset on the initial failure and the retry, then stop"
+  end
 end
