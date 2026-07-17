@@ -34,6 +34,98 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     def interruptible_sleep(_seconds) = (@waits += 1)
   end
 
+  # Counts touches instead of talking to tuber. #touch on a job that's been
+  # deleted (or whose reservation lapsed) raises, exactly as beaneater's
+  # with_reserved does — the heartbeat must shrug that off.
+  class FakeJob
+    attr_reader :touches
+
+    def initialize(dead: false)
+      @touches = 0
+      @dead = dead
+    end
+
+    def touch
+      raise Beaneater::JobNotReserved, "not reserved" if @dead
+      @touches += 1
+    end
+  end
+
+  # Heartbeats on a millisecond interval so a "slow" batch is milliseconds
+  # rather than minutes. Overrides the method, not the constant — Ruby resolves
+  # TOUCH_INTERVAL lexically, so redefining it here would change nothing.
+  class FastTouchConsumer < Ingest::TubeConsumer
+    def initialize(&block)
+      super(tube: "splat.test")
+      @block = block
+    end
+
+    def process_batch(jobs) = @block.call(jobs)
+
+    private
+
+    def touch_interval = 0.005
+  end
+
+  test "a batch slower than its TTR keeps its reservations alive" do
+    # The bug this exists to prevent: StorageStatsJob ran ~40 minutes against a
+    # 120s TTR, so tuber handed its job to someone else mid-run and the worker
+    # re-ran it forever, starving the tube retention lives on.
+    job = FakeJob.new
+    consumer = FastTouchConsumer.new { sleep 0.05 }
+
+    consumer.send(:keeping_alive, [job]) { sleep 0.05 }
+
+    assert_operator job.touches, :>, 0, "a slow batch must touch its jobs to hold the reservation"
+  end
+
+  test "process_one_batch keeps a slow batch's jobs alive" do
+    # Covers the wiring, not just keeping_alive in isolation: drop the wrapper
+    # from process_one_batch and this is the test that notices.
+    job = FakeJob.new
+    consumer = FastTouchConsumer.new { sleep 0.05 }
+    consumer.define_singleton_method(:reserve_batch) { [job] }
+
+    consumer.send(:process_one_batch)
+
+    assert_operator job.touches, :>, 0, "the real batch path must hold its reservations"
+  end
+
+  test "the heartbeat stops once the batch is done" do
+    job = FakeJob.new
+    consumer = FastTouchConsumer.new { nil }
+
+    consumer.send(:keeping_alive, [job]) { nil }
+    settled = job.touches
+    sleep 0.05
+
+    assert_equal settled, job.touches, "heartbeat must not outlive the batch"
+  end
+
+  test "the heartbeat survives a job that can no longer be touched" do
+    # Jobs get deleted as a batch progresses; touching them then is expected.
+    dead = FakeJob.new(dead: true)
+    live = FakeJob.new
+
+    assert_nothing_raised do
+      FastTouchConsumer.new { nil }.send(:keeping_alive, [dead, live]) { sleep 0.05 }
+    end
+    assert_operator live.touches, :>, 0, "one dead job must not stop the others being kept alive"
+  end
+
+  test "keeping_alive stops the heartbeat even when the batch raises" do
+    job = FakeJob.new
+    consumer = FastTouchConsumer.new { nil }
+
+    assert_raises(RuntimeError) do
+      consumer.send(:keeping_alive, [job]) { raise "boom" }
+    end
+    settled = job.touches
+    sleep 0.05
+
+    assert_equal settled, job.touches, "a raising batch must still stop its heartbeat"
+  end
+
   test "connect_with_retry waits for tuber to come up, then watches the tube" do
     attempts = 0
     client = FakeClient.new

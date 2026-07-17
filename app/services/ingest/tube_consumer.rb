@@ -18,6 +18,23 @@ module Ingest
     # so a poison-pill body doesn't cycle on the tube forever.
     MAX_RETRIES = 5
 
+    # How often to touch the jobs a batch is still working on. A job's TTR is
+    # the server's "is this worker still alive?" timer: hold a job longer than
+    # its TTR without touching and tuber assumes the worker died, and makes the
+    # job ready for someone else — while this worker is still busy with it.
+    #
+    # Not theoretical. Maintenance::StorageStatsJob's deep pass walks every page
+    # of every DB (~40 minutes on a 114 GB instance) against the 120s
+    # Tuber::DEFAULT_TTR. It was requeued ~20x per run, then re-reserved the
+    # moment it finished (its own delete had already become a no-op NotFound),
+    # and re-run forever — starving splat.maintenance, which is where
+    # Maintenance::RetentionJob lives. A database that never purges because its
+    # stats job is too slow to measure it.
+    #
+    # Must stay comfortably under the shortest TTR any producer uses
+    # (Tuber::DEFAULT_TTR is 120s). Touching early is free; touching late isn't.
+    TOUCH_INTERVAL = 30
+
     # Seconds to wait between attempts to (re)connect to tuber. The worker
     # retries for as long as it takes — on boot it waits for tuber to come up,
     # and after a tuber restart it reconnects and re-watches its tube — so a
@@ -71,10 +88,48 @@ module Ingest
       return if jobs.empty?
 
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      process_batch(jobs)
+      keeping_alive(jobs) { process_batch(jobs) }
       ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round
       Rails.logger.info "[#{self.class.name}] processed #{jobs.size} in #{ms}ms"
     end
+
+    # Run the block with a heartbeat touching `jobs`, so a batch slower than its
+    # TTR keeps the reservations it's still working on (see TOUCH_INTERVAL).
+    #
+    # The heartbeat shares this consumer's connection deliberately: a
+    # reservation belongs to the connection that made it, so a touch from any
+    # other socket is NOT_FOUND. Beaneater serialises commands on that
+    # connection's mutex, and nothing reserves while a batch is in flight, so
+    # the touch only ever contends with this batch's own deletes.
+    def keeping_alive(jobs)
+      # A queue rather than a flag + sleep: pop(timeout:) waits the full
+      # interval but wakes the instant the batch finishes, so `ensure` never
+      # blocks waiting for a nap to end.
+      finished = Queue.new
+      heartbeat = Thread.new do
+        until finished.pop(timeout: touch_interval)
+          jobs.each do |job|
+            job.touch
+          rescue
+            # Already deleted, expired, or never reserved — nothing left to keep
+            # alive. process_batch owns what happens to the job itself; a failed
+            # touch is only ever a lost cause, never a new problem.
+            nil
+          end
+        end
+      end
+      yield
+    ensure
+      finished&.push(true)
+      # join, not kill: killing mid-touch would abandon a half-written command
+      # on the shared socket and desync the protocol for every later reserve.
+      heartbeat&.join(TOUCH_INTERVAL)
+    end
+
+    # Overridable so tests can drive the heartbeat without waiting on the wall
+    # clock. A subclass can't just redefine TOUCH_INTERVAL — Ruby resolves
+    # constants lexically, so the reference above would still find this class's.
+    def touch_interval = TOUCH_INTERVAL
 
     private
 
