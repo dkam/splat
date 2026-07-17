@@ -11,6 +11,55 @@ class LogFtsTest < ActiveSupport::TestCase
       level: :info, source: "sentry", body: body, attrs_text: attrs_text, **extra)
   end
 
+  # logs_fts is external-content: querying it reads the `logs` table, so
+  # count(*)/rowid on logs_fts say nothing about whether the index is populated.
+  # Only logs_fts_docsize tracks indexed documents.
+  test "an emptied index is invisible to logs_fts itself, visible in docsize" do
+    create_log(body: "canary row")
+    conn = LogsRecord.connection
+    conn.execute("INSERT INTO logs_fts(logs_fts) VALUES('delete-all')")
+
+    assert_equal 0, Log.search_text("canary").count, "search must be broken after delete-all"
+    # The trap: both of these look perfectly healthy. count(*) on logs_fts just
+    # counts the content table, so it tracks Log.count and never reaches zero
+    # while any log exists — which is why the old `count(*).zero?` guard could
+    # never fire.
+    assert_equal Log.count, conn.select_value("SELECT count(*) FROM logs_fts").to_i
+    assert_not_nil conn.select_value("SELECT rowid FROM logs_fts LIMIT 1")
+    # The only honest signal.
+    assert_nil conn.select_value("SELECT 1 FROM logs_fts_docsize LIMIT 1")
+  end
+
+  test "ensure! rebuilds the index when it is empty but logs exist" do
+    # The state a fresh db:schema:load leaves behind: virtual table created,
+    # never populated, logs rows already present.
+    create_log(body: "orphaned row needing an index")
+    LogsRecord.connection.execute("INSERT INTO logs_fts(logs_fts) VALUES('delete-all')")
+    assert_equal 0, Log.search_text("orphaned").count
+
+    Logs::Fts.ensure!
+
+    assert_equal 1, Log.search_text("orphaned").count, "ensure! should have rebuilt the index"
+  end
+
+  test "ensure! leaves a populated index alone" do
+    create_log(body: "already indexed row")
+    before = LogsRecord.connection.select_value("SELECT count(*) FROM logs_fts_docsize").to_i
+
+    Logs::Fts.ensure!
+
+    assert_equal before, LogsRecord.connection.select_value("SELECT count(*) FROM logs_fts_docsize").to_i
+    assert_equal 1, Log.search_text("indexed").count
+  end
+
+  test "ensure! is a no-op when there are no logs at all" do
+    Log.delete_all
+    LogsRecord.connection.execute("INSERT INTO logs_fts(logs_fts) VALUES('delete-all')")
+
+    assert_nothing_raised { Logs::Fts.ensure! }
+    assert_nil LogsRecord.connection.select_value("SELECT 1 FROM logs_fts_docsize LIMIT 1")
+  end
+
   test "matches on message tokens (AND semantics), not unrelated rows" do
     hit = create_log(body: "payment gateway timeout")
     create_log(body: "healthcheck ok")

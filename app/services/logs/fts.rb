@@ -40,8 +40,22 @@ module Logs
       # First boot after the table is created (or a fresh schema:load): index
       # rows already present. 'rebuild' re-reads the whole content table; only
       # runs while the index is empty.
-      if conn.select_value("SELECT count(*) FROM logs_fts").to_i.zero? &&
-          conn.select_value("SELECT count(*) FROM logs").to_i.positive?
+      #
+      # Emptiness is read from logs_fts_docsize (one row per indexed document),
+      # NOT from logs_fts itself. logs_fts is external-content, so querying it
+      # reads the *content* table — `SELECT count(*) FROM logs_fts` returns the
+      # logs count and `SELECT rowid ... LIMIT 1` returns a logs id, both
+      # completely unchanged by an empty index. Verified: after
+      # `INSERT INTO logs_fts(logs_fts) VALUES('delete-all')`, search returns
+      # nothing while count(*) still reports every log. Reading logs_fts to ask
+      # about the index is measuring the wrong table.
+      #
+      # It's also the difference between a boot and a hang. This runs at boot in
+      # every process (web, workers, console, runner); count(*) scans all of
+      # logs — 18.3 GB / 14.5M rows in production, ~5-7s warm and far worse
+      # cold. The docsize probe is a single row from a plain shadow table.
+      if conn.select_value("SELECT 1 FROM logs_fts_docsize LIMIT 1").nil? &&
+          !conn.select_value("SELECT rowid FROM logs LIMIT 1").nil?
         conn.execute("INSERT INTO logs_fts(logs_fts) VALUES('rebuild')")
         Rails.logger.info("[logs_fts] rebuilt index from existing logs rows")
       end
