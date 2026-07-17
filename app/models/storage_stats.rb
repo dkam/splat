@@ -85,7 +85,18 @@ class StorageStats
     # forward; `deep_collected_at` tells the view how stale they are. The
     # headline total is still live, from PRAGMA page_count.
     def refresh!
-      prior = snapshot || {}
+      prior = snapshot
+
+      # A cold cache has no deep pass to carry forward, and CACHE_KEY is
+      # versioned on Splat::VERSION so every deploy starts cold. Writing a
+      # snapshot with empty groups here would be doubly wrong: the settings page
+      # would show no per-table breakdown and no counts, and the controller's
+      # cold-cache deep enqueue would never fire again — it only triggers when
+      # the snapshot is nil, and we'd just made it non-nil. Build the real thing
+      # once instead. Self-healing, and it doesn't depend on anyone loading the
+      # settings page to kick off the first deep pass.
+      return refresh_deep! if prior.nil? || prior[:deep_collected_at].nil?
+
       groups = prior[:groups] || []
       snap = {groups: groups,
               total: file_bytes_total,

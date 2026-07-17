@@ -82,6 +82,32 @@ class StorageStatsTest < ActiveSupport::TestCase
     assert fast[:collected_at] >= deep[:collected_at]
   end
 
+  # CACHE_KEY is versioned on Splat::VERSION, so every deploy starts cold and the
+  # hourly job usually fires before anyone loads the settings page. If refresh!
+  # wrote its carried-forward defaults on a cold cache it would leave an empty
+  # snapshot AND suppress SettingsController's deep enqueue, which only fires
+  # when the snapshot is nil.
+  test "refresh! builds a deep snapshot rather than caching an empty one on a cold cache" do
+    Rails.cache.delete(StorageStats::CACHE_KEY)
+
+    snap = StorageStats.refresh!
+
+    assert snap[:groups].any?, "cold refresh! must build groups, not carry forward []"
+    assert snap[:deep_collected_at], "cold refresh! must count as a deep pass"
+    assert_equal snap[:collected_at], snap[:deep_collected_at]
+  end
+
+  # Same trap one step later: a snapshot that exists but has never had a deep
+  # pass (e.g. written by an older build) must not be treated as carry-forwardable.
+  test "refresh! rebuilds deep when a prior snapshot has no deep pass" do
+    Rails.cache.write(StorageStats::CACHE_KEY, {groups: [], counts: {}, collected_at: Time.current})
+
+    snap = StorageStats.refresh!
+
+    assert snap[:groups].any?
+    assert snap[:deep_collected_at]
+  end
+
   test "file_bytes_total reports on-disk bytes across every DB" do
     assert StorageStats.file_bytes_total.positive?
   end
