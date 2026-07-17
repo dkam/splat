@@ -42,6 +42,74 @@ module Mcp
       assert_match(/splat\.events/, text)
     end
 
+    test "get_status splits data from index bytes, ranks indexes, and flags uncompressed tables" do
+      fake = {
+        total: 90_000_000_000,
+        collected_at: Time.utc(2026, 7, 16, 21, 35),
+        deep_collected_at: Time.utc(2026, 7, 16, 3, 0),
+        groups: [{name: "Transactions + Spans", base: "TransactionsSpansRecord", tables: [
+          {name: "transactions", row_estimate: 5_470_176, table_bytes: 27_000_000_000,
+           index_bytes: 16_200_000_000, total_bytes: 43_200_000_000,
+           indexes: [{name: "index_transactions_on_duration", bytes: 3_900_000_000},
+             {name: "index_transactions_on_project_id_and_environment", bytes: 3_100_000_000}]},
+          {name: "span_trees", row_estimate: 4_353_596, table_bytes: 13_000_000_000,
+           index_bytes: 600_000_000, total_bytes: 13_600_000_000, indexes: []}
+        ]}],
+        compression: [{name: "Spans", rows: 4_353_596, sample: 500, ratio: 11.0,
+                       stored_bytes: 10_100_000_000, original_bytes: 111_100_000_000,
+                       saved_bytes: 101_000_000_000}]
+      }
+
+      with_stub(StorageStats, :snapshot, -> { fake }) do
+        with_stub(Ingest::Tuber, :queue_depths, -> { {} }) do
+          call_tool("get_status", {})
+        end
+      end
+
+      assert_response :success
+      text = JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+
+      # Data and index bytes are reported separately, not just as a total.
+      assert_match(/\| transactions \| 5470176 \| 25\.1 GB \| 15\.1 GB \| 40\.2 GB \|/, text)
+      # Per-index detail, biggest first.
+      assert_match(/### Largest indexes/, text)
+      assert_match(/index_transactions_on_duration.*3\.63 GB/, text)
+      assert_operator text.index("index_transactions_on_duration"), :<,
+        text.index("index_transactions_on_project_id_and_environment"),
+        "indexes should be ranked biggest-first"
+      # The configured window, which the observed data span can't reveal.
+      assert_match(/### Retention settings \(configured\)/, text)
+      # An uncompressed table is named as such rather than silently absent.
+      assert_match(/Transactions \(pre-cutover plain-JSON measurements\).*not compressed/, text)
+      # Table sizes carry the deep pass's timestamp, not the 15-min one.
+      assert_match(/\*\*Table sizes from:\*\* 2026-07-16T03:00:00Z/, text)
+    end
+
+    test "get_status renders a snapshot written before per-index sizes were collected" do
+      fake = {
+        total: 700_000_000,
+        collected_at: Time.utc(2026, 6, 28, 6, 20),
+        groups: [{name: "Transactions + Spans", base: "TransactionsSpansRecord", tables: [
+          {name: "span_trees", row_estimate: 302, table_bytes: 1_300_000,
+           index_bytes: 36_000, total_bytes: 1_336_000}
+        ]}],
+        compression: []
+      }
+
+      with_stub(StorageStats, :snapshot, -> { fake }) do
+        with_stub(Ingest::Tuber, :queue_depths, -> { {} }) do
+          call_tool("get_status", {})
+        end
+      end
+
+      assert_response :success
+      text = JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+      assert_match(/span_trees/, text)
+      # No :indexes key and no :deep_collected_at — render, don't crash.
+      refute_match(/### Largest indexes/, text)
+      refute_match(/Table sizes from/, text)
+    end
+
     test "search_slow_transactions passes valid tags hash through to Transaction.slow" do
       with_slow_stub do |captured|
         call_tool("search_slow_transactions", {"tags" => {"user_id" => "123", "feature" => "x"}})

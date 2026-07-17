@@ -757,18 +757,17 @@ module Mcp
       end
 
       result += "- **Storage total:** #{human_size(snapshot[:total])}\n"
-      result += "- **Stats collected:** #{snapshot[:collected_at]&.utc&.iso8601 || "unknown"} (refreshes every ~15 min)\n\n"
-
-      result += "### Storage by database\n\n"
-      Array(snapshot[:groups]).each do |group|
-        group_total = group[:tables].sum { |t| t[:total_bytes] }
-        result += "**#{group[:name]}** — #{human_size(group_total)}\n\n"
-        result += "| Table | Rows | Size |\n|---|---:|---:|\n"
-        group[:tables].each do |t|
-          result += "| #{t[:name]} | #{t[:row_estimate]} | #{human_size(t[:total_bytes])} |\n"
-        end
-        result += "\n"
+      result += "- **Stats collected:** #{snapshot[:collected_at]&.utc&.iso8601 || "unknown"} (refreshes every ~15 min)\n"
+      # Table/index bytes and row counts come from the daily dbstat walk, not
+      # the 15-min pass that carries them forward — so they get their own
+      # timestamp rather than inheriting collected_at's freshness claim.
+      if (deep = snapshot[:deep_collected_at])
+        result += "- **Table sizes from:** #{deep.utc.iso8601} (deep dbstat pass, daily)\n"
       end
+      result += "\n"
+
+      result += format_retention_settings
+      result += format_storage_groups(snapshot)
 
       data_span = snapshot[:data_span]
       if data_span&.any?
@@ -791,10 +790,100 @@ module Mcp
         compression.each do |c|
           result += "| #{c[:name]} | #{c[:rows]} | #{c[:ratio].round(1)}× | #{human_size(c[:stored_bytes])} | #{human_size(c[:saved_bytes])} |\n"
         end
+        result += format_uncompressed_rows(snapshot)
         result += "\n"
       end
 
       result
+    end
+
+    # Per-table sizes, split into data vs index bytes. The split is the whole
+    # point: a table that's mostly index wants indexes dropped, one that's
+    # mostly data wants compression, and the combined total can't tell them
+    # apart. `indexes` is absent from snapshots written before it was
+    # collected, so every read of it tolerates nil.
+    def format_storage_groups(snapshot)
+      result = "### Storage by database\n\n"
+      Array(snapshot[:groups]).each do |group|
+        group_total = group[:tables].sum { |t| t[:total_bytes] }
+        result += "**#{group[:name]}** — #{human_size(group_total)}\n\n"
+        result += "| Table | Rows | Data | Indexes | Total |\n|---|---:|---:|---:|---:|\n"
+        group[:tables].each do |t|
+          result += "| #{t[:name]} | #{t[:row_estimate]} | #{human_size(t[:table_bytes])} | " \
+                    "#{human_size(t[:index_bytes])} | #{human_size(t[:total_bytes])} |\n"
+        end
+        result += "\n"
+      end
+      result + format_largest_indexes(snapshot)
+    end
+
+    # The biggest individual indexes across every DB. Answers "which of these
+    # seven indexes is worth dropping?" — a per-table index total can't, since
+    # it hides one 1 GB index among six small ones.
+    def format_largest_indexes(snapshot, limit: 15)
+      indexes = Array(snapshot[:groups]).flat_map { |group|
+        group[:tables].flat_map do |t|
+          Array(t[:indexes]).map { |idx| idx.merge(table: t[:name]) }
+        end
+      }.reject { |idx| idx[:bytes].to_i.zero? }.sort_by { |idx| -idx[:bytes].to_i }
+
+      return "" if indexes.empty?
+
+      result = "### Largest indexes (top #{limit})\n\n"
+      result += "| Index | Table | Size |\n|---|---|---:|\n"
+      indexes.first(limit).each do |idx|
+        result += "| #{idx[:name]} | #{idx[:table]} | #{human_size(idx[:bytes])} |\n"
+      end
+      result + "\n"
+    end
+
+    # The configured retention windows. get_status already reports the observed
+    # data span, but observed < configured whenever a table is younger than its
+    # window — so the span alone can't tell you what the window actually is,
+    # nor how much growth is still ahead.
+    def format_retention_settings
+      s = Setting.instance
+      rows = [
+        ["Events", s.events_data_retention_days],
+        ["Transactions", s.transactions_data_retention_days],
+        ["Spans / span trees", s.spans_data_retention_days],
+        ["Logs", s.logs_data_retention_days],
+        ["Histograms + hourly stats", s.histograms_retention_days]
+      ]
+      result = "### Retention settings (configured)\n\n"
+      result += "| Data | Keep for |\n|---|---:|\n"
+      rows.each { |name, days| result += "| #{name} | #{days} days |\n" }
+      result + "\n"
+    rescue => e
+      Rails.logger.warn("MCP get_status: retention settings unavailable: #{e.class}: #{e.message}")
+      ""
+    end
+
+    # Payload-bearing tables holding uncompressed data, listed alongside the
+    # compressed segments. Without these rows the compression table is a list of
+    # successes and the gaps are invisible — you'd have to notice an absence to
+    # spot the biggest uncompressed table in the system.
+    #
+    # Both entries are legacy-only and shrink to nothing as retention ages them
+    # out: `spans` froze at the 1.7.0 span_trees cutover, and `transactions`
+    # holds plain-JSON measurements only for rows written before the
+    # measurements_blob cutover. The size shown is the whole table, so during
+    # each dual-read window it over-reports — directionally right, and the row
+    # disappears once the old rows are gone.
+    UNCOMPRESSED_TABLES = {
+      "transactions" => "Transactions (pre-cutover plain-JSON measurements)",
+      "spans" => "Spans (legacy, frozen at 1.7.0 cutover)"
+    }.freeze
+
+    def format_uncompressed_rows(snapshot)
+      sizes = Array(snapshot[:groups]).flat_map { |g| g[:tables] }
+        .each_with_object({}) { |t, h| h[t[:name]] = t }
+
+      UNCOMPRESSED_TABLES.filter_map { |table, label|
+        t = sizes[table]
+        next if t.nil? || t[:total_bytes].to_i.zero?
+        "| #{label} | #{t[:row_estimate]} | — | #{human_size(t[:table_bytes])} | not compressed |\n"
+      }.join
     end
 
     def format_queues(queues)
@@ -1356,6 +1445,17 @@ module Mcp
       result += "**Server:** #{event.server_name}\n" if event.server_name
       result += "**Platform:** #{event.platform}\n" if event.platform
       result += "**Issue:** ##{event.issue.id} - #{event.issue.title}\n" if event.issue
+      # The trace ties this error to the request that threw it. Mirrors the hint
+      # get_transaction already prints, so the correlation is discoverable from
+      # either end.
+      if event.trace_id.present?
+        result += "**Trace:** #{event.trace_id}\n"
+        if (txn = event.related_transaction)
+          result += "_Thrown during transaction ##{txn.id} (#{txn.transaction_name}, #{txn.duration}ms) — " \
+                    "call `get_transaction` with id #{txn.id} for its span waterfall._\n"
+        end
+        result += "_Call `get_trace_logs` with this trace_id for the correlated log lines._\n"
+      end
       result += "\n"
 
       # Exception details
