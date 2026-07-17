@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-17.** A sketch of a monthly-archive strategy, superseded by the
+> current retention + compression design (per-transaction zstd span trees, v1.7.0).
+
 # Archive strategy
 ```ruby
 class ArchiveOldEvents

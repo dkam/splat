@@ -1,3 +1,8 @@
+> **SUPERSEDED — archived 2026-07-17.** Splat moved to sqlite-everything (2026-06-03).
+> DuckDB, DuckLake and Parquet are entirely gone from the codebase: `FastMigrateToDuckdbJob`
+> described below no longer exists. Kept only as a record of the abandoned direction.
+> **Do not follow this guide.** See `docs/README.md` for current storage docs.
+
 # DuckDB Migration Guide
 
 ## Overview

@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-17.** A review summary from 2026-05. Its headline 'critical' item
+> (ProcessTransactionJob parameter mismatch) no longer exists in the code. Kept as a
+> record of that review; do not treat items as open.
+
 # Review Summary
 Overall, the implementation is solid and well-structured, but here are the key issues and gaps I've identified:
 # Critical Issues

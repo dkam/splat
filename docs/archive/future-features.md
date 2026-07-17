@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-17.** A wishlist last touched 2026-05-05. Wishlists belong in the
+> issue tracker — see `docs/README.md`. Kept for mining.
+
 # Future Features
 
 A running wishlist of Sentry-style features worth considering for Splat. Sorted

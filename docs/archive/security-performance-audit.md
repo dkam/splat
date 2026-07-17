@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-17.** A point-in-time audit dated 2025-10-29. Findings may be fixed,
+> stale, or overtaken by the sqlite-everything migration. Kept as a record of what was
+> true then; re-audit rather than trusting this.
+
 # 🔒 Rails Security & Performance Audit Report
 
 **Date**: October 29, 2025

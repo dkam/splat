@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-17.** A 686-line backlog last touched 2025-11-25; unknown how much
+> is already shipped. Backlogs belong in the issue tracker, not in `docs/` — see the
+> routing rule in `docs/README.md`. Kept for mining; do not treat any item as open.
+
 # Splat - Improvement Backlog
 
 This document tracks suggested improvements, optimizations, and enhancements for Splat.
