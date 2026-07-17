@@ -22,6 +22,17 @@ module Compression
       before_save :_encode_compressed_json
     end
 
+    # Drop the memoized value so a reloaded record reads its blob back from the
+    # row rather than serving what was assigned before the save. Without this,
+    # `record.reload.payload` returns the in-memory object — which round-trips
+    # through JSON differently than it reads (symbol keys become strings, Time
+    # becomes String), so a reloaded record disagrees with a freshly-found one.
+    def reload(*)
+      @_compressed_json_decoded = nil
+      @_compressed_json_pending = nil
+      super
+    end
+
     class_methods do
       def compressed_json(name, db:, table:, platform: nil)
         self._compressed_json_config = {
