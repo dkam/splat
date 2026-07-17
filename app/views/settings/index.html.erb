@@ -21,9 +21,14 @@
 
   <p class="text-xs text-gray-500 dark:text-gray-400 mb-6">
     <% if @storage %>
-      Storage sizes collected <%= time_ago_in_words(@storage[:collected_at]) %> ago
+      Totals, compression and retention collected <%= time_ago_in_words(@storage[:collected_at]) %> ago
       (<%= @storage[:collected_at].localtime.strftime("%Y-%m-%d %H:%M") %>) —
-      refreshed every 15&nbsp;min by <code>Maintenance::StorageStatsJob</code>.
+      refreshed hourly by <code>Maintenance::StorageStatsJob</code>.
+      <% if @storage[:deep_collected_at] %>
+        Per-table sizes and row counts need a full <code>dbstat</code> page walk of every DB, so they
+        refresh daily — last <%= time_ago_in_words(@storage[:deep_collected_at]) %> ago
+        (<%= @storage[:deep_collected_at].localtime.strftime("%Y-%m-%d %H:%M") %>).
+      <% end %>
     <% else %>
       Storage sizes are being calculated in the background — reload in a moment.
     <% end %>
@@ -308,10 +313,11 @@
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Counts</h2>
-      <%# Counts come from the StorageStats snapshot (refreshed every ~15 min by %>
-      <%# the job) — never a live scan on the request path. "—" until the first %>
-      <%# snapshot lands after a deploy. Spans is the true total: legacy spans %>
-      <%# rows + the spans packed inside span_trees blobs. %>
+      <%# Counts come from the StorageStats snapshot's daily deep pass (a COUNT(*) %>
+      <%# per table) — never a live scan on the request path, and not part of the %>
+      <%# hourly refresh. "—" until the first deep snapshot lands after a deploy. %>
+      <%# Spans is the true total: legacy spans rows + the spans packed inside %>
+      <%# span_trees blobs. %>
       <% counts = @storage&.dig(:counts) %>
       <% show = ->(key) { counts ? number_with_delimiter(counts[key]) : "—" } %>
       <div class="grid grid-cols-2 md:grid-cols-5 gap-4">

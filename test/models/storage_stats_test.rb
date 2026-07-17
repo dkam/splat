@@ -37,4 +37,52 @@ class StorageStatsTest < ActiveSupport::TestCase
     assert_equal 555, counts[:logs]
     assert_equal 0, counts[:spans] # no span_trees seeded
   end
+
+  # The sampler replaced `ORDER BY RANDOM() LIMIT n`, which scanned and sorted
+  # the whole table. Anchored rowid runs must still produce a usable estimate.
+  test "compression_estimate samples blobs and scales by the table's row count" do
+    30.times do |i|
+      SpanTree.create_from_tree!(project_id: 1, transaction_id: "t#{i}", timestamp: Time.current,
+        tree: {"spans" => [{"op" => "db.sql.query", "description" => "SELECT * FROM books" * 20}]},
+        span_count: 3, spans_truncated: false)
+    end
+
+    estimate = StorageStats.compression_estimate({"span_trees" => 30}).find { |e| e[:name] == "Spans" }
+
+    assert estimate, "expected a Spans compression estimate"
+    assert estimate[:sample].positive?, "expected blobs to be decoded"
+    assert estimate[:ratio] > 1, "repetitive payloads should compress"
+    assert_equal 30, estimate[:rows], "all 30 rows carry a payload_blob"
+    assert estimate[:saved_bytes].positive?
+  end
+
+  # A table the deep pass hasn't counted yet can't be scaled into a total, and
+  # counting it inline would reintroduce the full scan we just removed.
+  test "compression_estimate skips tables with no known row count" do
+    SpanTree.create_from_tree!(project_id: 1, transaction_id: "t1", timestamp: Time.current,
+      tree: {"spans" => []}, span_count: 1, spans_truncated: false)
+
+    assert_empty StorageStats.compression_estimate({})
+  end
+
+  # refresh! is the hourly pass and deliberately does not rebuild `groups` —
+  # that needs the dbstat walk. It must carry the deep pass's results forward
+  # rather than blanking the per-table breakdown every hour.
+  test "refresh! carries groups and counts forward from the last deep pass" do
+    deep = StorageStats.refresh_deep!
+    assert deep[:groups].any?, "deep pass should build the per-table breakdown"
+    assert_equal deep[:collected_at], deep[:deep_collected_at]
+
+    fast = StorageStats.refresh!
+
+    assert_equal deep[:groups], fast[:groups]
+    assert_equal deep[:counts], fast[:counts]
+    assert_equal deep[:deep_collected_at], fast[:deep_collected_at],
+      "deep_collected_at should keep pointing at the deep pass, not the fast one"
+    assert fast[:collected_at] >= deep[:collected_at]
+  end
+
+  test "file_bytes_total reports on-disk bytes across every DB" do
+    assert StorageStats.file_bytes_total.positive?
+  end
 end

@@ -61,14 +61,29 @@ cleanup_expired_oidc_sessions:
   schedule: cron 17 * * * *
   con: 1
 
-# Recompute the per-table SQLite size snapshot (dbstat page scan) for the
-# settings page and cache it. The scan walks every page of each DB file, so
-# it's kept off the request path entirely — the settings controller only
-# reads the cached snapshot. idp guards against stacking if a scan ever runs
-# longer than the 15m interval on a very large DB.
+# Refresh the SQLite storage snapshot for the settings page and cache it. Both
+# passes are kept off the request path entirely — the settings controller only
+# reads the cached snapshot.
+#
+# The cheap pass: file totals via PRAGMA, compression ratios from an anchored
+# rowid sample, retention bounds from indexed MIN/MAX. Index seeks only, so it
+# finishes in seconds regardless of DB size.
 storage_stats:
   class: Maintenance::StorageStatsJob
   tube: splat.maintenance
-  schedule: cron */15 * * * *
+  schedule: cron 7 * * * *
   con: 1
   idp: storage_stats
+
+# The deep pass: per-table dbstat page walk + COUNT(*) per table, which is
+# ~two full reads of every DB (~80 min at 100GB). Daily, off-peak. This was
+# once folded into the 15-minute job above, which meant the maintenance worker
+# ran a full-dataset scan permanently and starved every other job on the tube.
+# If it needs to be more frequent than daily, make it cheaper first.
+storage_stats_deep:
+  class: Maintenance::StorageStatsJob
+  args: ["deep"]
+  tube: splat.maintenance
+  schedule: cron 40 3 * * *
+  con: 1
+  idp: storage_stats_deep

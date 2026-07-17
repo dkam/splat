@@ -33,6 +33,16 @@ class StorageStats
   # is plenty for a stable ratio and stays well under a second.
   COMPRESSION_SAMPLE = 500
 
+  # The sample is gathered as COMPRESSION_ANCHORS short runs of consecutive
+  # rows, each starting at a random rowid, rather than `ORDER BY RANDOM() LIMIT
+  # n` — SQLite can't push a limit into a random sort, so that form materialises
+  # and sorts the whole table (a full scan plus a spill-to-disk sort of a 90GB
+  # file, every run). Anchored runs are index seeks into the rowid b-tree.
+  # Spreading over many anchors keeps the sample representative: payloads
+  # correlate with time, and rowid order is insertion order, so a single run of
+  # 500 would only measure one moment's traffic.
+  COMPRESSION_ANCHORS = 25
+
   # Per-DB compression-dictionary state for the settings page:
   # [ui label, dict AR model, AR base class (for the runs table connection)].
   DICTIONARIES = [
@@ -44,8 +54,9 @@ class StorageStats
   RECENT_TRAINING_RUNS = 10
 
   # Data tables whose time span answers "how far back do we actually keep X?".
-  # [ui label, AR base class, table, time column]. All four columns are indexed,
-  # so MIN/MAX are cheap index seeks. The histogram/hourly_stats rows are what
+  # [ui label, AR base class, table, time column]. Every column here is indexed,
+  # but that alone doesn't make the bounds cheap — see #data_span for why MIN and
+  # MAX have to be queried separately. The histogram/hourly_stats rows are what
   # the performance sparklines read, so their span is the real "days of spark
   # data" answer — distinct from raw transaction retention.
   DATA_SPAN = [
@@ -65,17 +76,60 @@ class StorageStats
       Rails.cache.read(CACHE_KEY)
     end
 
-    # Run the heavy dbstat scan now and store the result. Called by
-    # Maintenance::StorageStatsJob; never on the request path. Returns the
-    # stored snapshot.
+    # The cheap pass: everything that costs index seeks rather than full scans.
+    # Called hourly by Maintenance::StorageStatsJob; never on the request path.
+    #
+    # The per-table `groups` breakdown and the row `counts` derived from it are
+    # NOT recomputed here — both need dbstat and COUNT(*), which read every page
+    # of every DB. Those come from the last refresh_deep! and are carried
+    # forward; `deep_collected_at` tells the view how stale they are. The
+    # headline total is still live, from PRAGMA page_count.
     def refresh!
-      groups = sqlite_tables_grouped
-      total = groups.sum { |g| g[:tables].sum { |t| t[:total_bytes] } }
-      snap = {groups: groups, total: total, counts: counts(groups),
-              compression: compression_estimate, dictionaries: dictionary_status,
-              data_span: data_span, collected_at: Time.current}
+      prior = snapshot || {}
+      groups = prior[:groups] || []
+      snap = {groups: groups,
+              total: file_bytes_total,
+              counts: prior[:counts] || {},
+              compression: compression_estimate(row_counts(groups)),
+              dictionaries: dictionary_status,
+              data_span: data_span,
+              collected_at: Time.current,
+              deep_collected_at: prior[:deep_collected_at]}
       Rails.cache.write(CACHE_KEY, snap)
       snap
+    end
+
+    # The full pass, including the dbstat page walk and a COUNT(*) per table.
+    # O(total file size) — ~two full reads of every DB — so this runs daily,
+    # not hourly. Also the cold-cache path: refresh! carries `groups` forward
+    # rather than building them, so a snapshot has to start life here.
+    def refresh_deep!
+      groups = sqlite_tables_grouped
+      now = Time.current
+      snap = {groups: groups,
+              total: file_bytes_total,
+              counts: counts(groups),
+              compression: compression_estimate(row_counts(groups)),
+              dictionaries: dictionary_status,
+              data_span: data_span,
+              collected_at: now,
+              deep_collected_at: now}
+      Rails.cache.write(CACHE_KEY, snap)
+      snap
+    end
+
+    # Total on-disk bytes across every DB, via PRAGMA page_count — two integer
+    # reads from each file's header, no page walk. Slightly larger than summing
+    # dbstat table bytes, because it counts free pages the file still occupies:
+    # that's the honest "how big is this on disk" number the headline wants.
+    def file_bytes_total
+      DBS.sum do |_label, base_name|
+        conn = base_name.constantize.connection
+        conn.select_value("PRAGMA page_count").to_i * conn.select_value("PRAGMA page_size").to_i
+      rescue => e
+        Rails.logger.warn("StorageStats.file_bytes_total(#{base_name}) failed: #{e.class}: #{e.message}")
+        0
+      end
     end
 
     # Headline row counts for the settings "Counts" block — read off the
@@ -101,16 +155,21 @@ class StorageStats
       {}
     end
 
-    # Oldest/newest row per data table → the real retention window. MIN/MAX on
-    # indexed time columns are cheap seeks, but this still only runs from the
-    # 15-min StorageStatsJob, never on the request path. Empty tables yield nil
-    # bounds (rendered as "—"); a missing table is skipped, not fatal.
+    # Oldest/newest row per data table → the real retention window. Runs on the
+    # hourly pass, never on the request path. Empty tables yield nil bounds
+    # (rendered as "—"); a missing table is skipped, not fatal.
+    #
+    # MIN and MAX are queried separately on purpose. SQLite only rewrites an
+    # aggregate into an index seek when it's the lone aggregate in the query:
+    # `SELECT MIN(x), MAX(x)` falls back to a full scan of the index, while two
+    # `SELECT MIN(x)` / `SELECT MAX(x)` statements are two O(log n) seeks.
+    # Confirm with EXPLAIN QUERY PLAN before merging these back together —
+    # SEARCH is the seek, SCAN is not.
     def data_span
       DATA_SPAN.filter_map do |label, base_name, table, column|
         conn = base_name.constantize.connection
-        row = conn.select_one("SELECT MIN(#{column}) AS oldest, MAX(#{column}) AS newest FROM #{table}")
-        oldest = parse_time(row&.fetch("oldest", nil))
-        newest = parse_time(row&.fetch("newest", nil))
+        oldest = parse_time(conn.select_value("SELECT MIN(#{column}) FROM #{table}"))
+        newest = parse_time(conn.select_value("SELECT MAX(#{column}) FROM #{table}"))
         days = (oldest && newest) ? ((newest - oldest) / 1.day.to_f).round(1) : nil
         {name: label, table: table, oldest: oldest, newest: newest, days: days}
       rescue => e
@@ -120,19 +179,18 @@ class StorageStats
     end
 
     # Estimate storage saved by zstd payload compression, per compressed table.
-    # We don't store original sizes, so sample COMPRESSION_SAMPLE random blobs,
-    # decode them, and compare decompressed vs stored bytes to get a ratio, then
-    # scale by the table's blob row count. Heavy-ish (decodes a sample) — only
-    # called from the 15-min StorageStatsJob, never on the request path.
-    def compression_estimate
+    # We don't store original sizes, so sample blobs, decode them, and compare
+    # decompressed vs stored bytes to get a ratio, then scale by the table's
+    # blob row count. `table_rows` maps table name => row count from the last
+    # deep pass; a table missing from it is skipped rather than counted inline,
+    # since COUNT(*) here would undo the point of the cheap sampling.
+    def compression_estimate(table_rows = {})
       COMPRESSED.filter_map do |label, base_name, db, table|
         conn = base_name.constantize.connection
+        total_rows = table_rows[table]
+        next if total_rows.nil? || total_rows.zero?
 
-        sample = conn.select_all(<<~SQL).to_a
-          SELECT payload_blob AS blob, dict_id FROM #{table}
-          WHERE payload_blob IS NOT NULL
-          ORDER BY RANDOM() LIMIT #{COMPRESSION_SAMPLE}
-        SQL
+        sample = sample_rows(conn, table)
         next if sample.empty?
 
         compressed = 0
@@ -150,7 +208,11 @@ class StorageStats
         end
         next if counted.zero? || compressed.zero?
 
-        blob_rows = conn.select_value("SELECT COUNT(*) FROM #{table} WHERE payload_blob IS NOT NULL").to_i
+        # The sample is taken without filtering on payload_blob, so the share of
+        # sampled rows that carried one scales the row count into a blob count —
+        # what COUNT(*) WHERE payload_blob IS NOT NULL used to answer exactly.
+        with_blob = sample.count { |r| r["blob"] }
+        blob_rows = (total_rows * (with_blob.to_f / sample.size)).round
         ratio = original.to_f / compressed
         est_stored = (compressed.to_f / counted * blob_rows).round
         est_original = (est_stored * ratio).round
@@ -205,13 +267,16 @@ class StorageStats
       end
     end
 
-    # Ask the maintenance pool to (re)build the snapshot. Idempotent via the
-    # tuber idp key, so a burst of cache-miss requests on a cold cache enqueues
-    # at most one scan. Safe to call from a web request — it only puts a job.
+    # Ask the maintenance pool to build the snapshot from scratch. Called on a
+    # cold cache, so it has to be the deep job: refresh! carries `groups`
+    # forward from a previous deep pass and would produce a snapshot with no
+    # per-table breakdown at all. Idempotent via the tuber idp key, so a burst
+    # of cache-miss requests enqueues at most one scan. Safe to call from a web
+    # request — it only puts a job.
     def enqueue_refresh
       Ingest::Tuber.put(
         Ingest::Tuber::MAINTENANCE_TUBE,
-        {class: "Maintenance::StorageStatsJob", args: []},
+        {class: "Maintenance::StorageStatsJob", args: ["deep"]},
         con: 1, idp: "storage_stats"
       )
     rescue => e
@@ -236,6 +301,40 @@ class StorageStats
 
     private
 
+    # table name => row count, from a `groups` breakdown built by a deep pass.
+    def row_counts(groups)
+      groups.each_with_object({}) do |g, h|
+        g[:tables].each { |t| h[t[:name]] = t[:row_estimate].to_i }
+      end
+    end
+
+    # Up to COMPRESSION_SAMPLE rows, gathered as COMPRESSION_ANCHORS short runs
+    # starting at random rowids (see COMPRESSION_ANCHORS for why not
+    # ORDER BY RANDOM()). Rows are returned unfiltered — callers need the share
+    # carrying a payload_blob, not just the blobs themselves.
+    #
+    # Retention deletes leave holes in the rowid space, so an anchor can land in
+    # a gap; `id >= anchor` walks forward to the next live row, which is why
+    # this samples rows rather than ids. Anchors near the top of the range
+    # return short runs; that costs a few samples, not representativeness.
+    def sample_rows(conn, table)
+      lo = conn.select_value("SELECT MIN(id) FROM #{table}")
+      hi = conn.select_value("SELECT MAX(id) FROM #{table}")
+      return [] if lo.nil? || hi.nil?
+
+      span = hi.to_i - lo.to_i + 1
+      per_anchor = [COMPRESSION_SAMPLE / COMPRESSION_ANCHORS, 1].max
+
+      COMPRESSION_ANCHORS.times.flat_map do
+        anchor = lo.to_i + Random.rand(span)
+        conn.select_all(<<~SQL).to_a
+          SELECT payload_blob AS blob, dict_id FROM #{table}
+          WHERE id >= #{anchor}
+          ORDER BY id LIMIT #{per_anchor}
+        SQL
+      end
+    end
+
     def sqlite_tables_for(base)
       conn = base.connection
       byte_map = page_bytes_by_object(conn)
@@ -255,13 +354,19 @@ class StorageStats
         name = row["name"]
         row_count = conn.select_value("SELECT COUNT(*) FROM #{conn.quote_table_name(name)}").to_i
         table_bytes = byte_map[name].to_i
-        index_bytes = indexes_by_table[name].sum { |idx| byte_map[idx].to_i }
+        # Keep each index's own size, not just the per-table sum: "which of
+        # these seven indexes is worth dropping?" is only answerable from the
+        # breakdown, and dbstat has already been walked to get here.
+        indexes = indexes_by_table[name].map { |idx|
+          {name: idx, bytes: byte_map[idx].to_i}
+        }.sort_by { |i| -i[:bytes] }
         {
           name: name,
           row_estimate: row_count,
           table_bytes: table_bytes,
-          index_bytes: index_bytes,
-          total_bytes: table_bytes + index_bytes
+          index_bytes: indexes.sum { |i| i[:bytes] },
+          indexes: indexes,
+          total_bytes: table_bytes + indexes.sum { |i| i[:bytes] }
         }
       }.sort_by { |t| -t[:total_bytes] }
     end

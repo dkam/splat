@@ -35,8 +35,9 @@ module Ingest
         sched = entry.fetch("schedule")
         con = entry["con"]
         idp = entry["idp"]
+        args = entry["args"] || []
 
-        register(name, klass, tube, sched, con, idp)
+        register(name, klass, tube, sched, con, idp, args)
       end
     end
 
@@ -45,9 +46,14 @@ module Ingest
     # a cron-driven maintenance job that occasionally runs longer than its
     # interval, this stops a queue pileup that would otherwise turn one
     # slow run into a flood after the next worker restart.
-    def register(name, klass, tube, sched, con, idp)
+    #
+    # `args:` is optional and defaults to none — it lets one job class be
+    # scheduled at two cadences with different arguments (e.g. StorageStatsJob's
+    # cheap hourly pass vs its deep daily one). Give each entry its own `idp:`
+    # when doing that, or the two will suppress each other.
+    def register(name, klass, tube, sched, con, idp, args = [])
       method, expr = sched.split(/\s+/, 2)
-      payload = {class: klass, args: []}
+      payload = {class: klass, args: args}
       put_opts = {}
       put_opts[:con] = con unless con.nil?
       put_opts[:idp] = idp unless idp.nil?
