@@ -59,7 +59,10 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     consumer.stop!
 
     called = false
-    ok = with_stub(Ingest::Tuber, :consumer_client, -> { called = true; FakeClient.new }) do
+    ok = with_stub(Ingest::Tuber, :consumer_client, -> {
+      called = true
+      FakeClient.new
+    }) do
       consumer.send(:connect_with_retry)
     end
 

@@ -1,5 +1,4 @@
 module ApplicationHelper
-
   # Maps each section of the project-level tab strip to the controllers
   # that belong to it. Used by `_project_nav` to highlight the active tab.
   PROJECT_NAV_SECTIONS = {
