@@ -24,6 +24,12 @@ and numbered. An ADR can't go stale, because it's a record of what we knew *at
 the time*. If a later decision reverses it, write a new ADR and link back —
 never edit the old one.
 
+When an ADR turns out to have been **wrong about a fact** (as opposed to
+reversed by a later decision), append a dated `## Amendment` section to it rather
+than editing the body. Quietly correcting the body destroys the useful part —
+the record of what we believed and therefore what we missed. The amendment sits
+next to the claim it corrects, which is where a reader will actually look.
+
 **Is it an external spec we didn't write?** → `reference/`.
 
 **Is it a task?** → The issue tracker. Not here. This is precisely what killed

@@ -102,7 +102,55 @@ holes, so it overestimates badly and unpredictably.
   the sole trace of DB growth over time (~3.2 GB/day, ~11 months of headroom
   against 1.1T free). Persisting it is tracked separately.
 
+## Amendment — 2026-07-17
+
+**The diagnosis above is incomplete, and the fix does not do everything this ADR
+implies.** Recorded here rather than edited into the body, because what this
+decision *missed* is more useful than a tidy record.
+
+**1. TTR overshoot was a second mechanism, and it's not addressed.**
+`Ingest::Tuber::DEFAULT_TTR` is 120s, with a comment reading "processing is well
+under a second; 120s leaves headroom before tuber re-releases the message". The
+deep pass runs ~4800s — a **40× violation** of that premise. The tube's
+`total_timeouts: 46` was visible in the same `stats-tube` output quoted above and
+went unread.
+
+The Context section blames the three permanently-ready jobs on cron puts plus
+`idp` freeing on reserve. That's real but partial: tuber auto-releases the job
+back to ready at TTR, server-side, without the consumer ever knowing. Whether the
+released copy then *re-executes* depends on whether the original's `job.delete`
+still succeeds 78 minutes later — `cmd_delete: 152` against `total_jobs: 155`
+suggests it does, but that's inference from counters, not proof. If it doesn't,
+this was duplicate execution the whole time.
+
+**2. `reserve_batch(100)` means TTR must cover the whole batch.** The consumer
+reserves up to `DEFAULT_BATCH_SIZE = 100` jobs and processes them serially, so
+every job in a batch bleeds its TTR while the first one runs. Any fix that sizes
+TTR to one slow job still fails with two in the batch.
+
+**3. The cadence split does not solve this.** The daily deep pass still takes
+~80 minutes, and `CACHE_KEY` is versioned on `Splat::VERSION`, so every deploy
+cold-starts the cache and forces a deep pass. The TTR overshoot survives this
+decision intact. Do not read "we made the job hourly" as "the queue behaviour is
+fixed".
+
+The fix is a consumer-side heartbeat — `touch` every reserved job in the batch on
+an interval, keeping TTR short so a genuinely dead worker is still caught in
+120s. Not a TTR bump: TTR's only purpose is detecting a dead worker, and sizing
+it to the slowest job trades that away while remaining a bet on runtime that data
+growth will break again. This belongs in `TubeConsumer`, not here —
+`RetentionJob` and `DictDriftJob` are exposed to the same thing. Owned by
+another session as of 2026-07-17.
+
+**The pattern worth noticing:** three separate comments asserted cheapness —
+`DATA_SPAN`'s "MIN/MAX are cheap index seeks", `DEFAULT_TTR`'s "well under a
+second", and `schedule.yml`'s "idp guards against stacking". All three were true
+when written and all three were false by the time they mattered. An assertion
+with no verification step attached is what stops the next person checking. This
+is why `docs/learnings/` requires every claim to name its check.
+
 ## See also
 
 - `docs/learnings/sqlite.md` — the planner facts this rests on.
-- `docs/learnings/tuber.md` — `idp:` semantics and reading tube stats.
+- `docs/learnings/tuber.md` — `idp:` semantics, TTR and batch reserve, reading
+  tube stats.
