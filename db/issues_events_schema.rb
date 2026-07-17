@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_14_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_000002) do
   create_table "compression_dictionaries", force: :cascade do |t|
     t.boolean "active", default: false, null: false
     t.float "baseline_ratio"
@@ -57,6 +57,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_14_000001) do
     t.string "sdk_version"
     t.string "server_name"
     t.datetime "timestamp", null: false
+    t.string "trace_id"
     t.string "transaction_name"
     t.datetime "updated_at", null: false
     t.index ["duration"], name: "index_events_on_duration"
@@ -64,6 +65,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_14_000001) do
     t.index ["issue_id"], name: "index_events_on_issue_id"
     t.index ["project_id", "event_id"], name: "index_events_on_project_id_and_event_id", unique: true
     t.index ["project_id", "timestamp"], name: "index_events_on_project_id_and_timestamp"
+    t.index ["project_id", "trace_id"], name: "index_events_on_project_id_and_trace_id"
     t.index ["project_id"], name: "index_events_on_project_id"
     t.index ["timestamp"], name: "index_events_on_timestamp"
   end

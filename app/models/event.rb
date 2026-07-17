@@ -52,7 +52,12 @@ class Event < IssuesEventsRecord
       environment: payload["environment"],
       release: payload["release"],
       server_name: payload["server_name"],
-      transaction_name: payload["transaction"]
+      transaction_name: payload["transaction"],
+      # Promoted from the payload so error <-> transaction <-> log correlation
+      # is an indexed lookup. transaction_name only names an endpoint (and is
+      # NULL for background jobs); the trace is the only thing tying an error to
+      # the specific request that threw it.
+      trace_id: payload.dig("contexts", "trace", "trace_id")
     )
 
     # counter_cache bumps issue.count, but last_seen has no auto-update.
@@ -156,6 +161,18 @@ class Event < IssuesEventsRecord
   def request = payload&.dig("request") || {}
   def contexts = payload&.dig("contexts") || {}
   def breadcrumbs = payload&.dig("breadcrumbs", "values") || []
+
+  # The transaction this error was thrown inside, or nil. Mirrors
+  # LogsController#related_transaction — trace_id is not globally unique, so the
+  # lookup is scoped to the project and rides the (project_id, trace_id) index.
+  #
+  # nil is expected and not a problem: events written before trace_id was
+  # promoted have none (until the backfill rake task runs), and a transaction
+  # only exists if that request was sampled for tracing.
+  def related_transaction
+    return nil if trace_id.blank?
+    Transaction.find_by(project_id: project_id, trace_id: trace_id)
+  end
 
   private
 

@@ -5,6 +5,78 @@ class EventTest < ActiveSupport::TestCase
     @project = Project.create!(name: "Test Project", slug: "test", public_key: "test-key")
   end
 
+  test "create_from_sentry_payload! promotes trace_id out of the trace context" do
+    payload = {
+      "message" => "boom",
+      "timestamp" => "2026-07-17T08:00:00Z",
+      "contexts" => {"trace" => {"trace_id" => "b38e43a713a14305b99bb6b5e9ac5b9c", "op" => "queue.process"}}
+    }
+
+    event = Event.create_from_sentry_payload!("evt-trace", payload, @project)
+
+    assert_equal "b38e43a713a14305b99bb6b5e9ac5b9c", event.reload.trace_id
+  end
+
+  test "trace_id is nil when the payload carries no trace context" do
+    payload = {"message" => "no trace here", "timestamp" => "2026-07-17T08:00:00Z"}
+
+    event = Event.create_from_sentry_payload!("evt-no-trace", payload, @project)
+
+    assert_nil event.reload.trace_id
+    assert_nil event.related_transaction
+  end
+
+  test "related_transaction finds the transaction the error was thrown in" do
+    trace = "fe927387680d41bc90d01992aa63ab89"
+    txn = Transaction.create!(
+      project: @project, transaction_id: SecureRandom.uuid, timestamp: Time.current,
+      transaction_name: "BooksController#show", duration: 240, trace_id: trace
+    )
+    event = Event.create_from_sentry_payload!(
+      "evt-correlated",
+      {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z",
+       "contexts" => {"trace" => {"trace_id" => trace}}},
+      @project
+    )
+
+    assert_equal txn, event.related_transaction
+  end
+
+  test "related_transaction does not match another project's identical trace_id" do
+    trace = "24ab1e1b736f4200b6e95b5bc2899095"
+    other = Project.create!(name: "Other", slug: "other", public_key: "other-key")
+    Transaction.create!(
+      project: other, transaction_id: SecureRandom.uuid, timestamp: Time.current,
+      transaction_name: "Other#show", duration: 10, trace_id: trace
+    )
+    event = Event.create_from_sentry_payload!(
+      "evt-cross-project",
+      {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z",
+       "contexts" => {"trace" => {"trace_id" => trace}}},
+      @project
+    )
+
+    # trace_id is not globally unique — the lookup must stay project-scoped.
+    assert_nil event.related_transaction
+  end
+
+  test "reload re-reads the payload from the blob instead of the assigned object" do
+    # The decoded payload is memoized. Without reload clearing that memo, a
+    # reloaded record keeps serving what was assigned pre-save — which differs
+    # from what's on disk, because JSON round-tripping turns symbol keys into
+    # strings. A reloaded record must agree with a freshly-found one.
+    event = Event.create!(
+      project: @project, event_id: "evt-reload", timestamp: Time.current,
+      payload: {message: "hi", nested: {count: 1}}
+    )
+
+    event.reload
+    found = Event.find_by(event_id: "evt-reload")
+
+    assert_equal found.payload, event.payload
+    assert_equal({"message" => "hi", "nested" => {"count" => 1}}, event.payload)
+  end
+
   test "create_from_sentry_payload! creates event with basic message" do
     payload = {
       "message" => "Test error message",
