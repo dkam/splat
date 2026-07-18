@@ -10,7 +10,29 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_18_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_18_100000) do
+  create_table "cron_monitors", force: :cascade do |t|
+    t.integer "checkin_margin"
+    t.json "config"
+    t.datetime "created_at", null: false
+    t.string "environment"
+    t.datetime "in_progress_since"
+    t.datetime "last_checkin_at"
+    t.float "last_duration"
+    t.datetime "last_ok_at"
+    t.string "last_status"
+    t.integer "max_runtime"
+    t.integer "project_id", null: false
+    t.string "schedule_type"
+    t.string "schedule_unit"
+    t.string "schedule_value"
+    t.string "slug", null: false
+    t.string "state", default: "unknown", null: false
+    t.string "timezone"
+    t.datetime "updated_at", null: false
+    t.index ["project_id", "slug"], name: "index_cron_monitors_on_project_id_and_slug", unique: true
+  end
+
   create_table "facets", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_seen_at", null: false
@@ -95,6 +117,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_000001) do
     t.datetime "updated_at", null: false
   end
 
+# Could not dump table "sqlite_stat1" because of following StandardError
+#   Unknown type '' for column 'idx'
+
+
+  add_foreign_key "cron_monitors", "projects"
   add_foreign_key "facets", "projects"
   add_foreign_key "releases", "projects"
 end

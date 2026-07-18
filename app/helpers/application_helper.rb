@@ -5,7 +5,8 @@ module ApplicationHelper
     overview: %w[projects],
     errors: %w[issues events],
     performance: %w[endpoints transactions],
-    logs: %w[logs]
+    logs: %w[logs],
+    monitors: %w[monitors]
   }.freeze
 
   # Tailwind classes for a log level badge.

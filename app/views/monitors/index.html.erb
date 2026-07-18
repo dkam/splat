@@ -1,0 +1,67 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="mb-8">
+    <%= link_to "← #{@project.name}", project_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
+  </div>
+
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Monitors</h1>
+  </div>
+
+  <% if @monitors.any? %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+        <thead class="bg-gray-50 dark:bg-gray-800/60">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Monitor</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">State</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Schedule</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last check-in</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Environment</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+          <% @monitors.each do |monitor| %>
+            <tr>
+              <td class="px-6 py-4 whitespace-nowrap font-mono text-sm text-gray-900 dark:text-gray-100"><%= monitor.slug %></td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <% badge = case monitor.state
+                   when "ok" then "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+                   when "missed", "error" then "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                   when "overrun" then "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300"
+                   else "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
+                   end %>
+                <span class="px-2 py-1 text-xs font-medium rounded <%= badge %>"><%= monitor.state %></span>
+                <% if monitor.last_status.present? && monitor.last_status != "ok" %>
+                  <span class="ml-1 text-xs text-gray-500 dark:text-gray-400" title="Latest check-in status"><%= monitor.last_status %></span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                <%= monitor.schedule_description %>
+                <% if monitor.checkin_margin.to_i.positive? %>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">+<%= monitor.checkin_margin %>m margin</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                <% if monitor.last_checkin_at %>
+                  <span title="<%= monitor.last_checkin_at.iso8601 %>"><%= time_ago_in_words(monitor.last_checkin_at) %> ago</span>
+                <% else %>
+                  <span class="text-gray-400 dark:text-gray-500">never</span>
+                <% end %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                <%= monitor.last_duration ? format_duration(monitor.last_duration * 1000) : "—" %>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300"><%= monitor.environment.presence || "—" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% else %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 p-12 text-center text-gray-500 dark:text-gray-400">
+      <p class="mb-2">No monitors yet.</p>
+      <p class="text-sm">Monitors auto-register from Sentry Crons check-ins — send a check-in envelope with a <code class="font-mono">monitor_slug</code> to this project's DSN.</p>
+    </div>
+  <% end %>
+</div>

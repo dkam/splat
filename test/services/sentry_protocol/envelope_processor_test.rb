@@ -281,6 +281,46 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     Setting.instance.update!(store_events: true)
   end
 
+  test "queues a check_in item to the checkins tube" do
+    envelope_body = build_envelope(
+      event_id: "83a7c03ed0a04e1b97e2e3b18d38f244",
+      items: [
+        {
+          type: "check_in",
+          payload: {
+            "check_in_id" => "83a7c03ed0a04e1b97e2e3b18d38f244",
+            "monitor_slug" => "meili-flush",
+            "status" => "ok",
+            "monitor_config" => {"schedule" => {"type" => "interval", "value" => 1, "unit" => "minute"}}
+          }
+        }
+      ]
+    )
+
+    put_calls = []
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
+      assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
+    end
+
+    checkin_puts = put_calls.select { |args, _| args.first == Ingest::Tuber::CHECKINS_TUBE }
+    assert_equal 1, checkin_puts.size
+    assert_equal "meili-flush", checkin_puts.first[0][1][:payload]["monitor_slug"]
+    assert_equal @project.id, checkin_puts.first[0][1][:project_id]
+  end
+
+  test "drops check_in items without a monitor_slug" do
+    envelope_body = build_envelope(
+      items: [{type: "check_in", payload: {"status" => "ok"}}]
+    )
+
+    put_calls = []
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
+      assert SentryProtocol::EnvelopeProcessor.new(envelope_body, @project).process
+    end
+
+    assert_equal [], put_calls
+  end
+
   test "processes transaction with event_id only in payload" do
     envelope_body = build_envelope_with_empty_headers(
       items: [

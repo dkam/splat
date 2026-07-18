@@ -5,6 +5,7 @@ module Ingest
     EVENTS_TUBE = "splat.events"
     TRANSACTIONS_TUBE = "splat.transactions"
     LOGS_TUBE = "splat.logs"
+    CHECKINS_TUBE = "splat.checkins"
     FORWARD_TUBE = "splat.forward"
     MAINTENANCE_TUBE = "splat.maintenance"
     ACTIVEJOB_TUBE = "splat.activejob"
@@ -12,7 +13,7 @@ module Ingest
     # Every pipeline tube, in display order. (INGEST_TUBES, used for the single
     # backlog number, intentionally omits logs; this is the full per-tube view.)
     ALL_TUBES = [
-      EVENTS_TUBE, TRANSACTIONS_TUBE, LOGS_TUBE,
+      EVENTS_TUBE, TRANSACTIONS_TUBE, LOGS_TUBE, CHECKINS_TUBE,
       FORWARD_TUBE, ACTIVEJOB_TUBE, MAINTENANCE_TUBE
     ].freeze
 
@@ -107,7 +108,7 @@ module Ingest
       # Pending jobs across the ingest pipeline. Used by the health endpoint
       # and the layout chrome to show backlog at a glance.
       INGEST_TUBES = [
-        EVENTS_TUBE, TRANSACTIONS_TUBE, FORWARD_TUBE,
+        EVENTS_TUBE, TRANSACTIONS_TUBE, CHECKINS_TUBE, FORWARD_TUBE,
         MAINTENANCE_TUBE, ACTIVEJOB_TUBE
       ].freeze
 

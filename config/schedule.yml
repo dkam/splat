@@ -15,6 +15,17 @@
 # Use on cron jobs that occasionally run longer than their cron interval —
 # stops the scheduler from stacking duplicates while one is mid-flight.
 
+# Minute sweep of check-in monitors: opens an Issue when a monitor misses its
+# expected check-in (interval + margin), reports an error, or overruns
+# max_runtime. Rides splat.checkins (NOT splat.maintenance) so it can't queue
+# behind long maintenance jobs — alert latency is the whole point. Cheap: one
+# scan of the small monitors table; writes only on state transitions.
+monitor_evaluation:
+  class: Monitors::EvaluateJob
+  tube: splat.checkins
+  schedule: every 60s
+  idp: monitor_evaluation
+
 # Hourly rollup of the previous hour's transactions into per-bucket counts in
 # transaction_histograms. Runs a few minutes past the hour so any in-flight
 # inserts for that hour have landed. Idempotent — re-running overwrites.

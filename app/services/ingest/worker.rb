@@ -17,6 +17,7 @@ module Ingest
           EventConsumer.new,
           TransactionConsumer.new,
           LogConsumer.new,
+          CheckInConsumer.new,
           ForwardConsumer.new,
           ActiveJobConsumer.new
         ]

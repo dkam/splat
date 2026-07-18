@@ -204,6 +204,26 @@ module SentryProtocol
         return
       end
 
+      # Check-ins (Sentry Crons heartbeats) carry a monitor_slug, not an
+      # event_id, so handle them before the event_id guard below.
+      if item_type == "check_in"
+        payload = item[:payload]
+        unless payload.is_a?(Hash) && payload["monitor_slug"].present?
+          Rails.logger.warn "Check-in item missing monitor_slug — dropping"
+          return
+        end
+        enqueue(
+          Ingest::Tuber::CHECKINS_TUBE,
+          {
+            payload: payload,
+            project_id: project.id
+          },
+          kind: "check_in"
+        )
+        Rails.logger.debug "Queued check-in for monitor #{payload["monitor_slug"]}"
+        return
+      end
+
       # Get event_id from payload first, then envelope headers, following GlitchTip pattern
       event_id = extract_event_id(item[:payload]) || envelope_headers[:event_id]
 

@@ -9,6 +9,7 @@ class Ingest::WorkerTest < ActiveSupport::TestCase
     assert_includes classes, Ingest::EventConsumer
     assert_includes classes, Ingest::TransactionConsumer
     assert_includes classes, Ingest::LogConsumer
+    assert_includes classes, Ingest::CheckInConsumer
     assert_includes classes, Ingest::ForwardConsumer
     assert_includes classes, Ingest::ActiveJobConsumer
     refute_includes classes, Ingest::DispatchConsumer
@@ -27,7 +28,8 @@ class Ingest::WorkerTest < ActiveSupport::TestCase
 
     expected = [
       Ingest::EventConsumer, Ingest::TransactionConsumer, Ingest::LogConsumer,
-      Ingest::ForwardConsumer, Ingest::ActiveJobConsumer, Ingest::DispatchConsumer
+      Ingest::CheckInConsumer, Ingest::ForwardConsumer, Ingest::ActiveJobConsumer,
+      Ingest::DispatchConsumer
     ].sort_by(&:name)
 
     assert_equal expected, all

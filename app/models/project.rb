@@ -6,6 +6,7 @@ class Project < ApplicationRecord
   has_many :transactions, dependent: :destroy
   has_many :releases, dependent: :destroy
   has_many :facets, dependent: :delete_all
+  has_many :cron_monitors, dependent: :destroy
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true

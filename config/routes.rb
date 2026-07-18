@@ -48,6 +48,8 @@ Rails.application.routes.draw do
 
     resources :logs, only: [:index, :show]
 
+    resources :monitors, only: [:index]
+
     resources :endpoints, only: [:index] do
       collection do
         get :detail
