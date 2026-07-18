@@ -90,6 +90,20 @@ module Ingest
         ::Beaneater.new(address)
       end
 
+      # Cheap liveness probe for the web chrome: distinguishes "tuber is up with
+      # 0 jobs" (healthy) from "tuber is unreachable" — which queue_depth also
+      # reports as 0, making a down queue look healthy. A stats call that answers
+      # means up; a tube not created yet still counts as up; a connection error
+      # means down.
+      def reachable?
+        with_producer { |conn| conn.tubes[EVENTS_TUBE].stats }
+        true
+      rescue ::Beaneater::NotFoundError
+        true
+      rescue
+        false
+      end
+
       # Pending jobs across the ingest pipeline. Used by the health endpoint
       # and the layout chrome to show backlog at a glance.
       INGEST_TUBES = [

@@ -191,13 +191,14 @@ module SentryProtocol
           Rails.logger.debug "Logs disabled — dropping log item"
           return
         end
-        Ingest::Tuber.put(
+        enqueue(
           Ingest::Tuber::LOGS_TUBE,
           {
             format: "sentry",
             payload: item[:payload],
             project_id: project.id
-          }
+          },
+          kind: "log"
         )
         Rails.logger.debug "Queued log batch"
         return
@@ -217,13 +218,14 @@ module SentryProtocol
           Rails.logger.debug "Events disabled — dropping event #{event_id}"
           return
         end
-        Ingest::Tuber.put(
+        enqueue(
           Ingest::Tuber::EVENTS_TUBE,
           {
             event_id: event_id,
             payload: item[:payload],
             project_id: project.id
-          }
+          },
+          kind: "event"
         )
         Rails.logger.debug "Queued event processing: #{event_id}"
       when "transaction"
@@ -237,13 +239,14 @@ module SentryProtocol
           return
         end
 
-        Ingest::Tuber.put(
+        enqueue(
           Ingest::Tuber::TRANSACTIONS_TUBE,
           {
             transaction_id: event_id,
             payload: item[:payload],
             project_id: project.id
-          }
+          },
+          kind: "transaction"
         )
         Rails.logger.debug "Queued transaction processing: #{event_id}"
       when "attachment"
@@ -266,6 +269,63 @@ module SentryProtocol
     def housekeeping_transaction?(name)
       return false unless name.is_a?(String)
       HOUSEKEEPING_TRANSACTION_PREFIXES.any? { |prefix| name.start_with?(prefix) }
+    end
+
+    # Enqueue an ingest job, self-reporting instead of silently dropping when the
+    # put fails — either tuber rejected the job (too big) or tuber was
+    # unreachable. Every failure lights up the local "ingestion degraded"
+    # indicator (Ingest::Health, read by the web chrome) so the operator on THIS
+    # instance sees it, and — mirroring the OTLP logs path — raises a
+    # fingerprint-stable issue on the *upstream* monitoring Splat/Sentry
+    # (ntfy/email) rather than the data vanishing with only a log line.
+    def enqueue(tube, payload, kind:)
+      Ingest::Tuber.put(tube, payload)
+      true
+    rescue Beaneater::JobTooBigError
+      handle_undeliverable(
+        tube, payload, kind,
+        category: "job_too_big",
+        reason: "job too big",
+        detail: "exceeds tuber's max job size — raise TUBER_MAX_JOB_SIZE or shrink the payload"
+      )
+      false
+    rescue *Ingest::Tuber::CONNECTION_ERRORS => e
+      handle_undeliverable(
+        tube, payload, kind,
+        category: "tuber_unreachable",
+        reason: "Tuber unreachable",
+        detail: "could not reach tuber (#{e.class})"
+      )
+      false
+    end
+
+    def handle_undeliverable(tube, payload, kind, category:, reason:, detail:)
+      Ingest::Health.record_failure(kind: kind, reason: reason)
+      bytes = JSON.generate(payload).bytesize
+      Rails.logger.warn(
+        "[Envelope] dropped #{kind} (#{bytes} bytes) for project #{project.slug} — #{detail}"
+      )
+
+      # An outage produces one failure per inbound event, and if SENTRY_DSN
+      # points back at this instance each report is itself an event — so throttle
+      # the unreachable case to one upstream report per minute to avoid a storm /
+      # feedback loop. A too-big rejection is per-payload (tuber is up), so it
+      # reports every time.
+      return if category == "tuber_unreachable" && !report_throttle_ok?
+
+      Sentry.capture_message(
+        "Ingest #{kind} dropped: #{detail}",
+        level: :warning,
+        fingerprint: ["ingest", category, kind],
+        extra: {job_bytes: bytes, kind: kind, tube: tube, project: project.slug}
+      )
+    end
+
+    # True at most once per minute across processes (Solid Cache marker).
+    def report_throttle_ok?
+      Rails.cache.write("ingest_unreachable_report", true, expires_in: 60, unless_exist: true)
+    rescue
+      true
     end
   end
 end

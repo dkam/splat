@@ -140,7 +140,7 @@ services:
       - TUBER_BINLOG_DIR=/var/lib/tuber/binlog
       - TUBER_MAX_STORAGE_BYTES=10gb
       - TUBER_MAX_JOBS_SIZE=1gb
-      - TUBER_MAX_JOB_SIZE=20mb         # must accommodate packed batches (~5MB at 100/batch)
+      - TUBER_MAX_JOB_SIZE=10mb         # per-job cap: one event/transaction/log, or a base64-forwarded envelope (~1.33x raw). Single items are sub-MB; 10mb is headroom. Tuber's own default is only 64KB.
       - TUBER_METRICS_PORT=9100
     logging:
       driver: "json-file"

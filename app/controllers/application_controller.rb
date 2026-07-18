@@ -10,7 +10,7 @@ class ApplicationController < ActionController::Base
 
   before_action :set_current_attributes
 
-  helper_method :queue_depth, :authorized_user?
+  helper_method :queue_depth, :authorized_user?, :ingest_health, :tuber_reachable?
 
   private
 
@@ -45,6 +45,22 @@ class ApplicationController < ActionController::Base
   def queue_depth
     @queue_depth ||= Rails.cache.fetch("tuber_ready_count", expires_in: 5.seconds) do
       Ingest::Tuber.queue_depth
+    end
+  end
+
+  # The last ingest enqueue failure within the health window, or nil when
+  # healthy. Drives the header's "ingestion degraded" warning.
+  def ingest_health
+    Ingest::Health.status
+  end
+
+  # Whether tuber answered a probe recently. Cached briefly (like queue_depth)
+  # so the header doesn't dial tuber on every request. Lets the chrome show
+  # "Tuber unreachable" instead of a misleading green "0".
+  def tuber_reachable?
+    return @tuber_reachable unless @tuber_reachable.nil?
+    @tuber_reachable = Rails.cache.fetch("tuber_reachable", expires_in: 5.seconds) do
+      Ingest::Tuber.reachable?
     end
   end
 end

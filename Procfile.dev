@@ -7,5 +7,5 @@ css: bin/rails tailwindcss:watch
 # Prefer a native binary? `brew install tuberq/tuber/tuber`, then comment out the
 # docker line and uncomment this one:
 #   tuber: tuber server -p 11330 --name "Splat Tuber"
-tuber: docker run --rm -e TUBER_LISTEN=0.0.0.0 -p 11330:11300 --name splat-dev-tuber ghcr.io/tuberq/tuber:latest server
+tuber: docker run --rm -e TUBER_LISTEN=0.0.0.0 -e TUBER_MAX_JOB_SIZE=10mb -p 11330:11300 --name splat-dev-tuber ghcr.io/tuberq/tuber:latest server
 

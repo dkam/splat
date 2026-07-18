@@ -48,17 +48,36 @@
           </svg>
           Settings
         <% end %>
-        <!-- Queue Depth Indicator -->
-        <div class="flex items-center space-x-2">
-          <span class="text-sm text-gray-600 dark:text-gray-400">Queue Depth:</span>
-          <% queue_depth_value = queue_depth %>
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                <%= queue_depth_value == 0 ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
-                    queue_depth_value < 10 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' :
-                    'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' %>">
-            <%= queue_depth_value %>
-          </span>
-        </div>
+        <!-- Ingest Indicator: degraded warning > tuber-unreachable > queue depth -->
+        <% if (health = ingest_health) %>
+          <div class="flex items-center space-x-2"
+               title="Splat couldn't hand <%= health[:count] %> ingest job(s) to Tuber in the last 10 minutes (last: <%= health[:kind] %> — <%= health[:reason] %>). Events may have been dropped.">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">
+              ⚠ Ingest degraded
+            </span>
+            <span class="text-xs text-red-600 dark:text-red-400">
+              <%= health[:count] %> failed · <%= health[:reason] %> · <%= time_ago_in_words(health[:at]) %> ago
+            </span>
+          </div>
+        <% elsif !tuber_reachable? %>
+          <div class="flex items-center space-x-2" title="Tuber isn't answering — incoming events can't be queued.">
+            <span class="text-sm text-gray-600 dark:text-gray-400">Queue Depth:</span>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">
+              ⚠ Tuber unreachable
+            </span>
+          </div>
+        <% else %>
+          <div class="flex items-center space-x-2">
+            <span class="text-sm text-gray-600 dark:text-gray-400">Queue Depth:</span>
+            <% queue_depth_value = queue_depth %>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                  <%= queue_depth_value == 0 ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
+                      queue_depth_value < 10 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' :
+                      'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' %>">
+              <%= queue_depth_value %>
+            </span>
+          </div>
+        <% end %>
 
         <!-- Authentication Section -->
         <div class="flex items-center space-x-4">

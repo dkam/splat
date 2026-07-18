@@ -24,6 +24,14 @@ FileUtils.chdir APP_ROOT do
   system! "bin/rails db:prepare"
   system! "bin/rails db:reset" if ARGV.include?("--reset")
 
+  # db:prepare only loads a schema into a database that doesn't yet exist. The
+  # cache and cable databases are schema-file based (no migrations), so an
+  # existing-but-empty file — e.g. left over from before dev used solid_cache —
+  # never gets its table and solid_cache fails with "No unique index found for
+  # key_hash". These tables are ephemeral, so unconditionally (re)loading their
+  # schema is safe and makes setup self-healing.
+  system! "bin/rails db:schema:load:cache db:schema:load:cable"
+
   puts "\n== Removing old logs and tempfiles =="
   system! "bin/rails log:clear tmp:clear"
 
