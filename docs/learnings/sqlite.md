@@ -67,6 +67,45 @@ process startup (`user`+`sys` 0.019s — it's almost all startup). The
 block *writes* — sorter spill shows up there, and a read-only query producing
 GBs of writes is the tell.
 
+## `DISTINCT`/`GROUP BY` have no loose index scan — they walk every entry
+
+SQLite has no *skip scan* (a.k.a. loose index scan): to find the distinct
+values of a column it reads **every** row in the scanned range and dedupes — it
+cannot hop from one distinct value to the next, even when an ordered index makes
+that theoretically possible. So `SELECT DISTINCT col` over a high-volume table is
+O(rows), not O(distinct values), and **an index does not rescue it**.
+
+An ordered index only removes the sort, not the walk:
+
+```
+-- col has a covering index (project_id, environment):
+SELECT DISTINCT environment FROM logs WHERE project_id = 1
+  → SEARCH logs USING COVERING INDEX index_logs_on_project_id_and_environment (project_id=?)
+     (no temp b-tree — the index is already ordered — but still reads every
+      entry in the project's slice; ~5 distinct values, ~1M reads)
+
+-- col has no ordered index:
+SELECT DISTINCT source FROM logs WHERE project_id = 1
+  → SEARCH logs USING INDEX index_logs_on_project_id_and_trace_id (project_id=?)
+  → USE TEMP B-TREE FOR DISTINCT   (walk every entry AND sort to dedupe)
+```
+
+Measured on the production `logs` table (~1M rows/project), 2026-07-17 —
+populating the three filter dropdowns on the logs page cost **source 55.8s,
+service 35.2s, environment 9.7s** (from one request's span waterfall). The
+environment column was **already covered by an index and still took ~10s**,
+which is the whole proof: the covering index removed the temp b-tree and nothing
+else. Indexing a column you `DISTINCT` on a big table buys you almost nothing.
+
+The fix is not a better index — it's to not `DISTINCT` the big table on the
+request path at all. Maintain the small distinct set somewhere cheap (populated
+at write time) and read that. See `docs/decisions/0003-facets-at-ingest.md`.
+
+**Check:** `EXPLAIN QUERY PLAN` — a `DISTINCT`/`GROUP BY` that plans as `SEARCH`/
+`SCAN` across the whole key range (with or without `USE TEMP B-TREE`) is reading
+every entry. There is no `SKIP-SCAN` node in SQLite's planner; if you're hoping
+for one, it isn't coming.
+
 ## `dbstat` costs a full read of the database file
 
 `SELECT SUM(pgsize) FROM dbstat` is the only way to get true per-table byte

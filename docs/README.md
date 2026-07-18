@@ -50,8 +50,9 @@ next to the claim it corrects, which is where a reader will actually look.
 
 - [`learnings/sqlite.md`](learnings/sqlite.md) — planner and pragma facts, with
   measured prod numbers. Lone `MIN`/`MAX` seeks (28.5s → 0.004s), why
-  `ORDER BY RANDOM()` can't be limited, `dbstat`/`COUNT(*)` costs, why `DELETE`
-  never shrinks a file, and the fact that `ANALYZE` has never run on prod.
+  `ORDER BY RANDOM()` can't be limited, no loose index scan so `DISTINCT` walks
+  every entry (a covered column still took 9.7s), `dbstat`/`COUNT(*)` costs, why
+  `DELETE` never shrinks a file, and the fact that `ANALYZE` has never run on prod.
 - [`learnings/tuber.md`](learnings/tuber.md) — `idp:` only dedupes while a job is
   *queued*, reading `stats-tube` to spot a starved tube, single-threaded
   consumers, job body shape.
@@ -75,6 +76,10 @@ next to the claim it corrects, which is where a reader will actually look.
   drop the frozen `spans` table (33GB, 36% of the transactions DB) once retention
   empties it ~2026-07-28, and deliberately don't VACUUM afterwards. **Has a
   checklist with a pending action.**
+- [`decisions/0003-facets-at-ingest.md`](decisions/0003-facets-at-ingest.md) —
+  maintain the filter-dropdown values (log/transaction environment, source,
+  service) in a `facets` table populated at ingest, after `DISTINCT` scans made
+  the logs page take ~100s. Why an index didn't fix it and the cache only hid it.
 
 ## Conventions
 
