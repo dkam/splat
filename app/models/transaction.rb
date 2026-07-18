@@ -61,10 +61,16 @@ class Transaction < TransactionsSpansRecord
     breadcrumbs_values = payload.dig("breadcrumbs", "values") || []
     query_analysis = SpanAnalyzer.analyze_sql_queries(breadcrumbs_values)
 
-    enhanced_measurements = measurements.dup
-    enhanced_measurements["span_extracted_db_time"] = db_time if db_time.present?
-    enhanced_measurements["span_extracted_view_time"] = view_time if view_time.present?
-    enhanced_measurements["query_analysis"] = query_analysis if query_analysis[:total_queries] > 0
+    # The JSON never duplicates a column: db/view are promoted to db_time/
+    # view_time above, so they're excluded here (other client-sent
+    # measurements pass through), and of the analyzer's output only
+    # query_patterns is stored — query_count/has_n_plus_one are columns, and
+    # the reader methods below re-derive unique_patterns and
+    # potential_n_plus_one from the per-pattern counts on demand.
+    enhanced_measurements = measurements.except("db", "view")
+    if query_analysis[:total_queries] > 0
+      enhanced_measurements["query_analysis"] = {"query_patterns" => query_analysis[:query_patterns]}
+    end
 
     query_count = query_analysis[:total_queries].to_i
     has_n_plus_one = query_analysis[:potential_n_plus_one].to_a.any?
@@ -174,9 +180,18 @@ class Transaction < TransactionsSpansRecord
     potential_n_plus_one_queries.any?
   end
 
-  def unique_query_patterns = query_analysis["unique_patterns"] || 0
-  def potential_n_plus_one_queries = query_analysis["potential_n_plus_one"] || []
   def query_patterns = query_analysis["query_patterns"] || {}
+
+  # Derived from query_patterns for rows written since the measurements slim;
+  # legacy rows stored these keys explicitly and keep their as-written values.
+  def unique_query_patterns
+    query_analysis["unique_patterns"] || query_patterns.size
+  end
+
+  def potential_n_plus_one_queries
+    query_analysis["potential_n_plus_one"] ||
+      query_patterns.select { |_, data| data["count"].to_i > SpanAnalyzer::N_PLUS_ONE_THRESHOLD }.keys
+  end
 
   def controller_action
     return nil unless transaction_name.present?

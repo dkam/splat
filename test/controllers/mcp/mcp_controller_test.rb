@@ -80,7 +80,7 @@ module Mcp
       # The configured window, which the observed data span can't reveal.
       assert_match(/### Retention settings \(configured\)/, text)
       # An uncompressed table is named as such rather than silently absent.
-      assert_match(/Transactions \(pre-cutover plain-JSON measurements\).*not compressed/, text)
+      assert_match(/Transactions \(plain-JSON measurements, slimmed at ingest\).*not compressed/, text)
       # Table sizes carry the deep pass's timestamp, not the 15-min one.
       assert_match(/\*\*Table sizes from:\*\* 2026-07-16T03:00:00Z/, text)
     end

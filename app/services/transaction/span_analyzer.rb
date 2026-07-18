@@ -3,6 +3,17 @@
 # Service class for analyzing transaction spans and extracting performance metrics
 class Transaction
   class SpanAnalyzer
+    # A pattern repeated more than this many times in one request is flagged as
+    # a potential N+1. Shared with Transaction#potential_n_plus_one_queries,
+    # which re-derives the flag from stored per-pattern counts at read time.
+    N_PLUS_ONE_THRESHOLD = 3
+
+    # Stored SQL (pattern keys and examples) is capped at this many characters.
+    # Nothing else bounds it — a multi-row INSERT or wide SELECT arriving as a
+    # breadcrumb can be tens of KB and would land in the JSON twice (normalized
+    # key + raw example). Sentry truncates around 1 KB for the same reason.
+    MAX_SQL_LENGTH = 1000
+
     # Extract timing data from spans when measurements are unavailable
     def self.extract_timing_data(spans = [])
       return {db_time: nil, view_time: nil} if spans.blank?
@@ -46,15 +57,21 @@ class Transaction
         sql = breadcrumb.dig("data", "sql")
         next if sql.blank?
 
-        # Normalize SQL by removing literal values and focusing on structure
-        pattern = normalize_sql_pattern(sql)
+        # Normalize SQL by removing literal values and focusing on structure.
+        # Truncate AFTER normalizing — normalization already collapses the
+        # usual size offenders (IN-lists, literals), and truncating first
+        # would cut queries at arbitrary points and fragment patterns.
+        pattern = truncate_sql(normalize_sql_pattern(sql))
         query_patterns[pattern] ||= {count: 0, examples: []}
         query_patterns[pattern][:count] += 1
-        query_patterns[pattern][:examples] << sql if query_patterns[pattern][:examples].size < 3
+        # One example (with real literal values) is all the UI ever renders;
+        # extra copies of full SQL strings were the transactions table's
+        # biggest storage cost.
+        query_patterns[pattern][:examples] << truncate_sql(sql) if query_patterns[pattern][:examples].empty?
       end
 
       # Detect potential N+1 queries (same pattern executed multiple times)
-      potential_n_plus_one = query_patterns.select { |pattern, data| data[:count] > 3 }.keys
+      potential_n_plus_one = query_patterns.select { |pattern, data| data[:count] > N_PLUS_ONE_THRESHOLD }.keys
 
       {
         total_queries: sql_breadcrumbs.size,
@@ -104,6 +121,10 @@ class Transaction
       sql.present? && INFRA_TABLE.match?(sql)
     end
 
+    def self.truncate_sql(sql)
+      (sql.length > MAX_SQL_LENGTH) ? "#{sql[0, MAX_SQL_LENGTH]}…" : sql
+    end
+
     # /* ... */ query log tag comments carry per-request data (request_id,
     # source_location) — they'd fragment patterns into one-per-request and
     # break N+1 detection.
@@ -136,6 +157,6 @@ class Transaction
         .strip
     end
 
-    private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern
+    private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern, :truncate_sql
   end
 end

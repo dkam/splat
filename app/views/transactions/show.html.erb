@@ -236,7 +236,7 @@
                   <% end %>
                 </div>
                 <div class="text-right">
-                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= (data["count"] || 0) > 3 ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' %>">
+                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= (data["count"] || 0) > Transaction::SpanAnalyzer::N_PLUS_ONE_THRESHOLD ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' %>">
                     <%= data["count"] || 0 %>×
                   </span>
                 </div>
@@ -264,12 +264,15 @@
     </div>
   <% end %>
 
-  <!-- Measurements -->
-  <% if @transaction.measurements.present? && @transaction.measurements.any? %>
+  <!-- Measurements (genuine client-sent values only; query_analysis renders in
+       its own section above, and the span_extracted_* keys on legacy rows
+       duplicate the DB/View timing breakdown) -->
+  <% client_measurements = @transaction.measurements.except("query_analysis", "span_extracted_db_time", "span_extracted_view_time") %>
+  <% if client_measurements.any? %>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800 mb-6">
       <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Measurements</h2>
       <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <% @transaction.measurements.each do |key, data| %>
+        <% client_measurements.each do |key, data| %>
           <div>
             <dt class="text-sm font-medium text-gray-600 dark:text-gray-400"><%= key.gsub('_', ' ').titleize %></dt>
             <dd class="mt-1 text-sm text-gray-900 dark:text-gray-100">

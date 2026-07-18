@@ -864,14 +864,15 @@ module Mcp
     # successes and the gaps are invisible — you'd have to notice an absence to
     # spot the biggest uncompressed table in the system.
     #
-    # Both entries are legacy-only and shrink to nothing as retention ages them
-    # out: `spans` froze at the 1.7.0 span_trees cutover, and `transactions`
-    # holds plain-JSON measurements only for rows written before the
-    # measurements_blob cutover. The size shown is the whole table, so during
-    # each dual-read window it over-reports — directionally right, and the row
-    # disappears once the old rows are gone.
+    # `spans` is legacy-only (frozen at the 1.7.0 span_trees cutover) and ages
+    # out with retention. `transactions` stays plain-JSON by design: a
+    # measurements_blob compression was drafted and rejected in favor of
+    # slimming what gets written (query_patterns only, one example per
+    # pattern — the rest was redundant with promoted columns). Rows from
+    # before the slim carry the fat JSON until retention ages them out, so
+    # this table's size overstates the steady state until then.
     UNCOMPRESSED_TABLES = {
-      "transactions" => "Transactions (pre-cutover plain-JSON measurements)",
+      "transactions" => "Transactions (plain-JSON measurements, slimmed at ingest)",
       "spans" => "Spans (legacy, frozen at 1.7.0 cutover)"
     }.freeze
 

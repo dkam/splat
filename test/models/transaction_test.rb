@@ -82,14 +82,72 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal 1500, transaction.duration
     assert_equal 800, transaction.db_time
     assert_equal 200, transaction.view_time
-    expected_measurements = {
-      "db" => {"value" => 800},
-      "view" => {"value" => 200},
-      "custom_metric" => {"value" => 42},
-      "span_extracted_db_time" => 800,
-      "span_extracted_view_time" => 200
+    # db/view are promoted to the db_time/view_time columns and excluded from
+    # the JSON; other client-sent measurements pass through untouched.
+    assert_equal({"custom_metric" => {"value" => 42}}, transaction.measurements)
+  end
+
+  test "create_from_sentry_payload! stores only query_patterns in the JSON and derives the rest" do
+    breadcrumbs = 5.times.map { |i|
+      {"category" => "sql.active_record",
+       "data" => {"sql" => %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1)}}
+    } + [
+      {"category" => "sql.active_record",
+       "data" => {"sql" => %(SELECT "posts".* FROM "posts" WHERE "posts"."user_id" = 1)}}
+    ]
+    payload = {
+      "transaction" => "UsersController#index",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.5,
+      "breadcrumbs" => {"values" => breadcrumbs}
     }
-    assert_equal(expected_measurements, transaction.measurements)
+
+    transaction = Transaction.create_from_sentry_payload!("txn-slim-qa", payload, @project)
+
+    # Promoted columns carry the scalars.
+    assert_equal 6, transaction[:query_count]
+    assert transaction.has_n_plus_one
+
+    # The JSON holds only the per-pattern map, one example per pattern.
+    assert_equal %w[query_patterns], transaction.query_analysis.keys
+    transaction.query_patterns.each_value do |data|
+      assert_equal 1, data["examples"].size
+    end
+
+    # Readers derive the dropped keys from the pattern counts.
+    assert_equal 2, transaction.unique_query_patterns
+    assert_equal 1, transaction.potential_n_plus_one_queries.size
+    assert transaction.has_n_plus_one_queries?
+  end
+
+  test "readers use stored keys on pre-slim fat-JSON rows" do
+    # A row written before the measurements slim: promoted columns are set (as
+    # ingest always did) AND the JSON still carries the redundant keys.
+    legacy = @project.transactions.create!(
+      transaction_id: "legacy-qa-1",
+      transaction_name: "Old#action",
+      timestamp: Time.current,
+      duration: 100,
+      query_count: 9,
+      has_n_plus_one: true,
+      measurements: {
+        "query_analysis" => {
+          "total_queries" => 9,
+          "unique_patterns" => 4,
+          "potential_n_plus_one" => ["SELECT ?"],
+          "query_patterns" => {"SELECT ?" => {"count" => 2, "examples" => ["SELECT 1", "SELECT 2"]}}
+        }
+      }
+    )
+
+    assert_equal 9, legacy.query_count
+    # Stored keys win over derivation, even where they disagree with what
+    # deriving from query_patterns would say (unique_patterns claims 4, count 2
+    # is under the N+1 threshold) — pre-slim verdicts stay as written.
+    assert_equal 4, legacy.unique_query_patterns
+    assert_equal ["SELECT ?"], legacy.potential_n_plus_one_queries
+    assert legacy.has_n_plus_one_queries?
+    assert_equal ["SELECT 1", "SELECT 2"], legacy.query_patterns.dig("SELECT ?", "examples")
   end
 
   test "create_from_sentry_payload! includes environment and release" do

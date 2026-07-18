@@ -48,6 +48,49 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     assert_equal 1, result[:potential_n_plus_one].size
   end
 
+  test "stores at most one example per pattern" do
+    breadcrumbs = 5.times.map do |i|
+      {
+        "category" => "sql.active_record",
+        "data" => {"sql" => %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1)}
+      }
+    end
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs)
+    result[:query_patterns].each_value do |data|
+      assert_equal 1, data[:examples].size
+    end
+    # The example is a real query with its literal values intact.
+    assert_includes result[:query_patterns].values.first[:examples].first, "= 0"
+  end
+
+  test "caps stored SQL length for both pattern keys and examples" do
+    max = Transaction::SpanAnalyzer::MAX_SQL_LENGTH
+    # A wide column list survives normalization (identifiers are kept), so
+    # both the pattern and the example blow past the cap.
+    columns = 200.times.map { |i| %("books"."column_#{i}") }.join(", ")
+    breadcrumbs = 2.times.map do |i|
+      {"category" => "sql.active_record",
+       "data" => {"sql" => %(SELECT #{columns} FROM "books" WHERE "books"."id" = #{i})}}
+    end
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs)
+
+    # Both rows still collapse into one pattern despite truncation.
+    assert_equal 1, result[:query_patterns].size
+    pattern, data = result[:query_patterns].first
+    assert_equal max + 1, pattern.length # cap plus the "…" marker
+    assert pattern.end_with?("…")
+    assert_equal max + 1, data[:examples].first.length
+    assert data[:examples].first.end_with?("…")
+
+    # Short queries are stored untouched.
+    short = Transaction::SpanAnalyzer.analyze_sql_queries(
+      [{"category" => "sql.active_record", "data" => {"sql" => "SELECT 1 FROM books"}}]
+    )
+    refute short[:query_patterns].keys.first.end_with?("…")
+  end
+
   test "collapses IN-lists regardless of arity" do
     a = normalize("SELECT 1 FROM users WHERE id IN (1, 2, 3)")
     b = normalize("SELECT 1 FROM users WHERE id IN (1, 2, 3, 4, 5, 6)")
