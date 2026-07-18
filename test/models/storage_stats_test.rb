@@ -24,7 +24,8 @@ class StorageStatsTest < ActiveSupport::TestCase
         {name: "issues", row_estimate: 7}, {name: "events", row_estimate: 1234}
       ]},
       {name: "Transactions + Spans", tables: [
-        {name: "transactions", row_estimate: 88}, {name: "spans", row_estimate: 0}
+        {name: "transactions", row_estimate: 88}, {name: "spans", row_estimate: 0},
+        {name: "transaction_histograms", row_estimate: 4096}
       ]},
       {name: "Logs", tables: [{name: "logs", row_estimate: 555}]}
     ]
@@ -36,6 +37,8 @@ class StorageStatsTest < ActiveSupport::TestCase
     assert_equal 88, counts[:transactions]
     assert_equal 555, counts[:logs]
     assert_equal 0, counts[:spans] # no span_trees seeded
+    # Read off the deep pass's table walk, not a live COUNT(*) on the request path.
+    assert_equal 4096, counts[:histogram_rows]
   end
 
   # The sampler replaced `ORDER BY RANDOM() LIMIT n`, which scanned and sorted

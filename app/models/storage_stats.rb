@@ -159,7 +159,11 @@ class StorageStats
         events: rows["events"].to_i,
         transactions: rows["transactions"].to_i,
         spans: rows["spans"].to_i + SpanTree.sum(:span_count).to_i,
-        logs: rows["logs"].to_i
+        logs: rows["logs"].to_i,
+        # The spark data behind the performance charts. Already scanned as part
+        # of the deep pass's per-table walk, so read it off `groups` rather than
+        # a live COUNT(*) on the request path (it's a 90GB DB).
+        histogram_rows: rows["transaction_histograms"].to_i
       }
     rescue => e
       Rails.logger.warn("StorageStats.counts failed: #{e.class}: #{e.message}")
