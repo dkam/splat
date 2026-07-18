@@ -233,6 +233,27 @@ module Mcp
       assert_match "get_trace_logs", tool_text
     end
 
+    test "get_transaction lists the errors thrown during the request" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "BooksController#show", duration: 240,
+        trace_id: "txn-with-error")
+      event = Event.create_from_sentry_payload!(
+        SecureRandom.uuid,
+        {"exception" => {"values" => [{"type" => "IO::TimeoutError", "value" => "user specified timeout"}]},
+         "timestamp" => "2026-07-17T08:00:00Z",
+         "contexts" => {"trace" => {"trace_id" => "txn-with-error"}}},
+        project
+      )
+
+      call_tool("get_transaction", {"transaction_id" => txn.id})
+      assert_response :success
+      assert_match "Errors in this request", tool_text
+      assert_match "IO::TimeoutError", tool_text
+      assert_match "get_event", tool_text
+      assert_match "id #{event.id}", tool_text
+    end
+
     test "get_transaction_spans renders the waterfall from the span_tree blob" do
       project = projects(:one)
       txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,

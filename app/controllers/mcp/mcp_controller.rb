@@ -1620,6 +1620,17 @@ module Mcp
       if trace_id.present?
         result += "**Trace:** #{trace_id}\n"
         result += "_Call `get_trace_logs` with this trace_id for the correlated log lines._\n"
+        # The reverse of the event detail's transaction hint: any errors thrown
+        # during this request, so the correlation is discoverable from either end.
+        errors = txn.related_events.limit(10).to_a
+        if errors.any?
+          result += "\n### Errors in this request (#{errors.size})\n"
+          errors.each do |event|
+            label = event.exception_type.presence || "Error"
+            label += " — #{event.exception_value}" if event.exception_value.present?
+            result += "- #{label} (event ##{event.id}; call `get_event` with id #{event.id})\n"
+          end
+        end
       end
 
       if txn.db_time || txn.view_time
