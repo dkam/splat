@@ -8,13 +8,23 @@ class StorageStats
     ["Logs", "LogsRecord"]
   ].freeze
 
+  # Bump ONLY when the snapshot Hash *shape* changes — a new key, a new table
+  # group, a renamed field. Not on every release. See CACHE_KEY.
+  SNAPSHOT_SCHEMA = 1
+
   # Where the precomputed snapshot lives. SolidCache is SQLite-backed and
   # survives restarts, so the snapshot is the refresher's responsibility, not
-  # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule. Keyed on
-  # Splat::VERSION so every release auto-invalidates it: a deploy that changes
-  # the snapshot's shape (new table, new compressed segment) shows fresh data
-  # immediately instead of serving a stale cross-version snapshot.
-  CACHE_KEY = "storage_stats/snapshot/#{Splat::VERSION}"
+  # a TTL's — Maintenance::StorageStatsJob rewrites it on a schedule.
+  #
+  # Keyed on SNAPSHOT_SCHEMA, deliberately NOT Splat::VERSION. Versioning on the
+  # app version invalidated this on every deploy, and the deep pass that rebuilds
+  # it takes ~40 min on a 100GB+ instance — so each release showed the settings
+  # page's "Calculating…" state until an uninterrupted pass finished, and a
+  # deploy landing mid-pass reset it to cold again. The only reason to invalidate
+  # is a change to the snapshot's shape, which is manual and rare; across an
+  # ordinary deploy a stale-but-present snapshot degrades to the honest
+  # "collected N ago" data the view already renders, never a crash.
+  CACHE_KEY = "storage_stats/snapshot/v#{SNAPSHOT_SCHEMA}"
 
   # Compressed payload tables: [ui label, AR base class, codec db, table].
   # Defined on the class (not in `class << self`) so the settings view can
@@ -352,7 +362,7 @@ class StorageStats
 
     def sqlite_tables_for(base)
       conn = base.connection
-      byte_map = page_bytes_by_object(conn)
+      byte_map, cell_map = dbstat_by_object(conn)
 
       indexes_by_table = Hash.new { |h, k| h[k] = [] }
       conn.select_all("SELECT name, tbl_name FROM sqlite_master WHERE type = 'index'").each do |row|
@@ -367,7 +377,15 @@ class StorageStats
 
       tables.map { |row|
         name = row["name"]
-        row_count = conn.select_value("SELECT COUNT(*) FROM #{conn.quote_table_name(name)}").to_i
+        # Row count comes from the same dbstat walk as the byte sizes: leaf-page
+        # cells in a table's btree are exactly its rows (see dbstat_by_object).
+        # Exact and free — no separate COUNT(*) per table (which was a second
+        # full read of the whole dataset), and no ANALYZE estimate (unusable: a
+        # bounded analysis_limit read `transactions` as ~100M rows against 5.7M
+        # actual). Falls back to COUNT(*) only if dbstat is unavailable, so the
+        # sizes and the counts degrade together rather than half the row lying.
+        row_count = cell_map[name] ||
+          conn.select_value("SELECT COUNT(*) FROM #{conn.quote_table_name(name)}").to_i
         table_bytes = byte_map[name].to_i
         # Keep each index's own size, not just the per-table sum: "which of
         # these seven indexes is worth dropping?" is only answerable from the
@@ -395,13 +413,38 @@ class StorageStats
       nil
     end
 
-    def page_bytes_by_object(conn)
-      conn.select_all("SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name").each_with_object({}) do |row, h|
-        h[row["name"]] = row["bytes"].to_i
+    # Bytes and row counts for every table/index in one dbstat pass. The walk we
+    # already pay for to size each object also yields its row count, so there's
+    # no separate COUNT(*) per table — that was a second full read of the whole
+    # dataset, roughly half the deep pass's runtime on a 100GB+ instance.
+    #
+    #   SUM(pgsize)                          → the object's on-disk bytes.
+    #   SUM(ncell) over *leaf* pages of a    → its row count. A table btree stores
+    #   table's btree                          one cell per row in its leaf pages;
+    #                                          interior pages carry pointer cells
+    #                                          (excluded) and overflow pages carry
+    #                                          none, so leaf cells == rows exactly.
+    #
+    # Index objects also get a leaf-cell count, but the caller only ever looks up
+    # table names. Returns [bytes_by_name, rows_by_name]; on dbstat failure both
+    # are empty and the caller falls back to COUNT(*) so sizes and counts stay
+    # consistent (either both real or both from the fallback).
+    def dbstat_by_object(conn)
+      bytes = {}
+      rows = {}
+      conn.select_all(<<~SQL).each do |row|
+        SELECT name,
+               SUM(pgsize) AS bytes,
+               SUM(CASE WHEN pagetype = 'leaf' THEN ncell ELSE 0 END) AS leaf_cells
+        FROM dbstat GROUP BY name
+      SQL
+        bytes[row["name"]] = row["bytes"].to_i
+        rows[row["name"]] = row["leaf_cells"].to_i
       end
+      [bytes, rows]
     rescue ActiveRecord::StatementInvalid => e
-      Rails.logger.warn("StorageStats: dbstat unavailable (#{e.class}: #{e.message}); per-table byte sizes will be 0")
-      {}
+      Rails.logger.warn("StorageStats: dbstat unavailable (#{e.class}: #{e.message}); per-table byte sizes and counts will fall back")
+      [{}, {}]
     end
   end
 end
