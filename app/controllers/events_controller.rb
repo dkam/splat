@@ -8,6 +8,14 @@ class EventsController < ApplicationController
 
   def show
     @issue = @event.issue
+    @related_transaction = @event.related_transaction
+
+    # trace_id ties an error to the rest of its request: the transaction it was
+    # thrown in (above) and every log line from the same trace. .presence guards
+    # a blank trace_id from matching every untraced log in the project; the count
+    # rides index_logs_on_project_id_and_trace_id.
+    @trace_id = @event.trace_id.presence
+    @trace_log_count = @trace_id ? Log.where(project_id: @project.id, trace_id: @trace_id).count : 0
   end
 
   def destroy

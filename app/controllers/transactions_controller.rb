@@ -21,6 +21,10 @@ class TransactionsController < ApplicationController
     @trace_id = @transaction.trace_id.presence
     @trace_log_count = @trace_id ? Log.where(project_id: @project.id, trace_id: @trace_id).count : 0
 
+    # Errors thrown during this transaction (reverse of Event#related_transaction).
+    # Usually none; capped because a pathological trace could carry many.
+    @related_events = @transaction.related_events.limit(25).to_a
+
     respond_to do |format|
       format.html
       format.json { render json: transaction_data }

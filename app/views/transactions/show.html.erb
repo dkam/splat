@@ -21,6 +21,25 @@
     </div>
   </div>
 
+  <!-- Errors thrown during this request -->
+  <% if @related_events.any? %>
+    <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 mb-8 border border-red-200 dark:border-red-800">
+      <h2 class="text-sm font-semibold text-red-900 dark:text-red-300 mb-2">
+        <%= pluralize(@related_events.size, "error") %> in this request
+      </h2>
+      <ul class="space-y-1">
+        <% @related_events.each do |event| %>
+          <li class="text-sm">
+            <%= link_to project_event_path(@project.slug, event),
+                class: "text-red-700 dark:text-red-300 hover:underline font-mono" do %>
+              <%= event.exception_type.presence || "Error" %><%= " — #{event.exception_value}" if event.exception_value.present? %>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
   <!-- Duration Overview -->
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">

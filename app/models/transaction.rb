@@ -153,6 +153,16 @@ class Transaction < TransactionsSpansRecord
     [other, 0].max
   end
 
+  # The errors thrown during this transaction — the reverse of
+  # Event#related_transaction. Events live in the issues_events DB, so this is a
+  # project-scoped query rather than an association; it rides the events
+  # (project_id, trace_id) index. trace_id is not globally unique, hence the
+  # project scope. Empty is the norm — most transactions raise nothing.
+  def related_events
+    return Event.none if trace_id.blank?
+    Event.where(project_id: project_id, trace_id: trace_id).order(timestamp: :desc)
+  end
+
   # Column wins over JSON; the JSON fallback handles legacy rows that
   # predate the promoted column.
   def query_count

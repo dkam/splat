@@ -323,6 +323,48 @@ class TransactionTest < ActiveSupport::TestCase
     assert_not_includes Transaction.by_server("web-1"), post_transaction
   end
 
+  test "related_events finds the errors thrown during this request" do
+    trace = "aa11bb22cc33dd44ee55ff6600778899"
+    txn = @project.transactions.create!(
+      transaction_id: "txn-with-error", transaction_name: "BooksController#show",
+      timestamp: Time.current, duration: 240, trace_id: trace
+    )
+    event = Event.create_from_sentry_payload!(
+      "evt-in-txn",
+      {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z",
+       "contexts" => {"trace" => {"trace_id" => trace}}},
+      @project
+    )
+
+    assert_equal [event], txn.related_events.to_a
+  end
+
+  test "related_events is empty when the transaction has no trace_id" do
+    txn = @project.transactions.create!(
+      transaction_id: "txn-no-trace", transaction_name: "Test",
+      timestamp: Time.current, duration: 100
+    )
+
+    assert_empty txn.related_events
+  end
+
+  test "related_events does not match another project's identical trace_id" do
+    trace = "1234567890abcdef1234567890abcdef"
+    other = Project.create!(name: "Other", slug: "other-proj", public_key: "other-key")
+    txn = @project.transactions.create!(
+      transaction_id: "txn-scoped", transaction_name: "Test",
+      timestamp: Time.current, duration: 100, trace_id: trace
+    )
+    Event.create_from_sentry_payload!(
+      "evt-other-project",
+      {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z",
+       "contexts" => {"trace" => {"trace_id" => trace}}},
+      other
+    )
+
+    assert_empty txn.related_events
+  end
+
   test "slow returns only transactions over the threshold" do
     slow_txn = @project.transactions.create!(
       transaction_id: "slow-scope",

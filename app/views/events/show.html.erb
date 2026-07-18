@@ -25,6 +25,18 @@
           <%= @event.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z") %>
           <span class="text-gray-500 dark:text-gray-500">&mdash; <%= time_ago_in_words(@event.timestamp) %> ago</span>
         </span>
+        <% if @related_transaction %>
+          <span>•</span>
+          <%= link_to "View transaction (#{format_duration(@related_transaction.duration)}) →",
+              project_transaction_path(@project.slug, @related_transaction),
+              class: "text-blue-600 dark:text-blue-400 hover:underline" %>
+        <% end %>
+        <% if @trace_log_count > 0 %>
+          <span>•</span>
+          <%= link_to "View #{pluralize(@trace_log_count, "log")} for this trace →",
+              project_logs_path(@project.slug, trace_id: @trace_id),
+              class: "text-blue-600 dark:text-blue-400 hover:underline" %>
+        <% end %>
       </div>
     </div>
 
