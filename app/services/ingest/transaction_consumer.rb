@@ -58,6 +58,8 @@ module Ingest
             timestamp: transaction.timestamp, kind: :transaction)
         end
 
+        harvest_facets(project, transaction) if transaction&.previously_new_record?
+
         outcomes << [job, :ok]
       rescue ActiveRecord::RecordNotUnique
         outcomes << [job, :ok]
@@ -67,6 +69,16 @@ module Ingest
       end
 
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
+    end
+
+    # Feed the endpoint page's environment dropdown. Cosmetic, so a failure must
+    # never fail (and retry) the transaction — swallow it; the maintenance prune
+    # and later transactions self-heal a miss.
+    def harvest_facets(project, transaction)
+      Facet.harvest!(project_id: project.id, stream: :transaction,
+        values: {environment: transaction.environment})
+    rescue => e
+      log_exception("[#{self.class.name}] facet harvest failed", e)
     end
 
     def build_span_rows(transaction, payload)

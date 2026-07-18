@@ -124,9 +124,9 @@ class EndpointsController < ApplicationController
     end
   end
 
+  # Environment filter values, maintained at ingest in the facets table (primary
+  # DB) — a covered lookup instead of a DISTINCT scan over the transactions table.
   def cached_environments
-    Rails.cache.fetch("environments_#{@project.id}", expires_in: 1.hour) do
-      @project.transactions.distinct.pluck(:environment).compact.sort
-    end
+    Facet.values_for(@project.id, :transaction, :environment)
   end
 end

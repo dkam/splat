@@ -7,7 +7,7 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
   end
 
   # Stub beanstalkd job: process_batch reads .body and calls .delete on :ok.
-  def job_for(transaction_id:, spans:)
+  def job_for(transaction_id:, spans:, environment: nil)
     payload = {
       "transaction" => "ProductsController#show",
       "start_timestamp" => 1_700_000_000.0,
@@ -15,6 +15,7 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
       "contexts" => {"trace" => {"op" => "http.server", "trace_id" => "trace-abc", "span_id" => "root"}},
       "spans" => spans
     }
+    payload["environment"] = environment if environment
     body = {"project_id" => @project.id, "transaction_id" => transaction_id, "payload" => payload}.to_json
     Struct.new(:body) { def delete = nil }.new(body)
   end
@@ -70,6 +71,15 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
     assert_equal "http.server", nodes.first.op, "root span first"
     assert(nodes.any? { |n| n.op == "db.sql.active_record" })
     assert_equal "trace-abc", nodes.first.trace_id
+  end
+
+  test "processing a new transaction records its environment facet" do
+    Facet.where(project_id: @project.id).delete_all
+    Facet.instance_variable_set(:@recent, {})
+
+    @consumer.send(:process_batch, [job_for(transaction_id: "txn-env", spans: [], environment: "production")])
+
+    assert_equal %w[production], Facet.values_for(@project.id, :transaction, :environment)
   end
 
   test "build_span_tree hoists trace_id and uses ts/end_ts keys" do

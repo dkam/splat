@@ -5,6 +5,7 @@ class Project < ApplicationRecord
   has_many :issues, dependent: :destroy
   has_many :transactions, dependent: :destroy
   has_many :releases, dependent: :destroy
+  has_many :facets, dependent: :delete_all
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true

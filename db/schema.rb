@@ -10,7 +10,19 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_18_000001) do
+  create_table "facets", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.string "name", null: false
+    t.integer "project_id", null: false
+    t.string "stream", null: false
+    t.datetime "updated_at", null: false
+    t.string "value", null: false
+    t.index ["project_id", "stream", "name", "value"], name: "index_facets_on_scope_and_value", unique: true
+    t.index ["project_id", "stream", "name"], name: "index_facets_on_scope"
+  end
+
   create_table "mcp_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_authenticated_at"
@@ -83,5 +95,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_000004) do
     t.datetime "updated_at", null: false
   end
 
+  add_foreign_key "facets", "projects"
   add_foreign_key "releases", "projects"
 end

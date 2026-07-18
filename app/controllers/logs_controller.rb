@@ -3,11 +3,6 @@
 class LogsController < ApplicationController
   include Pagy::Method
 
-  # How long the environment-filter facet is cached. A distinct scan over the
-  # logs table is expensive; staleness here only delays a new environment
-  # appearing in the dropdown.
-  ENVIRONMENTS_TTL = 5.minutes
-
   before_action :set_project
 
   # Logs live on their own DB, so scope by project_id rather than a cross-DB
@@ -33,27 +28,12 @@ class LogsController < ApplicationController
     # an append-only feed only needs prev/next, not a total page count.
     @pagy, @logs = pagy(:countless, logs, limit: 50)
 
-    # Distinct environments for the filter dropdown. A DISTINCT over a
-    # high-volume table is too costly to run on every page load, so cache it
-    # briefly (same TTL pattern as the project show metrics) — a new
-    # environment showing up a few minutes late in the dropdown is fine.
-    @environments = Rails.cache.fetch("project_#{@project.id}_log_environments", expires_in: ENVIRONMENTS_TTL) do
-      Log.where(project_id: @project.id).distinct.pluck(:environment).compact.sort
-    end
-
-    # Sources are a tiny fixed set ("otlp"/"sentry"), but cache the distinct scan
-    # anyway — same rationale as environments (a DISTINCT over the logs table is
-    # too costly per request; brief staleness in the dropdown is fine).
-    @sources = Rails.cache.fetch("project_#{@project.id}_log_sources", expires_in: ENVIRONMENTS_TTL) do
-      Log.where(project_id: @project.id).distinct.pluck(:source).compact.sort
-    end
-
-    # Services (postgresql / booko / …) — the "what system" facet. Cached
-    # distinct like environments; the partial index on service keeps the scan
-    # to the non-null slice.
-    @services = Rails.cache.fetch("project_#{@project.id}_log_services", expires_in: ENVIRONMENTS_TTL) do
-      Log.where(project_id: @project.id).distinct.pluck(:service).compact.sort
-    end
+    # Filter-dropdown values, maintained at ingest in the facets table (primary
+    # DB). Replaces three DISTINCT scans over the ~1M-row logs table that used to
+    # dominate this page's load time — these are covered lookups on a tiny table.
+    @environments = Facet.values_for(@project.id, :log, :environment)
+    @sources = Facet.values_for(@project.id, :log, :source)
+    @services = Facet.values_for(@project.id, :log, :service)
   end
 
   def show

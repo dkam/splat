@@ -45,4 +45,19 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
       Log.insert_all!(rows)
     end
   end
+
+  test "harvest_facets records distinct environment/source/service from the batch" do
+    Facet.where(project_id: @project.id).delete_all
+    Facet.instance_variable_set(:@recent, {})
+    rows = [
+      {environment: "production", source: "sentry", service: "booko"},
+      {environment: "staging", source: "otlp", service: "booko"}
+    ]
+
+    @consumer.send(:harvest_facets, @project, rows)
+
+    assert_equal %w[production staging], Facet.values_for(@project.id, :log, :environment)
+    assert_equal %w[otlp sentry], Facet.values_for(@project.id, :log, :source)
+    assert_equal %w[booko], Facet.values_for(@project.id, :log, :service)
+  end
 end

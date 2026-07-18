@@ -31,6 +31,7 @@ module Ingest
         records = parse(args["format"], args["payload"])
         rows = records.map { |rec| build_row(project, rec) }
         Log.insert_all!(rows) if rows.any?
+        harvest_facets(project, rows)
         [job, :ok]
       rescue => e
         log_exception("[#{self.class.name}] job failed", e)
@@ -38,6 +39,19 @@ module Ingest
       end
 
       outcomes.each { |job, outcome| safe_finalize(job, outcome) }
+    end
+
+    # Feed the filter-dropdown facets from the batch's distinct values. Cosmetic,
+    # so a failure here must never fail (and retry) the log insert — swallow it;
+    # the maintenance prune and later batches self-heal a miss.
+    def harvest_facets(project, rows)
+      Facet.harvest!(project_id: project.id, stream: :log, values: {
+        environment: rows.map { |r| r[:environment] },
+        source: rows.map { |r| r[:source] },
+        service: rows.map { |r| r[:service] }
+      })
+    rescue => e
+      log_exception("[#{self.class.name}] facet harvest failed", e)
     end
 
     def parse(format, payload)

@@ -24,13 +24,14 @@ module Maintenance
       # the historical performance record that outlives the raw transactions.
       histograms_deleted = retire_histograms(setting.histograms_cutoff_date)
       hourly_stats_deleted = retire_hourly_stats(setting.histograms_cutoff_date)
+      facets_deleted = retire_facets(setting)
 
       vacuum(IssuesEventsRecord)
       vacuum(TransactionsSpansRecord)
       vacuum(LogsRecord)
 
       duration = (Time.current - start).round(2)
-      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, span_trees:#{span_trees_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}"
+      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, span_trees:#{span_trees_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}, facets:#{facets_deleted}"
       {
         duration: duration,
         events_deleted: events_deleted,
@@ -39,11 +40,21 @@ module Maintenance
         span_trees_deleted: span_trees_deleted,
         logs_deleted: logs_deleted,
         histograms_deleted: histograms_deleted,
-        hourly_stats_deleted: hourly_stats_deleted
+        hourly_stats_deleted: hourly_stats_deleted,
+        facets_deleted: facets_deleted
       }
     end
 
     private
+
+    # Drop facet values not seen within their stream's data-retention window: a
+    # value absent that long points at zero surviving rows, so it should leave the
+    # dropdown. facets is on the primary DB (not vacuumed here); the churn is a
+    # handful of rows, so incremental_vacuum isn't worth it.
+    def retire_facets(setting)
+      batched_delete_all(Facet.where(stream: "log").where("last_seen_at < ?", setting.logs_data_cutoff_date)) +
+        batched_delete_all(Facet.where(stream: "transaction").where("last_seen_at < ?", setting.transactions_data_cutoff_date))
+    end
 
     def retire_logs(cutoff)
       batched_delete_all(Log.where("timestamp < ?", cutoff))
