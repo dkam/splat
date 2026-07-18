@@ -197,6 +197,8 @@ module Mcp
       case tool_name
       when "get_status"
         get_status(arguments)
+      when "list_monitors"
+        list_monitors(arguments)
       when "list_recent_issues"
         list_recent_issues(arguments)
       when "search_issues"
@@ -258,6 +260,20 @@ module Mcp
           inputSchema: {
             type: "object",
             properties: {}
+          }
+        },
+        {
+          name: "list_monitors",
+          description: "List check-in monitors (Sentry Crons / dead-man's-switch heartbeats): each monitor's slug, evaluated state (ok / missed / error / overrun / unknown), schedule, margin, last check-in time + status, last duration, and environment. Monitors auto-register from check-in envelopes; a missed/error/overrun state means an Issue is (or is about to be) open for it — find it by fingerprint monitor:<slug>:<kind> via search_issues.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              state: {
+                type: "string",
+                description: "Filter by evaluated state (default: all)",
+                enum: ["ok", "missed", "error", "overrun", "unknown"]
+              }
+            }
           }
         },
         {
@@ -900,6 +916,38 @@ module Mcp
 
     def human_size(bytes)
       ActiveSupport::NumberHelper.number_to_human_size(bytes.to_i)
+    end
+
+    def list_monitors(args)
+      monitors = CronMonitor.includes(:project).by_slug
+      monitors = monitors.where(state: args["state"]) if args["state"].present?
+      monitors = monitors.to_a
+
+      if monitors.empty?
+        render_text("No monitors#{args["state"].present? ? " in state '#{args["state"]}'" : " registered"}. Monitors auto-register when a service sends a Sentry Crons check-in envelope to its project DSN.")
+        return
+      end
+
+      lines = ["# Check-In Monitors (#{monitors.size})", ""]
+      monitors.each do |m|
+        lines << "## #{m.slug} — #{m.state}"
+        lines << "- **Project:** #{m.project&.name}"
+        schedule = m.schedule_description
+        schedule += " (+#{m.checkin_margin}m margin)" if m.checkin_margin.to_i.positive?
+        lines << "- **Schedule:** #{schedule}"
+        lines << "- **Max runtime:** #{m.max_runtime}m" if m.max_runtime.to_i.positive?
+        lines << if m.last_checkin_at
+          "- **Last check-in:** #{m.last_checkin_at.iso8601} (#{helpers.time_ago_in_words(m.last_checkin_at)} ago, status: #{m.last_status})"
+        else
+          "- **Last check-in:** never"
+        end
+        lines << "- **In progress since:** #{m.in_progress_since.iso8601}" if m.in_progress_since
+        lines << "- **Last duration:** #{m.last_duration.round(2)}s" if m.last_duration
+        lines << "- **Environment:** #{m.environment}" if m.environment.present?
+        lines << ""
+      end
+
+      render_text(lines.join("\n"))
     end
 
     def list_recent_issues(args)

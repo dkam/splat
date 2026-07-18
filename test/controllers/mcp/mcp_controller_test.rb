@@ -288,6 +288,39 @@ module Mcp
       assert_match "GET https://api.example", tool_text
     end
 
+    test "list_monitors renders registered monitors with state and schedule" do
+      project = projects(:one)
+      CronMonitor.create!(
+        project: project, slug: "meili-flush",
+        schedule_type: "interval", schedule_value: "1", schedule_unit: "minute",
+        checkin_margin: 5, last_status: "ok", last_checkin_at: 2.minutes.ago,
+        last_ok_at: 2.minutes.ago, last_duration: 0.42, environment: "production",
+        state: "ok"
+      )
+      CronMonitor.create!(
+        project: project, slug: "nightly-report",
+        schedule_type: "crontab", schedule_value: "0 2 * * *",
+        last_status: "error", last_checkin_at: 1.hour.ago, state: "error"
+      )
+
+      call_tool("list_monitors", {})
+      assert_response :success
+      assert_match "meili-flush — ok", tool_text
+      assert_match "every 1 minute (+5m margin)", tool_text
+      assert_match "nightly-report — error", tool_text
+      assert_match "cron 0 2 * * *", tool_text
+
+      call_tool("list_monitors", {"state" => "error"})
+      assert_match "nightly-report", tool_text
+      refute_match "meili-flush", tool_text
+    end
+
+    test "list_monitors explains the empty state" do
+      call_tool("list_monitors", {})
+      assert_response :success
+      assert_match "No monitors registered", tool_text
+    end
+
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
     end
