@@ -48,7 +48,7 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
 
   test "harvest_facets records distinct environment/source/service from the batch" do
     Facet.where(project_id: @project.id).delete_all
-    Facet.instance_variable_set(:@recent, {})
+    Facet.reset_throttle!
     rows = [
       {environment: "production", source: "sentry", service: "booko"},
       {environment: "staging", source: "otlp", service: "booko"}

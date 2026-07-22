@@ -17,6 +17,13 @@ class IssuesController < ApplicationController
       @project.issues.open
     end.recent
 
+    # "Seen in", not "belongs to" — grouping spans environments, so an issue
+    # can appear under staging and production both. Backed by issue_facets
+    # (maintained at ingest), so this stays an indexed subquery rather than a
+    # DISTINCT over events.
+    @environment = params[:environment].presence
+    issues = issues.seen_in_environment(@environment, project_id: @project.id) if @environment
+
     @pagy, @issues = pagy(issues, limit: 25)
     @burst_threshold = Setting.instance.burst_threshold
 
@@ -38,6 +45,18 @@ class IssuesController < ApplicationController
     @deploy_markers = @project.releases
       .where(first_seen_at: @sparkline_range)
       .pluck(:first_seen_at)
+
+    # Dropdown options, and the per-row chips for the page of issues on screen
+    # (one query for the page, not one per row). Both are pointless on a project
+    # that only ever reports one environment — no dropdown, and a chip repeating
+    # "production" on every row — so a single-environment project skips the
+    # second query entirely.
+    @environments = IssueFacet.values_for(@project.id, :environment)
+    @issue_environments = if @environments.many?
+      IssueFacet.values_by_issue(@issues.map(&:id), :environment)
+    else
+      {}
+    end
   end
 
   def show

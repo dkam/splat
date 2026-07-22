@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_17_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_23_000001) do
   create_table "compression_dictionaries", force: :cascade do |t|
     t.boolean "active", default: false, null: false
     t.float "baseline_ratio"
@@ -68,6 +68,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_000002) do
     t.index ["project_id", "trace_id"], name: "index_events_on_project_id_and_trace_id"
     t.index ["project_id"], name: "index_events_on_project_id"
     t.index ["timestamp"], name: "index_events_on_timestamp"
+  end
+
+  create_table "issue_facets", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "issue_id", null: false
+    t.datetime "last_seen_at", null: false
+    t.string "name", null: false
+    t.integer "project_id", null: false
+    t.datetime "updated_at", null: false
+    t.string "value", null: false
+    t.index ["issue_id", "name", "value"], name: "index_issue_facets_on_issue_and_value", unique: true
+    t.index ["last_seen_at"], name: "index_issue_facets_on_last_seen_at"
+    t.index ["name", "value", "project_id", "issue_id"], name: "index_issue_facets_on_value_across_projects"
+    t.index ["project_id", "name", "value", "issue_id"], name: "index_issue_facets_on_scope_and_value"
   end
 
   create_table "issues", force: :cascade do |t|

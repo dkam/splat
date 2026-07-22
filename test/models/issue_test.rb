@@ -211,6 +211,45 @@ class IssueTest < ActiveSupport::TestCase
     end
   end
 
+  test "matching_text treats LIKE wildcards as literals" do
+    literal = create_open_issue("underscore")
+    literal.update!(title: "undefined method `_dump'")
+    decoy = create_open_issue("decoy")
+    decoy.update!(title: "undefined method `Xdump'")
+
+    found = @project.issues.matching_text("`_dump'")
+
+    assert_includes found, literal
+    # Without escaping, `_` matches any single character and this would also
+    # return the decoy — a search hit that doesn't contain the search text.
+    refute_includes found, decoy
+  end
+
+  test "matching_text with a bare % matches nothing rather than everything" do
+    create_open_issue("some-issue")
+
+    assert_empty @project.issues.matching_text("%")
+  end
+
+  test "seen_in_environment matches issues with at least one event in the env" do
+    both = create_open_issue("both")
+    staging_only = create_open_issue("staging-only")
+    IssueFacet.reset_throttle!
+    IssueFacet.harvest!(project_id: @project.id, issue_id: both.id,
+      values: {environment: "production"})
+    IssueFacet.harvest!(project_id: @project.id, issue_id: both.id,
+      values: {environment: "staging"})
+    IssueFacet.harvest!(project_id: @project.id, issue_id: staging_only.id,
+      values: {environment: "staging"})
+
+    production = @project.issues.seen_in_environment("production", project_id: @project.id)
+    staging = @project.issues.seen_in_environment("staging", project_id: @project.id)
+
+    # An issue groups across environments, so `both` legitimately matches twice.
+    assert_equal [both.id], production.map(&:id)
+    assert_equal [both.id, staging_only.id].sort, staging.map(&:id).sort
+  end
+
   private
 
   def create_open_issue(fingerprint)

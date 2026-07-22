@@ -13,7 +13,7 @@
   <!-- Status Tabs -->
   <div class="mb-6 border-b border-gray-200 dark:border-gray-800">
     <nav class="flex gap-8">
-      <%= link_to project_issues_path(@project.slug, status: "open"),
+      <%= link_to project_issues_path(@project.slug, status: "open", environment: @environment),
           class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'open' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700'}" do %>
         Open
         <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-300">
@@ -21,7 +21,7 @@
         </span>
       <% end %>
 
-      <%= link_to project_issues_path(@project.slug, status: "resolved"),
+      <%= link_to project_issues_path(@project.slug, status: "resolved", environment: @environment),
           class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'resolved' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700'}" do %>
         Resolved
         <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-300">
@@ -29,7 +29,7 @@
         </span>
       <% end %>
 
-      <%= link_to project_issues_path(@project.slug, status: "ignored"),
+      <%= link_to project_issues_path(@project.slug, status: "ignored", environment: @environment),
           class: "py-4 px-1 border-b-2 font-medium text-sm #{@status == 'ignored' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-700'}" do %>
         Ignored
         <span class="ml-2 py-0.5 px-2 rounded-full text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-300">
@@ -38,6 +38,30 @@
       <% end %>
     </nav>
   </div>
+
+  <!-- Environment filter. Only worth showing once events have been seen in more
+       than one environment — a single-environment project gets no dropdown. -->
+  <% if @environments.many? %>
+    <%= form_with url: project_issues_path(@project.slug), method: :get, data: {turbo_frame: "_top"},
+        class: "mb-6 flex flex-wrap items-end gap-3" do |f| %>
+      <%= f.hidden_field :status, value: @status %>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Environment</label>
+        <%= f.select :environment,
+            options_for_select([["All", ""]] + @environments.map { |e| [e, e] }, @environment),
+            {},
+            class: "rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 text-sm",
+            onchange: "this.form.requestSubmit()" %>
+      </div>
+      <%= f.submit "Filter", class: "px-3 py-2 text-sm rounded-md bg-gray-100 dark:bg-gray-800 dark:text-gray-100 cursor-pointer" %>
+    <% end %>
+    <% if @environment %>
+      <p class="-mt-3 mb-6 text-xs text-gray-500 dark:text-gray-400">
+        Showing issues seen at least once in <span class="font-medium"><%= @environment %></span>.
+        Issues group across environments, so these may also occur elsewhere.
+      </p>
+    <% end %>
+  <% end %>
 
   <!-- Issues List -->
   <% if @issues.any? %>
@@ -67,6 +91,15 @@
                 <span>•</span>
                 <span class="font-semibold text-gray-900 dark:text-gray-100"><%= issue.count %></span>
                 <span>events</span>
+                <% envs = @issue_environments[issue.id] %>
+                <% if envs.present? %>
+                  <span>•</span>
+                  <span class="flex items-center gap-1" title="Environments this issue has been seen in">
+                    <% envs.each do |env| %>
+                      <span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 dark:text-gray-300"><%= env %></span>
+                    <% end %>
+                  </span>
+                <% end %>
               </div>
 
               <div class="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">

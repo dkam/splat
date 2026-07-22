@@ -8,7 +8,7 @@ class FacetTest < ActiveSupport::TestCase
     Facet.where(project_id: @project.id).delete_all
     # The REFRESH_INTERVAL throttle memo is process-global; clear it so each test
     # starts from a clean slate rather than inheriting another test's sightings.
-    Facet.instance_variable_set(:@recent, {})
+    Facet.reset_throttle!
   end
 
   test "harvest! records distinct values and skips blanks" do
@@ -38,7 +38,7 @@ class FacetTest < ActiveSupport::TestCase
     original = row.last_seen_at
 
     # Clear the memo so the second harvest isn't throttled, and advance the clock.
-    Facet.instance_variable_set(:@recent, {})
+    Facet.reset_throttle!
     later = original + 1.hour
     Facet.harvest!(project_id: @project.id, stream: :log, values: {environment: "production"}, seen_at: later)
 

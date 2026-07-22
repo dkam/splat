@@ -5,6 +5,44 @@ class EventTest < ActiveSupport::TestCase
     @project = Project.create!(name: "Test Project", slug: "test", public_key: "test-key")
   end
 
+  test "create_from_sentry_payload! denormalises environment and release onto the issue" do
+    IssueFacet.reset_throttle!
+    payload = {
+      "message" => "boom", "timestamp" => "2026-07-17T08:00:00Z",
+      "environment" => "staging", "release" => "v1.2.3"
+    }
+
+    event = Event.create_from_sentry_payload!("evt-facets", payload, @project)
+
+    assert_equal %w[staging], IssueFacet.values_for(@project.id, :environment)
+    assert_equal %w[v1.2.3], IssueFacet.values_for(@project.id, :release)
+    assert_includes Issue.seen_in_environment("staging", project_id: @project.id), event.issue
+  end
+
+  test "a second event in another environment adds to the issue's environments" do
+    IssueFacet.reset_throttle!
+    base = {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z"}
+
+    first = Event.create_from_sentry_payload!("evt-prod", base.merge("environment" => "production"), @project)
+    second = Event.create_from_sentry_payload!("evt-stg", base.merge("environment" => "staging"), @project)
+
+    # Same fingerprint, so one issue spanning both environments.
+    assert_equal first.issue_id, second.issue_id
+    assert_equal %w[production staging], IssueFacet.values_by_issue([first.issue_id], :environment)[first.issue_id]
+  end
+
+  test "a failing facet harvest never fails ingest" do
+    with_stub(IssueFacet, :harvest!, ->(**) { raise "issue_facets is on fire" }) do
+      event = Event.create_from_sentry_payload!(
+        "evt-harvest-boom",
+        {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z", "environment" => "production"},
+        @project
+      )
+
+      assert_predicate event, :persisted?
+    end
+  end
+
   test "create_from_sentry_payload! promotes trace_id out of the trace context" do
     payload = {
       "message" => "boom",

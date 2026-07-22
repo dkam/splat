@@ -75,7 +75,7 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
 
   test "processing a new transaction records its environment facet" do
     Facet.where(project_id: @project.id).delete_all
-    Facet.instance_variable_set(:@recent, {})
+    Facet.reset_throttle!
 
     @consumer.send(:process_batch, [job_for(transaction_id: "txn-env", spans: [], environment: "production")])
 

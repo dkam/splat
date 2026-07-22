@@ -5,6 +5,7 @@ class Issue < IssuesEventsRecord
   # `issue.project` is fine (one extra SELECT against primary).
   belongs_to :project
   has_many :events, dependent: :nullify
+  has_many :issue_facets, dependent: :delete_all
 
   enum :status, {open: 0, resolved: 1, ignored: 2}
 
@@ -13,6 +14,25 @@ class Issue < IssuesEventsRecord
 
   scope :recent, -> { order(last_seen: :desc) }
   scope :by_frequency, -> { order(count: :desc) }
+
+  # Free-text match on title/exception type. `%` and `_` are escaped and an
+  # explicit ESCAPE clause is set — error text is full of underscores
+  # (`undefined method '_dump'`), and unescaped they'd silently match any
+  # character, returning issues that don't contain the search text at all.
+  scope :matching_text, ->(query) {
+    pattern = "%#{sanitize_sql_like(query.to_s)}%"
+    where("title LIKE :q ESCAPE '\\' OR exception_type LIKE :q ESCAPE '\\'", q: pattern)
+  }
+
+  # "Seen in", not "belongs to": an issue groups events across environments and
+  # releases, so these match an issue with at least one event carrying the
+  # value. Backed by issue_facets (see IssueFacet) — a subquery on an indexed
+  # tiny table, never a scan over events.
+  scope :seen_in, ->(name, value, project_id: nil) {
+    where(id: IssueFacet.issue_ids_for(name, value, project_id: project_id))
+  }
+  scope :seen_in_environment, ->(env, project_id: nil) { seen_in(:environment, env, project_id: project_id) }
+  scope :seen_in_release, ->(release, project_id: nil) { seen_in(:release, release, project_id: project_id) }
 
   # Burst alerting: how often we recompute an issue's rate, and how long an
   # alert suppresses follow-ups for the same issue (one alert per hour).

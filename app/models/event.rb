@@ -66,10 +66,25 @@ class Event < IssuesEventsRecord
       .where("last_seen < ?", event.timestamp)
       .update_all(last_seen: event.timestamp, updated_at: Time.current)
 
-    # Best-effort spike alert; throttled per issue and never raises into ingest.
+    # Best-effort side effects; both throttled, and neither raises into ingest.
+    harvest_issue_facets(project, issue, event)
     issue.maybe_alert_burst!
 
     event
+  end
+
+  # Denormalise this event's environment/release onto the issue so the filters
+  # don't have to DISTINCT over events. Throttled per (issue, name, value), and
+  # swallowed on failure — a filter-index miss must never fail (and retry) ingest.
+  def self.harvest_issue_facets(project, issue, event)
+    IssueFacet.harvest!(
+      project_id: project.id,
+      issue_id: issue.id,
+      values: {environment: event.environment, release: event.release},
+      seen_at: event.timestamp
+    )
+  rescue => e
+    Rails.logger.warn("IssueFacet.harvest! failed for issue=#{issue.id}: #{e.class} #{e.message}")
   end
 
   def self.parse_timestamp(timestamp)
