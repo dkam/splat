@@ -69,7 +69,7 @@ See [Deployment](#deployment) for running it for real, and [Authentication](#aut
 
 **Platform**
 - ✅ **Sentry Protocol Compatible** - Drop-in replacement for Sentry client SDKs
-- ✅ **MCP Integration** - Query errors and performance data via Claude and other AI assistants
+- ✅ **MCP Integration** - Query errors, performance and logs via Claude and other AI assistants. Issue, log and performance queries filter by project and environment (issues and endpoint stats also by release), so an agent can drive a whole load-test → mine → fix → verify cycle headlessly, without a dashboard ([details](#model-context-protocol-mcp-integration))
 - ✅ **Single-Tenant, Multi-Project** - Group events under multiple projects/DSNs; no user or team management overhead
 - ✅ **Minimal Dependencies** - Rails + SQLite + Tuber (a single-binary work queue)
 - ✅ **Auto-Cleanup** - Configurable data retention (default 90 days)
@@ -660,6 +660,15 @@ Each backup is self-contained: the zstd compression dictionaries used for event 
 ## Model Context Protocol (MCP) Integration
 
 Splat exposes an MCP server that allows Claude and other AI assistants to query error tracking and performance data directly. The MCP endpoint carries its own bearer token and is independent of OIDC — `/mcp` skips browser auth either way, so this token is the only thing guarding it.
+
+**The querying tools are parameterized by project and environment**, which is the point: an agent can run a complete load-test → mine → fix → verify loop without a human ever opening a dashboard. Hammer staging, ask `find_n_plus_one_endpoints` and `get_transaction_stats` what broke *in that environment*, read the offending stack trace with `get_issue`, fix it, deploy, then close the loop with `compare_endpoint_performance` across the two releases and `resolve_issue` when the numbers agree. Every step is a tool call, so it works headless — in CI, in a cron job, or in an agent session.
+
+Two arguments are worth knowing about, since they show up on most tools:
+
+- **`project`** — every listing tool spans all projects by default (MCP credentials are instance-wide) and labels each row with its project. Pass `project` to narrow to one, given as its slug, display name, or numeric id. An unknown value is an error listing the valid slugs, not an empty result.
+- **`environment`** — supported by `list_recent_issues`, `search_issues`, `search_logs`, `get_transaction_stats`, `search_slow_transactions` and the endpoint tools. On the issue tools it means *seen in*: grouping is deliberately cross-environment, so `environment: "staging"` matches issues with at least one staging event, and the same issue may also be occurring in production. `release` works the same way on `list_recent_issues` and `search_issues`.
+
+Not every tool takes both — `get_issue`, `get_event` and `get_status` address a single record or the instance itself, and the release dimension only exists where the underlying aggregates carry it (issues, and `get_transaction_stats` when narrowed to one endpoint). The `inputSchema` in `tools/list` is authoritative.
 
 Note the tools are not read-only: `resolve_issue`, `ignore_issue` and `reopen_issue` change issue state. Treat the token as read/write.
 

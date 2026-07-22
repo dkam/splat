@@ -44,6 +44,25 @@ module Mcp
       }, status: :bad_request
     end
 
+    # Raised by resolve_project_id when the caller names a project that doesn't
+    # exist, or names one ambiguously. Declared after the StandardError handler
+    # so it wins the match — rescue_from searches most-recently-registered first
+    # — and the agent gets something actionable rather than "Internal server
+    # error". The message is composed at the raise site, since the two cases
+    # call for different advice.
+    class ProjectResolutionError < StandardError; end
+
+    rescue_from ProjectResolutionError do |exception|
+      render json: {
+        jsonrpc: "2.0",
+        error: {
+          code: -32602,
+          message: exception.message
+        },
+        id: @rpc_id
+      }, status: :bad_request
+    end
+
     # Main entry point
     def handle_mcp_request
       request.body.rewind
@@ -251,6 +270,86 @@ module Mcp
       end
     end
 
+    # Optional per-tool project filter. MCP credentials are instance-wide (see
+    # mcp_auth_outcome — there is no per-project token), so listing tools span
+    # every project by default and label each row with its project name. This
+    # narrows a single call without changing that default.
+    PROJECT_ARG = {
+      type: "string",
+      description: "Restrict results to one project, given as its slug, its display name, or its numeric id. Omit to cover every project on this instance."
+    }.freeze
+
+    # Environment/release filters for the issue tools. Both mean "seen in" — an
+    # issue groups events across environments and releases, so this matches an
+    # issue with at least one event carrying the value, not an issue that
+    # belongs exclusively to it.
+    ENVIRONMENT_ARG = {
+      type: "string",
+      description: "Restrict to issues seen at least once in this environment (e.g. 'production', 'staging'). Grouping spans environments, so an issue can match several."
+    }.freeze
+
+    RELEASE_ARG = {
+      type: "string",
+      description: "Restrict to issues seen at least once in this release version. Grouping spans releases, so an issue can match several."
+    }.freeze
+
+    # Returns nil only when the caller omitted `project` entirely (meaning:
+    # don't filter), otherwise the id. A present-but-blank value is an error,
+    # not "every project" — an agent that built the argument from a lookup that
+    # came back empty should be told so, not handed the whole instance.
+    #
+    # Both slug and name match case-insensitively: an agent passing a
+    # title-cased slug is naming a project that plainly exists, so a BINARY
+    # compare rejecting it is just a spurious failure. Slug wins over name (it's
+    # the stable identifier in the DSN) and both win over id, so a numeric-looking
+    # slug still beats a coincidental id.
+    #
+    # One indexed lookup per tier, tried in priority order — the tiers are only
+    # consulted until one hits, and this runs at most once per tool call.
+    def resolve_project_id(args)
+      return nil unless args.key?("project")
+
+      raw = args["project"].to_s.strip
+      raise_unknown_project(args["project"].inspect) if raw.blank?
+
+      folded = raw.downcase
+      project = Project.find_by("LOWER(slug) = ?", folded)
+      project ||= disambiguate(Project.where("LOWER(name) = ?", folded).to_a, raw)
+      project ||= Project.find_by(id: raw) if raw.match?(/\A\d+\z/)
+      raise_unknown_project(raw) unless project
+      project.id
+    end
+
+    def raise_unknown_project(raw)
+      raise ProjectResolutionError,
+        "Unknown project: #{raw}. Available projects: #{Project.order(:name).pluck(:slug).join(", ")}"
+    end
+
+    # `name` has no uniqueness constraint (only slug does), so a display name can
+    # legitimately match several projects. Picking one arbitrarily would silently
+    # answer about the wrong project, so make the caller name a slug instead.
+    def disambiguate(matches, raw)
+      return matches.first if matches.size <= 1
+
+      raise ProjectResolutionError,
+        "#{raw.inspect} matches #{matches.size} projects by name. Use one of these slugs: " \
+        "#{matches.map(&:slug).sort.join(", ")}"
+    end
+
+    # Applies the shared environment/release filters to an issue scope. Both are
+    # "seen in" matches against issue_facets (maintained at ingest), never a
+    # DISTINCT over events. project_id narrows the index lookup when the caller
+    # named a project; without it the filter spans every project, same as the
+    # rest of the tool.
+    def apply_issue_facet_filters(issues, args, project_id)
+      environment = args["environment"]
+      release = args["release"]
+
+      issues = issues.seen_in_environment(environment, project_id: project_id) if environment.present?
+      issues = issues.seen_in_release(release, project_id: project_id) if release.present?
+      issues
+    end
+
     # Tool definitions
     def tools_list
       [
@@ -272,13 +371,14 @@ module Mcp
                 type: "string",
                 description: "Filter by evaluated state (default: all)",
                 enum: ["ok", "missed", "error", "overrun", "unknown"]
-              }
+              },
+              project: PROJECT_ARG
             }
           }
         },
         {
           name: "list_recent_issues",
-          description: "List the most recent issues, optionally filtered by status",
+          description: "List the most recent issues, optionally filtered by status, environment or release",
           inputSchema: {
             type: "object",
             properties: {
@@ -291,13 +391,16 @@ module Mcp
                 type: "integer",
                 description: "Maximum number of results (default: 20, max: 100)",
                 default: 20
-              }
+              },
+              environment: ENVIRONMENT_ARG,
+              release: RELEASE_ARG,
+              project: PROJECT_ARG
             }
           }
         },
         {
           name: "search_issues",
-          description: "Search for issues by keyword, status, or exception type",
+          description: "Search for issues by keyword, status, exception type, environment or release",
           inputSchema: {
             type: "object",
             properties: {
@@ -318,7 +421,10 @@ module Mcp
                 type: "integer",
                 description: "Maximum results (default: 20, max: 100)",
                 default: 20
-              }
+              },
+              environment: ENVIRONMENT_ARG,
+              release: RELEASE_ARG,
+              project: PROJECT_ARG
             }
           }
         },
@@ -377,7 +483,7 @@ module Mcp
             properties: {
               endpoint: {
                 type: "string",
-                description: "Filter the overall percentile block to one endpoint (e.g., 'AlertsController#index'). The top-endpoints list is always project-wide."
+                description: "Filter the overall percentile block to one endpoint (e.g., 'AlertsController#index'). The top-endpoints list is never narrowed by this — it always covers whatever the project filter allows."
               },
               time_range_hours: {
                 type: "integer",
@@ -388,7 +494,12 @@ module Mcp
                 type: "integer",
                 description: "Maximum number of top endpoints to return (default: 10, max: 50)",
                 default: 10
-              }
+              },
+              environment: {
+                type: "string",
+                description: "Restrict every figure — percentiles, count and the top-endpoints list — to one environment (e.g. 'staging')."
+              },
+              project: PROJECT_ARG
             }
           }
         },
@@ -411,7 +522,8 @@ module Mcp
                 type: "integer",
                 description: "Maximum endpoints to return (default: 20, max: 100)",
                 default: 20
-              }
+              },
+              project: PROJECT_ARG
             }
           }
         },
@@ -442,7 +554,8 @@ module Mcp
               release: {
                 type: "string",
                 description: "Filter by application version/release (optional)"
-              }
+              },
+              project: PROJECT_ARG
             },
             required: ["endpoint"]
           }
@@ -489,7 +602,8 @@ module Mcp
                 description: "Filter by Sentry tags. Keys are AND'd; string equality. " \
                              "Example: {\"user_id\":\"123\",\"environment\":\"production\"}",
                 additionalProperties: {type: "string"}
-              }
+              },
+              project: PROJECT_ARG
             }
           }
         },
@@ -552,7 +666,8 @@ module Mcp
               release: {
                 type: "string",
                 description: "Filter by application version/release (optional)"
-              }
+              },
+              project: PROJECT_ARG
             },
             required: ["endpoint"]
           }
@@ -584,7 +699,8 @@ module Mcp
               release: {
                 type: "string",
                 description: "Filter by application version/release (optional)"
-              }
+              },
+              project: PROJECT_ARG
             },
             required: ["endpoint"]
           }
@@ -628,7 +744,8 @@ module Mcp
               environment: {
                 type: "string",
                 description: "Filter by environment (optional)"
-              }
+              },
+              project: PROJECT_ARG
             },
             required: ["endpoint"]
           }
@@ -677,13 +794,13 @@ module Mcp
         },
         {
           name: "search_logs",
-          description: "Search structured logs (from Sentry Logs or OTLP) by level, logger, trace, environment, or message text",
+          description: "Search structured logs (from Sentry Logs or OTLP) by level, logger, trace, environment, or full-text query over the message and attributes. Covers every project on this instance unless you pass `project`; results are prefixed with the project name.",
           inputSchema: {
             type: "object",
             properties: {
               query: {
                 type: "string",
-                description: "Substring to match against the log message body"
+                description: "Full-text query over the log message body and its attributes. Whole-word tokens, not substrings: 'timeout' matches 'timeout' but not 'timeouts'. Multiple words are ANDed. Use key:value (e.g. method:POST, dbname:booko_production) to match an attribute. Note that fractional values such as durations are not indexed and cannot be searched."
               },
               level: {
                 type: "string",
@@ -711,7 +828,8 @@ module Mcp
                 type: "integer",
                 description: "Maximum results (default: 50, max: 200)",
                 default: 50
-              }
+              },
+              project: PROJECT_ARG
             }
           }
         },
@@ -919,7 +1037,10 @@ module Mcp
     end
 
     def list_monitors(args)
+      project_id = resolve_project_id(args)
+
       monitors = CronMonitor.includes(:project).by_slug
+      monitors = monitors.where(project_id: project_id) if project_id
       monitors = monitors.where(state: args["state"]) if args["state"].present?
       monitors = monitors.to_a
 
@@ -954,8 +1075,12 @@ module Mcp
       status = args["status"] || "open"
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
+      project_id = resolve_project_id(args)
+
       issues = Issue.includes(:project).recent
+      issues = issues.where(project_id: project_id) if project_id
       issues = issues.where(status: status) unless status == "all"
+      issues = apply_issue_facet_filters(issues, args, project_id)
       issues = issues.limit(limit)
 
       text = format_issues_list(issues, status)
@@ -969,10 +1094,14 @@ module Mcp
       exception_type = args["exception_type"]
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
+      project_id = resolve_project_id(args)
+
       issues = Issue.includes(:project).recent
-      issues = issues.where("title LIKE ? OR exception_type LIKE ?", "%#{query}%", "%#{query}%") if query.present?
+      issues = issues.where(project_id: project_id) if project_id
+      issues = issues.matching_text(query) if query.present?
       issues = issues.where(status: status) if status.present?
       issues = issues.where(exception_type: exception_type) if exception_type.present?
+      issues = apply_issue_facet_filters(issues, args, project_id)
       issues = issues.limit(limit)
 
       text = format_issues_list(issues)
@@ -1011,7 +1140,10 @@ module Mcp
       time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
       limit = (args["limit"]&.to_i || 50).clamp(1, 200)
 
+      project_id = resolve_project_id(args)
+
       logs = Log.where(timestamp: time_range_hours.hours.ago..Time.current).recent
+      logs = logs.where(project_id: project_id) if project_id
       logs = logs.search_text(args["query"]) if args["query"].present?
       logs = logs.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
       logs = logs.by_logger(args["logger"]) if args["logger"].present?
@@ -1041,13 +1173,20 @@ module Mcp
 
     def get_transaction_stats(args)
       endpoint = args["endpoint"]
+      environment = args["environment"].presence
       time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
       limit = (args["limit"]&.to_i || 10).clamp(1, 50)
 
       time_range = time_range_hours.hours.ago..Time.current
+      project_id = resolve_project_id(args)
 
+      # total_count comes from the same hourly rollups as the percentiles, not
+      # from a COUNT over raw transactions. Raw rows and rollups have separate
+      # retention windows (transactions_data_retention_days vs
+      # histograms_retention_days), so counting raw rows reported a count and a
+      # p95 describing different populations once the shorter window elapsed.
       if endpoint.present?
-        ep_stats = Transaction.percentiles_for_endpoint(endpoint, time_range)
+        ep_stats = Transaction.percentiles_for_endpoint(endpoint, time_range, project_id: project_id, environment: environment)
         percentiles = {
           avg: ep_stats["avg_duration"]&.to_f || 0,
           p50: ep_stats["p50_duration"]&.to_f || 0,
@@ -1056,13 +1195,13 @@ module Mcp
           min: ep_stats["min_duration"]&.to_f || 0,
           max: ep_stats["max_duration"]&.to_f || 0
         }
-        total_count = Transaction.where(transaction_name: endpoint, timestamp: time_range).count
+        total_count = ep_stats["count"].to_i
       else
-        percentiles = Transaction.percentiles(time_range)
-        total_count = Transaction.where(timestamp: time_range).count
+        percentiles = Transaction.percentiles(time_range, project_id: project_id, environment: environment)
+        total_count = percentiles[:count].to_i
       end
 
-      top_endpoints = Transaction.stats_by_endpoint_with_impact(time_range, limit: limit)
+      top_endpoints = Transaction.stats_by_endpoint_with_impact(time_range, project_id: project_id, environment: environment, limit: limit)
 
       text = format_transaction_stats(percentiles, top_endpoints, total_count, time_range_hours, endpoint)
 
@@ -1089,6 +1228,7 @@ module Mcp
       rows = Transaction.slow(
         threshold_ms: min_duration_ms,
         time_range: time_range_hours.hours.ago..Time.current,
+        project_id: resolve_project_id(args),
         transaction_name: endpoint,
         http_status: http_status,
         http_method: http_method,
@@ -1150,9 +1290,10 @@ module Mcp
       environment = args["environment"]
       release = args["release"]
       time_range = hours.hours.ago..Time.current
+      project_id = resolve_project_id(args)
 
       stats = Transaction.percentiles_for_endpoint(
-        endpoint, time_range, environment: environment, release: release
+        endpoint, time_range, project_id: project_id, environment: environment, release: release
       )
       total_count = stats["count"].to_i
       return render_text("No transactions found for endpoint '#{endpoint}' with the specified filters.") if total_count.zero?
@@ -1174,8 +1315,8 @@ module Mcp
           {avg: stats["avg_view_time"].to_f, p95: stats["p95_view_time"]&.to_f || 0}
         end
 
-      slowest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :desc)
-      fastest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :asc)
+      slowest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :desc, project_id)
+      fastest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :asc, project_id)
 
       text = format_endpoint_summary(
         endpoint, total_count, hours, environment, release,
@@ -1193,7 +1334,7 @@ module Mcp
       time_range = time_range_hours.hours.ago..Time.current
 
       rows = Transaction.endpoints_by_n_plus_one(
-        time_range, environment: environment, limit: limit
+        time_range, project_id: resolve_project_id(args), environment: environment, limit: limit
       )
 
       text = format_n_plus_one_endpoints(rows, time_range_hours, environment)
@@ -1210,7 +1351,7 @@ module Mcp
       time_range = hours.hours.ago..Time.current
 
       series = Transaction.time_series_for_endpoint(
-        endpoint, time_range,
+        endpoint, time_range, project_id: resolve_project_id(args),
         bucket_count: buckets, environment: environment, release: release
       )
 
@@ -1219,8 +1360,9 @@ module Mcp
       render_text(text)
     end
 
-    def endpoint_extreme_row(endpoint, time_range, environment, release, direction)
+    def endpoint_extreme_row(endpoint, time_range, environment, release, direction, project_id = nil)
       scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
+      scope = scope.where(project_id: project_id) if project_id
       scope = scope.where(environment: environment) if environment.present?
       scope = scope.where(release: release) if release.present?
       row = scope.order(duration: (direction == :desc) ? :desc : :asc).limit(1).first
@@ -1235,12 +1377,15 @@ module Mcp
       environment = args["environment"]
       release = args["release"]
 
+      project_id = resolve_project_id(args)
+
       transactions = Transaction.includes(:project)
         .where(transaction_name: endpoint)
         .where("timestamp > ?", hours.hours.ago)
         .order(timestamp: :desc)
         .limit(limit)
 
+      transactions = transactions.where(project_id: project_id) if project_id
       transactions = transactions.where(environment: environment) if environment.present?
       transactions = transactions.where(release: release) if release.present?
 
@@ -1258,12 +1403,13 @@ module Mcp
       hours_before = (args["hours_before"]&.to_i || 24).clamp(1, 168)
       hours_after = (args["hours_after"]&.to_i || 24).clamp(1, 168)
       environment = args["environment"]
+      project_id = resolve_project_id(args)
 
       # Validate input - either release-based or timestamp-based comparison
       if before_release.present? && after_release.present?
         # Version-based comparison
-        before_transactions = get_transactions_by_filters(endpoint, hours_before, environment, before_release)
-        after_transactions = get_transactions_by_filters(endpoint, hours_after, environment, after_release)
+        before_transactions = get_transactions_by_filters(endpoint, hours_before, environment, before_release, project_id)
+        after_transactions = get_transactions_by_filters(endpoint, hours_after, environment, after_release, project_id)
         comparison_type = "version"
         before_label = "Version #{before_release}"
         after_label = "Version #{after_release}"
@@ -1272,8 +1418,8 @@ module Mcp
         before_time = Time.parse(before_timestamp)
         after_time = Time.parse(after_timestamp)
 
-        before_transactions = get_transactions_by_time_range(endpoint, before_time - hours_before.hours, before_time, environment)
-        after_transactions = get_transactions_by_time_range(endpoint, after_time, after_time + hours_after.hours, environment)
+        before_transactions = get_transactions_by_time_range(endpoint, before_time - hours_before.hours, before_time, environment, project_id)
+        after_transactions = get_transactions_by_time_range(endpoint, after_time, after_time + hours_after.hours, environment, project_id)
         comparison_type = "timestamp"
         before_label = "Before #{before_timestamp}"
         after_label = "After #{after_timestamp}"
@@ -1324,21 +1470,23 @@ module Mcp
     end
 
     # Returns a sorted array of durations from the transactions DB, ready for percentile calc.
-    def get_transactions_by_filters(endpoint, hours, environment, release)
+    def get_transactions_by_filters(endpoint, hours, environment, release, project_id = nil)
       durations_for(
         endpoint,
         hours.hours.ago..Time.current,
         environment: environment,
-        release: release
+        release: release,
+        project_id: project_id
       )
     end
 
-    def get_transactions_by_time_range(endpoint, start_time, end_time, environment)
-      durations_for(endpoint, start_time..end_time, environment: environment)
+    def get_transactions_by_time_range(endpoint, start_time, end_time, environment, project_id = nil)
+      durations_for(endpoint, start_time..end_time, environment: environment, project_id: project_id)
     end
 
-    def durations_for(endpoint, time_range, environment: nil, release: nil)
+    def durations_for(endpoint, time_range, environment: nil, release: nil, project_id: nil)
       scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
+      scope = scope.where(project_id: project_id) if project_id
       scope = scope.where(environment: environment) if environment.present?
       scope = scope.where(release: release) if release.present?
       scope.pluck(:duration).sort

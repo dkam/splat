@@ -195,6 +195,147 @@ module Mcp
       assert_match "mcp searchable log", tool_text
     end
 
+    test "search_logs without a project spans every project" do
+      seed_log_in(projects(:one), "alpha inbound line")
+      seed_log_in(projects(:two), "beta inbound line")
+
+      call_tool("search_logs", {"query" => "inbound"})
+      assert_response :success
+      assert_match "alpha inbound line", tool_text
+      assert_match "beta inbound line", tool_text
+    end
+
+    test "search_logs narrows to one project by slug, name, or id" do
+      seed_log_in(projects(:one), "alpha inbound line")
+      seed_log_in(projects(:two), "beta inbound line")
+
+      [projects(:two).slug, projects(:two).name, projects(:two).id.to_s].each do |ref|
+        call_tool("search_logs", {"query" => "inbound", "project" => ref})
+        assert_response :success
+        assert_match "beta inbound line", tool_text, "expected project match for #{ref.inspect}"
+        assert_no_match(/alpha inbound line/, tool_text, "leaked other project for #{ref.inspect}")
+      end
+    end
+
+    test "an unknown project is a bad request naming the real projects" do
+      call_tool("search_logs", {"query" => "inbound", "project" => "no-such-project"})
+      assert_response :bad_request
+
+      message = JSON.parse(response.body).dig("error", "message").to_s
+      assert_match "Unknown project: no-such-project", message
+      assert_match projects(:one).slug, message
+    end
+
+    test "list_recent_issues honours the project filter" do
+      seed_issue_in(projects(:one), "AlphaError")
+      seed_issue_in(projects(:two), "BetaError")
+
+      call_tool("list_recent_issues", {"status" => "all", "project" => projects(:one).slug})
+      assert_response :success
+      assert_match "AlphaError", tool_text
+      assert_no_match(/BetaError/, tool_text)
+    end
+
+    test "a project slug matches regardless of case" do
+      seed_log_in(projects(:two), "beta inbound line")
+
+      call_tool("search_logs", {"query" => "inbound", "project" => projects(:two).slug.upcase})
+      assert_response :success
+      assert_match "beta inbound line", tool_text
+    end
+
+    test "a blank project is an error, not every project" do
+      seed_log_in(projects(:one), "alpha inbound line")
+
+      call_tool("search_logs", {"query" => "inbound", "project" => "   "})
+      assert_response :bad_request
+      assert_no_match(/alpha inbound line/, response.body)
+    end
+
+    test "an ambiguous project name asks for a slug instead of guessing" do
+      duplicate = Project.create!(name: projects(:one).name, slug: "one-duplicate",
+        public_key: "dup-key")
+
+      call_tool("search_logs", {"query" => "inbound", "project" => projects(:one).name})
+      assert_response :bad_request
+
+      message = JSON.parse(response.body).dig("error", "message").to_s
+      assert_match "matches 2 projects by name", message
+      assert_match duplicate.slug, message
+      assert_match projects(:one).slug, message
+    end
+
+    test "a slug still wins over another project's identical name" do
+      # Project A's slug == Project B's name: naming it must not silently
+      # resolve to whichever row the DB returned first.
+      named_like_a_slug = Project.create!(name: projects(:two).slug, slug: "shadow-check",
+        public_key: "shadow-key")
+      seed_log_in(projects(:two), "beta inbound line")
+      seed_log_in(named_like_a_slug, "shadow inbound line")
+
+      call_tool("search_logs", {"query" => "inbound", "project" => projects(:two).slug})
+      assert_response :success
+      assert_match "beta inbound line", tool_text
+      assert_no_match(/shadow inbound line/, tool_text)
+    end
+
+    test "list_recent_issues filters by environment as seen-in, not belongs-to" do
+      both = seed_issue_in(projects(:one), "SpansEnvsError")
+      staging_only = seed_issue_in(projects(:one), "StagingOnlyError")
+      IssueFacet.reset_throttle!
+      IssueFacet.harvest!(project_id: projects(:one).id, issue_id: both.id, values: {environment: "production"})
+      IssueFacet.harvest!(project_id: projects(:one).id, issue_id: both.id, values: {environment: "staging"})
+      IssueFacet.harvest!(project_id: projects(:one).id, issue_id: staging_only.id, values: {environment: "staging"})
+
+      call_tool("list_recent_issues", {"status" => "all", "environment" => "production"})
+      assert_response :success
+      assert_match "SpansEnvsError", tool_text
+      assert_no_match(/StagingOnlyError/, tool_text)
+
+      # The cross-environment issue also shows under staging — that's the point.
+      call_tool("list_recent_issues", {"status" => "all", "environment" => "staging"})
+      assert_response :success
+      assert_match "SpansEnvsError", tool_text
+      assert_match "StagingOnlyError", tool_text
+    end
+
+    test "search_issues combines the environment filter with the project filter" do
+      mine = seed_issue_in(projects(:one), "SharedNameError")
+      theirs = seed_issue_in(projects(:two), "SharedNameError")
+      IssueFacet.reset_throttle!
+      IssueFacet.harvest!(project_id: projects(:one).id, issue_id: mine.id, values: {environment: "production"})
+      IssueFacet.harvest!(project_id: projects(:two).id, issue_id: theirs.id, values: {environment: "production"})
+
+      call_tool("search_issues", {"query" => "SharedName", "environment" => "production",
+                                  "project" => projects(:two).slug})
+      assert_response :success
+      assert_match "##{theirs.id}", tool_text
+      assert_no_match(/##{mine.id}\b/, tool_text)
+    end
+
+    test "search_issues filters by release" do
+      old = seed_issue_in(projects(:one), "OldReleaseError")
+      fresh = seed_issue_in(projects(:one), "NewReleaseError")
+      IssueFacet.reset_throttle!
+      IssueFacet.harvest!(project_id: projects(:one).id, issue_id: old.id, values: {release: "v1.0.0"})
+      IssueFacet.harvest!(project_id: projects(:one).id, issue_id: fresh.id, values: {release: "v2.0.0"})
+
+      call_tool("search_issues", {"release" => "v2.0.0"})
+      assert_response :success
+      assert_match "NewReleaseError", tool_text
+      assert_no_match(/OldReleaseError/, tool_text)
+    end
+
+    test "search_issues treats LIKE wildcards in the query as literals" do
+      seed_issue_in(projects(:one), "Net_HTTPError")
+      seed_issue_in(projects(:one), "NetXHTTPError")
+
+      call_tool("search_issues", {"query" => "Net_HTTP"})
+      assert_response :success
+      assert_match "Net_HTTPError", tool_text
+      assert_no_match(/NetXHTTPError/, tool_text)
+    end
+
     test "get_log returns a record by log_id" do
       project = projects(:one)
       id = SecureRandom.uuid_v7
@@ -323,6 +464,17 @@ module Mcp
 
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+    end
+
+    def seed_log_in(project, body)
+      Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+        level: :error, source: "sentry", body: body, payload: {})
+    end
+
+    def seed_issue_in(project, exception_type)
+      Issue.create!(project: project, fingerprint: "#{project.slug}::#{exception_type}",
+        title: "#{exception_type}: something broke", exception_type: exception_type,
+        first_seen: Time.current, last_seen: Time.current)
     end
 
     def call_tool(name, arguments)
