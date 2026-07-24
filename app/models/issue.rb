@@ -114,6 +114,22 @@ class Issue < IssuesEventsRecord
     )
   end
 
+  # Denormalise an event's environment/release onto this issue so the "seen in"
+  # filters don't have to DISTINCT over events. Throttled per (issue, name,
+  # value). Called from Event.create_from_sentry_payload! after the event is
+  # persisted, alongside maybe_alert_burst!.
+  def harvest_facets!(environment:, release:, seen_at:)
+    IssueFacet.harvest!(
+      project_id: project_id,
+      issue_id: id,
+      values: {environment: environment, release: release},
+      seen_at: seen_at
+    )
+  rescue => e
+    # Best-effort: a filter-index miss must never fail (and retry) ingest.
+    Rails.logger.warn("Issue#harvest_facets! failed for issue=#{id}: #{e.class} #{e.message}")
+  end
+
   # Fire a burst alert (email + ntfy) when an open issue's event rate over the
   # last hour crosses the configured threshold. Throttled per issue so a flood
   # of events doesn't recompute the rate on every ingest. Called from

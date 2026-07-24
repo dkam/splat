@@ -304,8 +304,14 @@ module Mcp
     # the stable identifier in the DSN) and both win over id, so a numeric-looking
     # slug still beats a coincidental id.
     #
-    # One indexed lookup per tier, tried in priority order — the tiers are only
-    # consulted until one hits, and this runs at most once per tool call.
+    # One lookup per tier, tried in priority order and only until one hits. Only
+    # the slug and id tiers are indexed (LOWER(slug) can't use index_projects_on_slug,
+    # and `name` has no index at all), but a single-tenant instance has a handful
+    # of projects and this runs at most once per tool call.
+    #
+    # LOWER() rather than a plain compare because generate_slug only fires when
+    # slug is blank — an explicitly-supplied slug is stored verbatim, so a
+    # mixed-case one is possible and shouldn't be unfindable.
     def resolve_project_id(args)
       return nil unless args.key?("project")
 

@@ -37,9 +37,12 @@ class CreateIssueFacets < ActiveRecord::Migration[8.1]
     add_index :issue_facets, [:name, :value, :project_id, :issue_id],
       name: "index_issue_facets_on_value_across_projects"
 
-    # The daily retention sweep deletes by last_seen_at, which leads none of the
-    # indexes above — without this it's a full scan of a table that grows with
-    # issues x values, every day, forever.
-    add_index :issue_facets, :last_seen_at
+    # No index on last_seen_at: the daily retention delete goes through
+    # batched_delete_all -> in_batches, which paginates by primary key, so the
+    # sweep walks the table in rowid order and filters last_seen_at as a residual
+    # predicate whatever indexes exist. Every retire_* method in RetentionJob
+    # accepts that same rowid scan on far larger tables (logs, events), and no
+    # read path filters issue_facets by last_seen_at, so an index here would only
+    # add write-amplification to every harvest upsert for no reader.
   end
 end

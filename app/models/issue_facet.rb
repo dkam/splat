@@ -16,7 +16,9 @@ class IssueFacet < IssuesEventsRecord
   belongs_to :issue
 
   # Names we harvest. Kept explicit so a typo'd key is a no-op rather than a new
-  # facet name quietly accumulating rows.
+  # facet name quietly accumulating rows. Note these double as literal Event
+  # column names in lib/tasks/backfill_issue_facets.rake — adding a facet that
+  # isn't a column there needs that task taught how to source it.
   NAMES = %w[environment release].freeze
 
   class << self
@@ -51,12 +53,17 @@ class IssueFacet < IssuesEventsRecord
     # distinct pair is throttled by REFRESH_INTERVAL, and survivors are upserted
     # in one statement (ON CONFLICT bumps last_seen_at).
     def harvest!(project_id:, issue_id:, values:, seen_at: Time.current)
+      # The throttle runs on wall time, never seen_at: seen_at is the event's
+      # timestamp (client-supplied, unvalidated), and a future-dated one would
+      # otherwise poison the prune clock and disable eviction for the life of
+      # the process. seen_at is only the row's retention value, below.
+      now = Time.current
       rows = []
       values.each do |name, value|
         name = name.to_s
         next unless NAMES.include?(name)
         next if value.blank?
-        next unless due?("#{issue_id}\t#{name}\t#{value}", seen_at)
+        next unless due?("#{issue_id}\t#{name}\t#{value}", now)
 
         rows << {
           project_id: project_id, issue_id: issue_id, name: name, value: value.to_s,

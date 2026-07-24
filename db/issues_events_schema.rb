@@ -79,7 +79,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_000001) do
     t.datetime "updated_at", null: false
     t.string "value", null: false
     t.index ["issue_id", "name", "value"], name: "index_issue_facets_on_issue_and_value", unique: true
-    t.index ["last_seen_at"], name: "index_issue_facets_on_last_seen_at"
     t.index ["name", "value", "project_id", "issue_id"], name: "index_issue_facets_on_value_across_projects"
     t.index ["project_id", "name", "value", "issue_id"], name: "index_issue_facets_on_scope_and_value"
   end

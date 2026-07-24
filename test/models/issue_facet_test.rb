@@ -62,20 +62,16 @@ class IssueFacetTest < ActiveSupport::TestCase
   end
 
   test "the throttle memo is pruned rather than growing for the life of the process" do
-    i = issue("a")
-    start = Time.current
-
     # Every deploy is a new release, so a long-lived recurring issue mints a new
     # throttle key indefinitely. Once a key is older than REFRESH_INTERVAL it can
-    # never suppress a write again, so retaining it is pure leak.
-    30.times do |n|
-      IssueFacet.harvest!(project_id: @project.id, issue_id: i.id,
-        values: {release: "v#{n}"}, seen_at: start + (n * 2).minutes)
-    end
+    # never suppress a write again, so retaining it is pure leak. Driven through
+    # due? directly with an advancing wall clock — harvest! reads Time.current,
+    # which doesn't move within a test.
+    start = Time.current
+    40.times { |n| IssueFacet.send(:due?, "1\trelease\tv#{n}", start + (n * 2).minutes) }
 
     memo = IssueFacet.instance_variable_get(:@recent)
-    assert_equal 30, IssueFacet.where(issue_id: i.id, name: "release").count
-    assert_operator memo.size, :<, 30
+    assert_operator memo.size, :<, 40
   end
 
   test "issue_ids_for scopes by project when given one, spans projects otherwise" do

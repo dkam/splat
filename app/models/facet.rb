@@ -30,13 +30,17 @@ class Facet < ApplicationRecord
     # each distinct value is throttled by REFRESH_INTERVAL, and the survivors are
     # upserted in one statement (ON CONFLICT bumps last_seen_at).
     def harvest!(project_id:, stream:, values:, seen_at: Time.current)
+      # Throttle on wall time, not seen_at — see the note in IssueFacet.harvest!.
+      # Facet's callers always pass wall time anyway, but this keeps the shared
+      # throttle from depending on that.
+      now = Time.current
       stream = stream.to_s
       rows = []
       values.each do |name, vals|
         name = name.to_s
         Array(vals).uniq.each do |value|
           next if value.blank?
-          next unless due?("#{project_id}\t#{stream}\t#{name}\t#{value}", seen_at)
+          next unless due?("#{project_id}\t#{stream}\t#{name}\t#{value}", now)
 
           rows << {
             project_id: project_id, stream: stream, name: name, value: value.to_s,
