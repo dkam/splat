@@ -147,7 +147,7 @@ module Mcp
         assert_operator 1000, :<=, cap_hours, "fixture retention should exceed the old 168h cap"
         window = captured[:kwargs][:time_range]
         assert_in_delta 1000 * 3600, window.end - window.begin, 60
-        refute_match(/window was reduced/, tool_text)
+        refute_match(/duration was reduced/, tool_text)
       end
     end
 
@@ -158,7 +158,7 @@ module Mcp
         assert_response :success
         window = captured[:kwargs][:time_range]
         assert_in_delta cap_hours * 3600, window.end - window.begin, 60
-        assert_match(/window was reduced to #{cap_hours}h/, tool_text)
+        assert_match(/duration was reduced to #{cap_hours}h/, tool_text)
       end
     end
 
@@ -166,7 +166,7 @@ module Mcp
       cap_hours = Setting.instance.logs_data_retention_days * 24
       call_tool("search_logs", {"time_range_hours" => cap_hours + 100})
       assert_response :success
-      assert_match(/window was reduced to #{cap_hours}h/, tool_text)
+      assert_match(/duration was reduced to #{cap_hours}h/, tool_text)
     end
 
     test "get_transaction_stats reaches back to the long rollup retention" do
@@ -174,7 +174,7 @@ module Mcp
       # retention is legitimate here and must not be flagged as truncated.
       call_tool("get_transaction_stats", {"time_range_hours" => 2000})
       assert_response :success
-      refute_match(/window was reduced/, tool_text)
+      refute_match(/duration was reduced/, tool_text)
     end
 
     test "search_slow_transactions passes release and a duration band through" do
@@ -195,6 +195,94 @@ module Mcp
         assert_response :success
         assert_nil captured[:kwargs][:max_duration_ms], "0 would exclude every row"
       end
+    end
+
+    # ---- Absolute window bounds. ----
+
+    test "end_time anchors the window to a past moment" do
+      anchor = 10.days.ago.change(usec: 0)
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {"end_time" => anchor.utc.iso8601, "time_range_hours" => 12})
+        assert_response :success
+        window = captured[:kwargs][:time_range]
+        assert_in_delta anchor.to_i, window.end.to_i, 1
+        assert_in_delta (anchor - 12.hours).to_i, window.begin.to_i, 1
+      end
+    end
+
+    test "start_time and end_time give a fully explicit window" do
+      from = 10.days.ago.change(usec: 0)
+      to = 9.days.ago.change(usec: 0)
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {
+          "start_time" => from.utc.iso8601, "end_time" => to.utc.iso8601, "time_range_hours" => 999
+        })
+        assert_response :success
+        window = captured[:kwargs][:time_range]
+        assert_in_delta from.to_i, window.begin.to_i, 1
+        assert_in_delta to.to_i, window.end.to_i, 1, "hours must be ignored when both bounds are given"
+      end
+    end
+
+    test "omitting both bounds behaves exactly as before" do
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {"time_range_hours" => 6})
+        assert_response :success
+        window = captured[:kwargs][:time_range]
+        assert_in_delta Time.current.to_i, window.end.to_i, 5
+        assert_in_delta 6 * 3600, window.end - window.begin, 5
+      end
+    end
+
+    test "a window entirely before retention is named as expired, not returned empty" do
+      cap_days = Setting.instance.transactions_data_retention_days
+      gone = (cap_days + 30).days.ago
+      call_tool("search_slow_transactions", {"end_time" => gone.utc.iso8601, "time_range_hours" => 6})
+
+      error = JSON.parse(response.body).dig("error", "message").to_s
+      assert_match(/retained for #{cap_days} days/, error)
+      assert_match(/Nothing from it remains/, error)
+    end
+
+    test "a window straddling the retention cutoff is pulled forward with a note" do
+      cap_days = Setting.instance.transactions_data_retention_days
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {
+          "start_time" => (cap_days + 10).days.ago.utc.iso8601, "end_time" => Time.current.utc.iso8601
+        })
+        assert_response :success
+        window = captured[:kwargs][:time_range]
+        assert_in_delta cap_days.days.ago.to_i, window.begin.to_i, 60
+        assert_match(/before the #{cap_days}d retention limit/, tool_text)
+      end
+    end
+
+    test "an inverted window is rejected" do
+      call_tool("search_slow_transactions", {
+        "start_time" => 1.day.ago.utc.iso8601, "end_time" => 2.days.ago.utc.iso8601
+      })
+      assert_match(/end_time must be after start_time/,
+        JSON.parse(response.body).dig("error", "message").to_s)
+    end
+
+    test "an unparseable timestamp says which argument and what format" do
+      call_tool("search_slow_transactions", {"end_time" => "last tuesday"})
+      error = JSON.parse(response.body).dig("error", "message").to_s
+      assert_match(/Invalid end_time/, error)
+      assert_match(/ISO 8601/, error)
+    end
+
+    test "output labels an absolute window with its bounds, not 'last Nh'" do
+      project = projects(:one)
+      at = 5.days.ago
+      Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: at,
+        level: :error, source: "sentry", body: "historical line", payload: {})
+
+      call_tool("search_logs", {"end_time" => (at + 1.hour).utc.iso8601, "time_range_hours" => 6})
+      assert_response :success
+      assert_match "historical line", tool_text
+      refute_match(/last 6h/, tool_text, "an absolute window mislabelled as recent is worse than useless")
+      assert_match(at.utc.strftime("%Y-%m-%d"), tool_text)
     end
 
     test "search_slow_transactions rejects invalid tag key without hitting Transaction.slow" do
