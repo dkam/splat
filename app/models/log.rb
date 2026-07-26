@@ -24,6 +24,7 @@ class Log < LogsRecord
   scope :by_level, ->(level) { where(level: level) }
   scope :by_logger, ->(name) { where(logger_name: name) }
   scope :by_environment, ->(env) { where(environment: env) }
+  scope :by_release, ->(release) { where(release: release) }
   scope :by_source, ->(source) { where(source: source) }
   scope :by_service, ->(service) { where(service: service) }
   # duration_ms is populated from a source-provided attribute (e.g. Postgres

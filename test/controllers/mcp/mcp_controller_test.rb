@@ -235,6 +235,19 @@ module Mcp
       assert_match "mcp searchable log", tool_text
     end
 
+    test "search_logs scopes to a single release" do
+      project = projects(:one)
+      %w[1.11.1 1.12.0].each do |release|
+        Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+          level: :error, source: "sentry", body: "boom from #{release}", release: release, payload: {})
+      end
+
+      call_tool("search_logs", {"release" => "1.12.0"})
+      assert_response :success
+      assert_match "boom from 1.12.0", tool_text
+      refute_match(/boom from 1\.11\.1/, tool_text)
+    end
+
     test "search_logs without a project spans every project" do
       seed_log_in(projects(:one), "alpha inbound line")
       seed_log_in(projects(:two), "beta inbound line")

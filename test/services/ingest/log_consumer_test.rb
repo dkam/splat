@@ -46,12 +46,12 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
     end
   end
 
-  test "harvest_facets records distinct environment/source/service from the batch" do
+  test "harvest_facets records distinct environment/source/service/release from the batch" do
     Facet.where(project_id: @project.id).delete_all
     Facet.reset_throttle!
     rows = [
-      {environment: "production", source: "sentry", service: "booko"},
-      {environment: "staging", source: "otlp", service: "booko"}
+      {environment: "production", source: "sentry", service: "booko", release: "1.12.0"},
+      {environment: "staging", source: "otlp", service: "booko", release: "1.11.1"}
     ]
 
     @consumer.send(:harvest_facets, @project, rows)
@@ -59,5 +59,18 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
     assert_equal %w[production staging], Facet.values_for(@project.id, :log, :environment)
     assert_equal %w[otlp sentry], Facet.values_for(@project.id, :log, :source)
     assert_equal %w[booko], Facet.values_for(@project.id, :log, :service)
+    assert_equal %w[1.11.1 1.12.0], Facet.values_for(@project.id, :log, :release)
+  end
+
+  test "harvest_facets skips a blank release without dropping the other facets" do
+    # Sentry SDKs only send release when the app sets one, so a nil here is
+    # normal traffic rather than a broken payload.
+    Facet.where(project_id: @project.id).delete_all
+    Facet.reset_throttle!
+
+    @consumer.send(:harvest_facets, @project, [{environment: "production", source: "sentry", service: "booko", release: nil}])
+
+    assert_empty Facet.values_for(@project.id, :log, :release)
+    assert_equal %w[production], Facet.values_for(@project.id, :log, :environment)
   end
 end

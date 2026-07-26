@@ -33,7 +33,7 @@ namespace :splat do
       rows.size
     end
 
-    %w[environment source service].each do |name|
+    %w[environment source service release].each do |name|
       count = seed.call("log", name, Log.distinct.pluck(:project_id, name.to_sym))
       puts "  logs.#{name}: #{count} values"
     end

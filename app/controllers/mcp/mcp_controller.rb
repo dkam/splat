@@ -872,6 +872,10 @@ module Mcp
                 type: "string",
                 description: "Filter by environment (e.g. production)"
               },
+              release: {
+                type: "string",
+                description: "Filter to one release (e.g. '1.12.0'). Indexed, unlike a tag filter — use it to scope logs to a single deploy."
+              },
               time_range_hours: {
                 type: "integer",
                 description: hours_description(:logs, "Look back this many hours"),
@@ -1202,6 +1206,7 @@ module Mcp
       logs = logs.by_logger(args["logger"]) if args["logger"].present?
       logs = logs.for_trace(args["trace_id"]).reorder(timestamp: :desc) if args["trace_id"].present?
       logs = logs.by_environment(args["environment"]) if args["environment"].present?
+      logs = logs.by_release(args["release"]) if args["release"].present?
       logs = logs.limit(limit)
 
       render_text("#{window_note}#{format_logs_list(logs.to_a, time_range_hours)}")

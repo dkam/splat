@@ -48,7 +48,8 @@ module Ingest
       Facet.harvest!(project_id: project.id, stream: :log, values: {
         environment: rows.map { |r| r[:environment] },
         source: rows.map { |r| r[:source] },
-        service: rows.map { |r| r[:service] }
+        service: rows.map { |r| r[:service] },
+        release: rows.map { |r| r[:release] }
       })
     rescue => e
       log_exception("[#{self.class.name}] facet harvest failed", e)

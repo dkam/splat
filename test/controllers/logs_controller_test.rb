@@ -28,6 +28,29 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     refute_match "noisy debug line", response.body
   end
 
+  test "index filters by release" do
+    Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+      level: :error, source: "sentry", body: "line from the old deploy", release: "1.11.1", payload: {})
+    @log.update!(release: "1.12.0")
+
+    get project_logs_url(@project.slug, release: "1.12.0")
+    assert_response :success
+    assert_match "controller test log", response.body
+    refute_match "line from the old deploy", response.body
+  end
+
+  test "index offers a release dropdown once more than one release is known" do
+    Facet.where(project_id: @project.id, stream: "log", name: "release").delete_all
+    Facet.reset_throttle!
+    Facet.harvest!(project_id: @project.id, stream: :log, values: {release: %w[1.11.1 1.12.0]})
+
+    get project_logs_url(@project.slug)
+    assert_response :success
+    # Newest deploy first — the dropdown is ordered by the controller, not by
+    # the facet table's lexical sort.
+    assert_match(/1\.12\.0.*1\.11\.1/m, response.body)
+  end
+
   test "index filters by trace_id" do
     get project_logs_url(@project.slug, trace_id: "ctrl-trace")
     assert_response :success

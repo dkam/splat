@@ -13,6 +13,7 @@ class LogsController < ApplicationController
     @level = params[:level].presence
     @trace_id = params[:trace_id].presence
     @environment = params[:environment].presence
+    @release = params[:release].presence
     @service = params[:service].presence
     @source = params[:source].presence
     @query = params[:q].presence
@@ -20,6 +21,7 @@ class LogsController < ApplicationController
     logs = logs.by_level(@level) if @level && Log.levels.key?(@level)
     logs = logs.for_trace(@trace_id).reorder(timestamp: :desc) if @trace_id
     logs = logs.by_environment(@environment) if @environment
+    logs = logs.by_release(@release) if @release
     logs = logs.by_service(@service) if @service
     logs = logs.by_source(@source) if @source
     logs = logs.search_text(@query) if @query
@@ -34,6 +36,10 @@ class LogsController < ApplicationController
     @environments = Facet.values_for(@project.id, :log, :environment)
     @sources = Facet.values_for(@project.id, :log, :source)
     @services = Facet.values_for(@project.id, :log, :service)
+    # Releases sort lexically like every other facet, which puts "1.10.0" before
+    # "1.9.0". Newest-first is what you want in a deploy dropdown, and the list
+    # is small enough to reverse here rather than teach Facet an ordering.
+    @releases = Facet.values_for(@project.id, :log, :release).reverse
   end
 
   def show
