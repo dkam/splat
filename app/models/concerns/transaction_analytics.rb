@@ -183,17 +183,48 @@ module TransactionAnalytics
 
     # ---- Bucketed time series (for sparklines + charts). ----
     #
-    # All three read pre-aggregated rows: hour-aligned bucket sizes (the common
-    # 24h/24-bucket dashboard case and any multi-hour bucket) read the histogram
-    # / hourly_stats tables directly; sub-hour buckets (windows shorter than the
-    # bucket count, e.g. 1h/6h) fold the same DDSketch buckets out of raw in one
-    # bounded GROUP BY. No path pulls per-row durations into Ruby.
+    # All three run their requested bucket count through bucketing_for first, so
+    # any width of an hour or more is snapped to a whole number of hours and
+    # reads the histogram / hourly_stats tables directly — the source is chosen
+    # deliberately, never as a side effect of how the window happened to divide.
+    # Sub-hour widths (windows shorter than the bucket count, e.g. 1h/6h) fold
+    # the same DDSketch buckets out of raw in one bounded GROUP BY, because an
+    # hour-grained aggregate cannot answer them at all. No path pulls per-row
+    # durations into Ruby.
+
+    # Output bucket width for a windowed chart, snapped so the hourly aggregates
+    # tile evenly. Their atom is one whole hour (hour_bucket), so a width that
+    # isn't a multiple of 3600 can't be assembled from them: some output buckets
+    # would swallow one more hour-row than their neighbours, swinging the series
+    # by up to 1/n as a pure tiling artifact (24h ÷ 10 → bars of 2 and 3 hours,
+    # ±33%). bucketed_index_counts reacts by silently reading raw transactions
+    # for the whole window instead — correct numbers, but a table scan; tolerable
+    # over a day, ruinous over a quarter.
+    #
+    # So round the width UP to a whole hour and re-derive the count from it.
+    # Callers get slightly fewer buckets than asked (24h ÷ 10 → 8 × 3h) and stay
+    # on the aggregates. Sub-hour widths are left alone: those are the deliberate
+    # short-window views (1h/6h) where raw is the only source with the resolution
+    # to answer at all. That path is self-bounding — a sub-hour width means
+    # window < 3600 × buckets, so at the MCP ceiling of 168 buckets it can never
+    # reach past 7 days.
+    #
+    # Returns [bucket_seconds, buckets].
+    def bucketing_for(time_range, buckets)
+      window = (time_range.end - time_range.begin).to_i
+      natural = (window.to_f / buckets).to_i.clamp(1, nil)
+      return [natural, buckets] if natural < 3600
+
+      seconds = (natural / 3600.0).ceil * 3600
+      [seconds, (window.to_f / seconds).ceil.clamp(1, nil)]
+    end
 
     # p95 per bucket per endpoint → { name => Array(buckets) of p95 ms }.
     def p95_by_bucket(transaction_names:, time_range:, buckets:, project_id: nil, environment: nil)
       return {} if transaction_names.empty?
+      bucket_seconds, buckets = bucketing_for(time_range, buckets)
       by_name = bucketed_index_counts(
-        time_range: time_range, buckets: buckets, project_id: project_id,
+        time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds, project_id: project_id,
         environment: environment, transaction_names: transaction_names, include_name: true
       )
       transaction_names.each_with_object({}) do |name, result|
@@ -207,7 +238,9 @@ module TransactionAnalytics
 
     # Total transaction volume bucketed by time.
     def volume_by_bucket(project_id:, time_range:, buckets:, environment: nil)
-      rows = bucketed_volume(time_range: time_range, buckets: buckets, project_id: project_id, environment: environment)
+      bucket_seconds, buckets = bucketing_for(time_range, buckets)
+      rows = bucketed_volume(time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds,
+        project_id: project_id, environment: environment)
       Array.new(buckets, 0).tap do |result|
         rows.each { |b, r| result[b] = r[:count] if b >= 0 && b < buckets }
       end
@@ -215,8 +248,9 @@ module TransactionAnalytics
 
     def time_series_for_endpoint(name, time_range, project_id: nil, buckets: 24, bucket_count: nil, environment: nil, release: nil)
       buckets = bucket_count if bucket_count
+      bucket_seconds, buckets = bucketing_for(time_range, buckets)
       series = bucketed_index_counts(
-        time_range: time_range, buckets: buckets, project_id: project_id,
+        time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds, project_id: project_id,
         environment: environment, transaction_name: name, release: release
       )
       Array.new(buckets) do |b|
@@ -361,10 +395,8 @@ module TransactionAnalytics
     # for sub-hour sizes or when a release filter is set (release isn't on the
     # histogram). Both branches share the same filter columns and feed the same
     # Analytics::Histogram.percentile_from_counts reducer.
-    def bucketed_index_counts(time_range:, buckets:, project_id: nil, environment: nil,
+    def bucketed_index_counts(time_range:, buckets:, bucket_seconds:, project_id: nil, environment: nil,
       transaction_name: nil, transaction_names: nil, include_name: false, release: nil)
-      window = time_range.end - time_range.begin
-      bucket_seconds = (window / buckets).to_i.clamp(1, nil)
       origin = time_range.begin.to_i
       use_histogram = (bucket_seconds % 3600).zero? && release.blank?
 
@@ -416,9 +448,7 @@ module TransactionAnalytics
     # Per-time-bucket volume (+ duration sum) for the count/avg charts.
     # { time_bucket => { count:, sum: } }. Hour-aligned → hourly_stats; sub-hour
     # → raw. Mirrors bucketed_index_counts' source-selection.
-    def bucketed_volume(time_range:, buckets:, project_id: nil, environment: nil)
-      window = time_range.end - time_range.begin
-      bucket_seconds = (window / buckets).to_i.clamp(1, nil)
+    def bucketed_volume(time_range:, buckets:, bucket_seconds:, project_id: nil, environment: nil)
       origin = time_range.begin.to_i
 
       if (bucket_seconds % 3600).zero?
@@ -628,7 +658,8 @@ module TransactionAnalytics
     end
 
     def time_series_for_endpoint_global(time_range, project_id:, buckets:)
-      rows = bucketed_volume(time_range: time_range, buckets: buckets, project_id: project_id)
+      bucket_seconds, buckets = bucketing_for(time_range, buckets)
+      rows = bucketed_volume(time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds, project_id: project_id)
       Array.new(buckets) do |b|
         r = rows[b]
         if r.nil? || r[:count].zero?

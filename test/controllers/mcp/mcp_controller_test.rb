@@ -126,6 +126,46 @@ module Mcp
       end
     end
 
+    # ---- Window ceilings come from retention, not a blanket 168. ----
+
+    test "search_slow_transactions reaches back to raw transaction retention" do
+      cap_hours = Setting.instance.transactions_data_retention_days * 24
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {"time_range_hours" => 1000})
+        assert_response :success
+        assert_operator 1000, :<=, cap_hours, "fixture retention should exceed the old 168h cap"
+        window = captured[:kwargs][:time_range]
+        assert_in_delta 1000 * 3600, window.end - window.begin, 60
+        refute_match(/window was reduced/, tool_text)
+      end
+    end
+
+    test "search_slow_transactions clamps past retention and says so" do
+      cap_hours = Setting.instance.transactions_data_retention_days * 24
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {"time_range_hours" => cap_hours + 5000})
+        assert_response :success
+        window = captured[:kwargs][:time_range]
+        assert_in_delta cap_hours * 3600, window.end - window.begin, 60
+        assert_match(/window was reduced to #{cap_hours}h/, tool_text)
+      end
+    end
+
+    test "search_logs is capped by the shorter log retention" do
+      cap_hours = Setting.instance.logs_data_retention_days * 24
+      call_tool("search_logs", {"time_range_hours" => cap_hours + 100})
+      assert_response :success
+      assert_match(/window was reduced to #{cap_hours}h/, tool_text)
+    end
+
+    test "get_transaction_stats reaches back to the long rollup retention" do
+      # The rollups outlive raw rows by design, so a window far past raw
+      # retention is legitimate here and must not be flagged as truncated.
+      call_tool("get_transaction_stats", {"time_range_hours" => 2000})
+      assert_response :success
+      refute_match(/window was reduced/, tool_text)
+    end
+
     test "search_slow_transactions rejects invalid tag key without hitting Transaction.slow" do
       with_slow_stub do |captured|
         call_tool("search_slow_transactions", {"tags" => {"bad key" => "x"}})

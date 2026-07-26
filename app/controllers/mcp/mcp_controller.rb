@@ -331,6 +331,53 @@ module Mcp
         "Unknown project: #{raw}. Available projects: #{Project.order(:name).pluck(:slug).join(", ")}"
     end
 
+    # ---- Window ceilings. ----
+    #
+    # A tool's maximum window is whatever its backing table still holds, read off
+    # Setting rather than a blanket constant. The windowed readers in
+    # TransactionAnalytics serve stats/percentiles/series from
+    # transaction_hourly_stats + transaction_histograms, which retention keeps on
+    # the long histograms clock (:rollup); tools that list or rank individual
+    # rows scan raw transactions (:transactions), and logs have their own shorter
+    # clock (:logs). A `release` filter forces the raw fallback — release isn't
+    # carried on either aggregate — so those callers pass :transactions instead.
+    RETENTION_SOURCE = {
+      rollup: :histograms_retention_days,
+      transactions: :transactions_data_retention_days,
+      logs: :logs_data_retention_days
+    }.freeze
+
+    def max_hours(source)
+      Setting.instance.public_send(RETENTION_SOURCE.fetch(source)) * 24
+    end
+
+    # Clamp a requested window to that ceiling and say so when it bites. Silent
+    # truncation is what made the old blanket 168 read as "there is no data that
+    # far back" rather than "this tool won't look that far back".
+    # Returns [hours, note_or_nil].
+    def clamp_hours(args, key, source, default: 24)
+      cap = max_hours(source)
+      requested = args[key]&.to_i || default
+      hours = requested.clamp(1, cap)
+      return [hours, nil] unless requested > cap
+
+      [hours, "_Requested #{requested}h; this data is retained for #{cap}h (#{cap / 24}d), so the window was reduced to #{hours}h._\n\n"]
+    end
+
+    # Raw transactions age out well before the rollups do, so a long window can
+    # have solid percentiles and no individual rows left to quote.
+    def raw_rows_expired?(hours)
+      hours > max_hours(:transactions)
+    end
+
+    # Advertise the live ceiling in tools/list. These used to read a hardcoded
+    # "max: 168" that no longer matched anything; interpolating keeps the schema
+    # honest when retention settings change.
+    def hours_description(source, label = "Number of hours to look back")
+      cap = max_hours(source)
+      "#{label} (default: 24, max: #{cap} — #{cap / 24}d, the retention window for this data)"
+    end
+
     # `name` has no uniqueness constraint (only slug does), so a display name can
     # legitimately match several projects. Picking one arbitrarily would silently
     # answer about the wrong project, so make the caller name a slug instead.
@@ -493,7 +540,7 @@ module Mcp
               },
               time_range_hours: {
                 type: "integer",
-                description: "Number of hours to look back (default: 24, max: 168)",
+                description: hours_description(:rollup),
                 default: 24
               },
               limit: {
@@ -517,7 +564,7 @@ module Mcp
             properties: {
               time_range_hours: {
                 type: "integer",
-                description: "Number of hours to look back (default: 24, max: 168)",
+                description: hours_description(:rollup),
                 default: 24
               },
               environment: {
@@ -545,12 +592,12 @@ module Mcp
               },
               hours: {
                 type: "integer",
-                description: "Time range in hours (default: 24, max: 168)",
+                description: hours_description(:rollup, "Time range in hours") + ". A release filter restricts it to #{max_hours(:transactions)}h, since release isn't carried on the rollups.",
                 default: 24
               },
               buckets: {
                 type: "integer",
-                description: "Number of buckets to split the range into (default: 24 → 1-hour buckets for a 24h range; min: 4, max: 168)",
+                description: "Number of buckets to split the range into (default: 24 → 1-hour buckets for a 24h range; min: 4, max: 168). Buckets an hour or wider are widened to a whole number of hours so the series can be served from the hourly rollups, so the count returned may be slightly lower than requested — the response states the effective width.",
                 default: 24
               },
               environment: {
@@ -595,7 +642,7 @@ module Mcp
               },
               time_range_hours: {
                 type: "integer",
-                description: "Number of hours to look back (default: 24, max: 168)",
+                description: hours_description(:transactions),
                 default: 24
               },
               limit: {
@@ -662,7 +709,7 @@ module Mcp
               },
               hours: {
                 type: "integer",
-                description: "Time range in hours (default: 24, max: 168)",
+                description: hours_description(:rollup, "Time range in hours") + ". A release filter restricts it to #{max_hours(:transactions)}h, since release isn't carried on the rollups.",
                 default: 24
               },
               environment: {
@@ -695,7 +742,7 @@ module Mcp
               },
               hours: {
                 type: "integer",
-                description: "Time range in hours (default: 24, max: 168)",
+                description: hours_description(:transactions, "Time range in hours"),
                 default: 24
               },
               environment: {
@@ -739,12 +786,12 @@ module Mcp
               },
               hours_before: {
                 type: "integer",
-                description: "Hours before comparison point (default: 24, max: 168)",
+                description: hours_description(:transactions, "Hours before comparison point"),
                 default: 24
               },
               hours_after: {
                 type: "integer",
-                description: "Hours after comparison point (default: 24, max: 168)",
+                description: hours_description(:transactions, "Hours after comparison point"),
                 default: 24
               },
               environment: {
@@ -827,7 +874,7 @@ module Mcp
               },
               time_range_hours: {
                 type: "integer",
-                description: "Look back this many hours (default: 24, max: 168)",
+                description: hours_description(:logs, "Look back this many hours"),
                 default: 24
               },
               limit: {
@@ -1143,7 +1190,7 @@ module Mcp
     end
 
     def search_logs(args)
-      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      time_range_hours, window_note = clamp_hours(args, "time_range_hours", :logs)
       limit = (args["limit"]&.to_i || 50).clamp(1, 200)
 
       project_id = resolve_project_id(args)
@@ -1157,7 +1204,7 @@ module Mcp
       logs = logs.by_environment(args["environment"]) if args["environment"].present?
       logs = logs.limit(limit)
 
-      render_text(format_logs_list(logs.to_a, time_range_hours))
+      render_text("#{window_note}#{format_logs_list(logs.to_a, time_range_hours)}")
     end
 
     def get_log(args)
@@ -1180,7 +1227,7 @@ module Mcp
     def get_transaction_stats(args)
       endpoint = args["endpoint"]
       environment = args["environment"].presence
-      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      time_range_hours, window_note = clamp_hours(args, "time_range_hours", :rollup)
       limit = (args["limit"]&.to_i || 10).clamp(1, 50)
 
       time_range = time_range_hours.hours.ago..Time.current
@@ -1211,7 +1258,7 @@ module Mcp
 
       text = format_transaction_stats(percentiles, top_endpoints, total_count, time_range_hours, endpoint)
 
-      render_text(text)
+      render_text("#{window_note}#{text}")
     end
 
     def search_slow_transactions(args)
@@ -1220,7 +1267,7 @@ module Mcp
       http_status = args["http_status"]
       http_method = args["http_method"]
       environment = args["environment"]
-      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      time_range_hours, window_note = clamp_hours(args, "time_range_hours", :transactions)
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
       tags = args["tags"]
@@ -1252,7 +1299,7 @@ module Mcp
 
       text = format_slow_transactions(rows, min_duration_ms, time_range_hours)
 
-      render_text(text)
+      render_text("#{window_note}#{text}")
     end
 
     def get_transaction(args)
@@ -1292,9 +1339,11 @@ module Mcp
 
     def get_endpoint_summary(args)
       endpoint = args["endpoint"]
-      hours = (args["hours"]&.to_i || 24).clamp(1, 168)
       environment = args["environment"]
       release = args["release"]
+      # A release filter drops percentiles_for_endpoint onto its raw fallback, so
+      # the window can only reach as far back as raw transactions survive.
+      hours, window_note = clamp_hours(args, "hours", release.present? ? :transactions : :rollup)
       time_range = hours.hours.ago..Time.current
       project_id = resolve_project_id(args)
 
@@ -1329,12 +1378,17 @@ module Mcp
         percentiles, db_percentiles, view_percentiles,
         slowest_request, fastest_request
       )
+      # The percentiles above come from the rollups, which outlive raw rows; say
+      # so rather than just omitting the sample-requests section.
+      if raw_rows_expired?(hours) && (slowest_request.nil? || fastest_request.nil?)
+        text += "\n_Individual requests are retained for #{max_hours(:transactions) / 24}d, so no sample requests are available across this window. Percentiles above are from the hourly rollups._\n"
+      end
 
-      render_text(text)
+      render_text("#{window_note}#{text}")
     end
 
     def find_n_plus_one_endpoints(args)
-      time_range_hours = (args["time_range_hours"]&.to_i || 24).clamp(1, 168)
+      time_range_hours, window_note = clamp_hours(args, "time_range_hours", :rollup)
       environment = args["environment"]
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)
       time_range = time_range_hours.hours.ago..Time.current
@@ -1345,25 +1399,32 @@ module Mcp
 
       text = format_n_plus_one_endpoints(rows, time_range_hours, environment)
 
-      render_text(text)
+      render_text("#{window_note}#{text}")
     end
 
     def get_endpoint_timeseries(args)
       endpoint = args["endpoint"]
-      hours = (args["hours"]&.to_i || 24).clamp(1, 168)
-      buckets = (args["buckets"]&.to_i || 24).clamp(4, 168)
       environment = args["environment"]
       release = args["release"]
+      hours, window_note = clamp_hours(args, "hours", release.present? ? :transactions : :rollup)
+      requested_buckets = (args["buckets"]&.to_i || 24).clamp(4, 168)
       time_range = hours.hours.ago..Time.current
 
       series = Transaction.time_series_for_endpoint(
         endpoint, time_range, project_id: resolve_project_id(args),
-        bucket_count: buckets, environment: environment, release: release
+        bucket_count: requested_buckets, environment: environment, release: release
+      )
+      # Ask the same helper the reader used rather than re-dividing hours by
+      # buckets — snapping to whole hours means the effective width and count can
+      # differ from what was requested, and the row labels have to match the data.
+      bucket_seconds, buckets = Transaction.bucketing_for(time_range, requested_buckets)
+
+      text = format_endpoint_timeseries(
+        endpoint, series, hours, buckets, bucket_seconds, requested_buckets,
+        environment, release, time_range.begin
       )
 
-      text = format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release, time_range.begin)
-
-      render_text(text)
+      render_text("#{window_note}#{text}")
     end
 
     def endpoint_extreme_row(endpoint, time_range, environment, release, direction, project_id = nil)
@@ -1379,7 +1440,8 @@ module Mcp
     def get_transactions_by_endpoint(args)
       endpoint = args["endpoint"]
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)
-      hours = (args["hours"]&.to_i || 24).clamp(1, 168)
+      # Lists individual rows, so it's bounded by raw transaction retention.
+      hours, window_note = clamp_hours(args, "hours", :transactions)
       environment = args["environment"]
       release = args["release"]
 
@@ -1397,7 +1459,7 @@ module Mcp
 
       text = format_transactions_by_endpoint(transactions, endpoint, hours, environment, release)
 
-      render_text(text)
+      render_text("#{window_note}#{text}")
     end
 
     def compare_endpoint_performance(args)
@@ -1406,8 +1468,10 @@ module Mcp
       after_release = args["after_release"]
       before_timestamp = args["before_timestamp"]
       after_timestamp = args["after_timestamp"]
-      hours_before = (args["hours_before"]&.to_i || 24).clamp(1, 168)
-      hours_after = (args["hours_after"]&.to_i || 24).clamp(1, 168)
+      # Both arms collect raw transaction rows, so both windows sit on the raw
+      # retention clock regardless of which comparison mode is used.
+      hours_before, before_note = clamp_hours(args, "hours_before", :transactions)
+      hours_after, after_note = clamp_hours(args, "hours_after", :transactions)
       environment = args["environment"]
       project_id = resolve_project_id(args)
 
@@ -1438,7 +1502,7 @@ module Mcp
         before_transactions, after_transactions
       )
 
-      render_text(text)
+      render_text("#{before_note}#{after_note}#{text}")
     rescue ArgumentError
       render_error("Invalid timestamp format. Please use ISO format (e.g., '2025-10-21T03:00:00Z')")
     end
@@ -1769,11 +1833,14 @@ module Mcp
         return result
       end
 
+      # percentiles is never `empty?` — it always carries the full key set — but
+      # p50/p95/p99 come back nil for a window with no transactions, so these
+      # have to go through format_ms rather than bare .round.
       result += "### Response Time Percentiles\n\n"
-      result += "- **Average:** #{percentiles[:avg].round}ms\n"
-      result += "- **Median (P50):** #{percentiles[:p50].round}ms\n"
-      result += "- **P95:** #{percentiles[:p95].round}ms\n"
-      result += "- **P99:** #{percentiles[:p99].round}ms\n\n"
+      result += "- **Average:** #{format_ms(percentiles[:avg])}\n"
+      result += "- **Median (P50):** #{format_ms(percentiles[:p50])}\n"
+      result += "- **P95:** #{format_ms(percentiles[:p95])}\n"
+      result += "- **P99:** #{format_ms(percentiles[:p99])}\n\n"
 
       if top_endpoints.any?
         result += "### Top Endpoints by Impact (avg × count)\n\n"
@@ -2043,13 +2110,16 @@ module Mcp
       header
     end
 
-    def format_endpoint_timeseries(endpoint, series, hours, buckets, environment, release, start_time)
-      bucket_seconds = hours * 3600.0 / buckets
+    def format_endpoint_timeseries(endpoint, series, hours, buckets, bucket_seconds, requested_buckets,
+      environment, release, start_time)
       bucket_minutes = (bucket_seconds / 60.0).round
 
       header = "## Endpoint Time Series: #{endpoint}\n\n"
       header += "**Time Range:** Last #{hours} hour(s)\n"
       header += "**Buckets:** #{buckets} × #{bucket_minutes}m\n"
+      if buckets != requested_buckets
+        header += "_Requested #{requested_buckets} buckets; widened to #{bucket_minutes}m so each bucket is a whole number of hours and the series can be served from the hourly rollups._\n"
+      end
       header += "**Environment:** #{environment}\n" if environment.present?
       header += "**Release:** #{release}\n" if release.present?
       header += "\n"

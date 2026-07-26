@@ -122,6 +122,43 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     assert_equal 1, vol.count { |element| !element.zero? }
   end
 
+  test "bucketing_for snaps widths of an hour or more up to a whole hour" do
+    day = 24.hours.ago..Time.current
+    assert_equal [3600, 24], Transaction.bucketing_for(day, 24), "already aligned → untouched"
+
+    # 24h ÷ 10 is 2.4h, which no stack of whole-hour rows can build. Widen to 3h
+    # and hand back the 8 buckets that actually fit.
+    assert_equal [10800, 8], Transaction.bucketing_for(day, 10)
+
+    quarter = 90.days.ago..Time.current
+    seconds, buckets = Transaction.bucketing_for(quarter, 168)
+    assert_equal 0, seconds % 3600, "long windows must stay hour-aligned or they scan raw"
+    assert_equal 13 * 3600, seconds
+    assert_equal 167, buckets
+  end
+
+  test "bucketing_for leaves sub-hour widths alone for short windows" do
+    # 1h ÷ 12 = 5m. Snapping this up would collapse the series to a single
+    # bucket; the aggregates simply can't answer at this resolution, so raw is
+    # the right source and the window is small enough to scan.
+    assert_equal [300, 12], Transaction.bucketing_for(1.hour.ago..Time.current, 12)
+  end
+
+  test "a misaligned bucket request is served from the aggregates, not raw" do
+    100.times { create_txn(duration: 200) }
+    Transaction.where(project_id: @project.id).delete_all
+
+    # 24h ÷ 10 would previously have fallen through to a raw scan and found
+    # nothing here. Snapped to 3h buckets it reads the rollups and still sees
+    # every request.
+    series = Transaction.time_series_for_endpoint("GET /x", @range, project_id: @project.id, buckets: 10)
+    assert_equal 8, series.size
+    assert_equal 100, series.sum { |b| b["count"] }
+    populated = series.reject { |b| b["count"].zero? }
+    assert_equal 1, populated.size
+    assert_in_delta 200, populated.first["p95"], 4
+  end
+
   test "sub-hour windows fall back to the bounded raw path with the same algorithm" do
     # 30-minute window → 5-minute buckets (sub-hour): reads raw, not histogram.
     recent = 10.minutes.ago
