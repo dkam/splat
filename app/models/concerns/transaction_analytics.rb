@@ -160,11 +160,18 @@ module TransactionAnalytics
       ranked
     end
 
-    def slow(time_range:, project_id: nil, threshold_ms: 1000, environment: nil, http_status: nil,
-      http_method: nil, transaction_name: nil, tags: nil, limit: 100)
+    # max_duration_ms turns the threshold into a band. Results are ordered
+    # duration-descending, so without a ceiling a wide window is dominated by a
+    # handful of multi-minute outliers and a plateau of merely-bad requests
+    # (say 12-19s) can never reach the page — which is exactly the shape of an
+    # overload incident.
+    def slow(time_range:, project_id: nil, threshold_ms: 1000, max_duration_ms: nil, environment: nil,
+      http_status: nil, http_method: nil, transaction_name: nil, release: nil, tags: nil, limit: 100)
       scope = where(timestamp: time_range).where("duration > ?", threshold_ms)
+      scope = scope.where("duration <= ?", max_duration_ms) if max_duration_ms
       scope = scope.where(project_id: project_id) if project_id
       scope = scope.where(environment: environment) if environment.present?
+      scope = scope.where(release: release) if release.present?
       scope = scope.where(http_status: http_status) if http_status.present?
       scope = scope.where(http_method: http_method) if http_method.present?
       # endpoint is advertised as a case-insensitive substring match (LIKE is

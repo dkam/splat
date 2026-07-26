@@ -13,6 +13,17 @@ module Mcp
       ENV.delete("MCP_AUTH_TOKEN")
     end
 
+    test "initialize tells the client to call serially" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 1, method: "initialize", params: {}}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      instructions = JSON.parse(response.body).dig("result", "instructions").to_s
+      assert_match(/SERIALLY/, instructions)
+      assert_match(/no server-side statement timeout/i, instructions)
+    end
+
     test "get_status reports version, storage, and compression from the snapshot" do
       fake = {
         total: 700_000_000,
@@ -166,6 +177,26 @@ module Mcp
       refute_match(/window was reduced/, tool_text)
     end
 
+    test "search_slow_transactions passes release and a duration band through" do
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {
+          "release" => "1.12.0", "min_duration_ms" => 10_000, "max_duration_ms" => 20_000
+        })
+        assert_response :success
+        assert_equal "1.12.0", captured[:kwargs][:release]
+        assert_equal 10_000, captured[:kwargs][:threshold_ms]
+        assert_equal 20_000, captured[:kwargs][:max_duration_ms]
+      end
+    end
+
+    test "search_slow_transactions ignores a non-positive max_duration_ms" do
+      with_slow_stub do |captured|
+        call_tool("search_slow_transactions", {"max_duration_ms" => 0})
+        assert_response :success
+        assert_nil captured[:kwargs][:max_duration_ms], "0 would exclude every row"
+      end
+    end
+
     test "search_slow_transactions rejects invalid tag key without hitting Transaction.slow" do
       with_slow_stub do |captured|
         call_tool("search_slow_transactions", {"tags" => {"bad key" => "x"}})
@@ -233,6 +264,20 @@ module Mcp
       call_tool("search_logs", {"query" => "mcp searchable", "level" => "error"})
       assert_response :success
       assert_match "mcp searchable log", tool_text
+    end
+
+    test "search_logs surfaces duration and release inline" do
+      project = projects(:one)
+      Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+        level: :error, source: "sentry", body: "shed the request", release: "1.12.0",
+        duration_ms: 10.76, payload: {})
+
+      call_tool("search_logs", {"query" => "shed the request"})
+      assert_response :success
+      # Without these inline, telling "failed fast" from "hung" needs a get_log
+      # per line.
+      assert_match "dur=11ms", tool_text
+      assert_match "release=1.12.0", tool_text
     end
 
     test "search_logs scopes to a single release" do
@@ -425,6 +470,41 @@ module Mcp
       assert_response :success
       assert_match "txn-trace-xyz", tool_text
       assert_match "get_trace_logs", tool_text
+    end
+
+    test "get_transaction resolves by trace_id, closing the log to transaction gap" do
+      project = projects(:one)
+      Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "WorksController#show", duration: 15_000,
+        trace_id: "log-handed-me-this")
+
+      call_tool("get_transaction", {"trace_id" => "log-handed-me-this"})
+      assert_response :success
+      assert_match "WorksController#show", tool_text
+    end
+
+    test "get_transaction by trace_id picks the most recent when a trace repeats" do
+      project = projects(:one)
+      Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: 2.hours.ago, transaction_name: "OldController#show", duration: 10,
+        trace_id: "reused-trace")
+      Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "NewController#show", duration: 20,
+        trace_id: "reused-trace")
+
+      call_tool("get_transaction", {"trace_id" => "reused-trace"})
+      assert_response :success
+      assert_match "NewController#show", tool_text
+      refute_match(/OldController#show/, tool_text)
+    end
+
+    test "get_transaction with neither id nor trace_id explains what is needed" do
+      # Surfaces through the standard RecordNotFound mapping (JSON-RPC -32602),
+      # same as any other failed lookup — what matters is that the message names
+      # both arguments rather than reporting a blank transaction_id miss.
+      call_tool("get_transaction", {})
+      assert_equal "Supply either transaction_id or trace_id",
+        JSON.parse(response.body).dig("error", "data")
     end
 
     test "get_transaction lists the errors thrown during the request" do

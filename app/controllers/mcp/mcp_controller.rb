@@ -188,9 +188,29 @@ module Mcp
             name: "splat",
             version: "1.0.0",
             description: "Splat Error Tracker MCP Server"
-          }
+          },
+          instructions: concurrency_note
         }
       }
+    end
+
+    # Parallelising independent reads is normally the right instinct, and here
+    # it is actively dangerous: Splat is one Puma process with a small thread
+    # pool, and SQLite offers no statement timeout — busy_timeout only bounds
+    # lock waits, not a scan already underway. A client-side timeout doesn't
+    # cancel the query either, so abandoning a slow call leaves it holding a
+    # thread. Enough concurrent wide scans and the instance stops serving,
+    # including the UI. Stated here because it's a property of the backend that
+    # no individual tool schema can express.
+    def concurrency_note
+      threads = ENV.fetch("RAILS_MAX_THREADS", "5")
+      "Issue calls to this server SERIALLY, not in parallel. It runs a single " \
+      "Puma process with #{threads} threads against SQLite, and a wide scan " \
+      "(search_slow_transactions with tags, search_logs over a long window) can " \
+      "hold its thread for minutes. There is no server-side statement timeout, " \
+      "and giving up client-side does not cancel the query — so parallel calls " \
+      "can take the whole instance down, UI included, and keep it down after " \
+      "you stop. Narrow the window or add filters instead of fanning out."
     end
 
     def handle_initialized_notification
@@ -624,6 +644,10 @@ module Mcp
                 description: "Minimum duration in milliseconds (default: 1000)",
                 default: 1000
               },
+              max_duration_ms: {
+                type: "integer",
+                description: "Optional upper bound, making the duration filter a band. Results are ordered slowest-first, so over a wide window a few multi-minute outliers crowd out everything else — pair this with min_duration_ms (e.g. 10000..20000) to surface a plateau of merely-slow requests that would otherwise never reach the page."
+              },
               endpoint: {
                 type: "string",
                 description: "Filter by endpoint name (case-insensitive substring match, e.g. 'works' matches 'WorksController#show')"
@@ -640,6 +664,10 @@ module Mcp
                 type: "string",
                 description: "Filter by environment"
               },
+              release: {
+                type: "string",
+                description: "Filter to one release (e.g. '1.12.0'). Indexed, unlike a tag filter. Every window here is measured back from now, so when a deploy brackets the period you care about this is the way to pin results to it."
+              },
               time_range_hours: {
                 type: "integer",
                 description: hours_description(:transactions),
@@ -653,7 +681,10 @@ module Mcp
               tags: {
                 type: "object",
                 description: "Filter by Sentry tags. Keys are AND'd; string equality. " \
-                             "Example: {\"user_id\":\"123\",\"environment\":\"production\"}",
+                             "Example: {\"user_id\":\"123\",\"environment\":\"production\"}. " \
+                             "NOTE: tags are unindexed JSON, so this scans every transaction in the " \
+                             "window and holds a thread until it finishes — prefer release, endpoint " \
+                             "or environment to narrow first, and keep the window tight.",
                 additionalProperties: {type: "string"}
               },
               project: PROJECT_ARG
@@ -662,16 +693,20 @@ module Mcp
         },
         {
           name: "get_transaction",
-          description: "Get detailed information about a specific transaction by ID",
+          description: "Get detailed information about a specific transaction, by transaction ID or by trace_id. The trace_id form closes the loop from a log line to the request that produced it: search_logs and get_trace_logs hand back trace IDs, and this turns one into the transaction (then get_transaction_spans for its waterfall).",
           inputSchema: {
             type: "object",
             properties: {
               transaction_id: {
                 type: "string",
                 description: "Either the internal numeric ID (e.g. '12345') or the Sentry transaction UUID (32 hex chars, e.g. 'abc123...'). UUIDs match the event_id used by get_event."
-              }
-            },
-            required: ["transaction_id"]
+              },
+              trace_id: {
+                type: "string",
+                description: "Look the transaction up by trace_id instead — the value carried on log records and accepted by get_trace_logs. Supply this or transaction_id. Passing `project` alongside it makes the lookup an index hit."
+              },
+              project: PROJECT_ARG
+            }
           }
         },
         {
@@ -684,6 +719,11 @@ module Mcp
                 type: "string",
                 description: "Either the internal numeric ID or the Sentry transaction UUID — same value accepted by get_transaction."
               },
+              trace_id: {
+                type: "string",
+                description: "Look the transaction up by trace_id instead, so a log line can be taken straight to its span waterfall. Supply this or transaction_id."
+              },
+              project: PROJECT_ARG,
               op_filter: {
                 type: "string",
                 description: "Filter spans by op prefix (e.g. 'db' for all db.* spans, 'db.sql' for SQL only, 'http' for outbound HTTP, 'view' for renders). Default: no filter."
@@ -693,8 +733,7 @@ module Mcp
                 description: "Max spans to render in the list (default: 100, max: 1000). Op summary and repeated-description sections always cover all spans.",
                 default: 100
               }
-            },
-            required: ["transaction_id"]
+            }
           }
         },
         {
@@ -1268,10 +1307,13 @@ module Mcp
 
     def search_slow_transactions(args)
       min_duration_ms = [args["min_duration_ms"]&.to_i || 1000, 0].max
+      max_duration_ms = args["max_duration_ms"]&.to_i
+      max_duration_ms = nil unless max_duration_ms&.positive?
       endpoint = args["endpoint"]
       http_status = args["http_status"]
       http_method = args["http_method"]
       environment = args["environment"]
+      release = args["release"]
       time_range_hours, window_note = clamp_hours(args, "time_range_hours", :transactions)
       limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
@@ -1285,12 +1327,14 @@ module Mcp
 
       rows = Transaction.slow(
         threshold_ms: min_duration_ms,
+        max_duration_ms: max_duration_ms,
         time_range: time_range_hours.hours.ago..Time.current,
         project_id: resolve_project_id(args),
         transaction_name: endpoint,
         http_status: http_status,
         http_method: http_method,
         environment: environment,
+        release: release,
         tags: tags,
         limit: limit
       )
@@ -1302,13 +1346,13 @@ module Mcp
         h
       end
 
-      text = format_slow_transactions(rows, min_duration_ms, time_range_hours)
+      text = format_slow_transactions(rows, min_duration_ms, max_duration_ms, time_range_hours)
 
       render_text("#{window_note}#{text}")
     end
 
     def get_transaction(args)
-      transaction = find_transaction(args["transaction_id"])
+      transaction = find_transaction(args["transaction_id"], trace_id: args["trace_id"], project_id: resolve_project_id(args))
       # trace_id is promoted onto the transaction row; the detail output uses it
       # to point an agent at get_trace_logs (mirrors the transaction→logs link
       # in the web UI).
@@ -1316,7 +1360,7 @@ module Mcp
     end
 
     def get_transaction_spans(args)
-      transaction = find_transaction(args["transaction_id"])
+      transaction = find_transaction(args["transaction_id"], trace_id: args["trace_id"], project_id: resolve_project_id(args))
       op_filter = args["op_filter"].to_s.strip
       limit = (args["limit"]&.to_i || 100).clamp(1, 1000)
 
@@ -1333,9 +1377,27 @@ module Mcp
       render_text(format_transaction_spans(transaction, all_spans, filtered, op_filter, limit))
     end
 
-    def find_transaction(id)
+    # Accepts an internal id, a Sentry transaction UUID, or — closing the gap
+    # from a log to its request — a trace_id. trace_id can't be sniffed from the
+    # string (it's hex like transaction_id), so it's a separate argument rather
+    # than a third branch on format. It's promoted onto the transaction row and
+    # indexed as [project_id, trace_id]; without project_id that index can't be
+    # used for a prefix lookup, so scope the scan by timestamp ordering and take
+    # the most recent match. A trace holds at most one server transaction per
+    # service, so this is a lookup rather than a genuine ambiguity.
+    def find_transaction(id, trace_id: nil, project_id: nil)
+      if trace_id.present?
+        scope = Transaction.includes(:project).where(trace_id: trace_id.to_s)
+        scope = scope.where(project_id: project_id) if project_id
+        found = scope.order(timestamp: :desc).first
+        raise ActiveRecord::RecordNotFound, "No transaction found for trace_id #{trace_id}" unless found
+        return found
+      end
+
       id_str = id.to_s
-      if id_str.match?(/\A\d+\z/)
+      if id_str.blank?
+        raise ActiveRecord::RecordNotFound, "Supply either transaction_id or trace_id"
+      elsif id_str.match?(/\A\d+\z/)
         Transaction.includes(:project).find(id_str)
       else
         Transaction.includes(:project).find_by!(transaction_id: id_str)
@@ -1582,6 +1644,12 @@ module Mcp
         meta = []
         meta << "logger=#{log.logger_name}" if log.logger_name.present?
         meta << "env=#{log.environment}" if log.environment.present?
+        # duration_ms and release are already on the row. Omitting them meant a
+        # round-trip to get_log per line to answer "was this slow?" — and a wall
+        # of identical fast responses (load shedding, say) reads as ordinary
+        # traffic until you open one.
+        meta << "dur=#{log.duration_ms.round}ms" if log.duration_ms.present?
+        meta << "release=#{log.release}" if log.release.present?
         meta << "trace=#{log.trace_id}" if log.trace_id.present?
         meta << "log_id=#{log.log_id}"
         result += "  #{meta.join(" · ")}\n"
@@ -1863,12 +1931,13 @@ module Mcp
       result
     end
 
-    def format_slow_transactions(transactions, min_duration_ms, time_range_hours)
+    def format_slow_transactions(transactions, min_duration_ms, max_duration_ms, time_range_hours)
+      band = max_duration_ms ? "#{min_duration_ms}–#{max_duration_ms}ms" : "≥#{min_duration_ms}ms"
       if transactions.empty?
-        return "No slow transactions found (≥#{min_duration_ms}ms) in the last #{time_range_hours} hour(s)."
+        return "No slow transactions found (#{band}) in the last #{time_range_hours} hour(s)."
       end
 
-      result = "## Slow Transactions (≥#{min_duration_ms}ms)\n\n"
+      result = "## Slow Transactions (#{band})\n\n"
       result += "Found #{transactions.size} transaction(s):\n\n"
 
       transactions.each do |txn|
