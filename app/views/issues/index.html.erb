@@ -112,10 +112,12 @@
             <div class="flex items-center gap-4">
               <% spark = @sparklines[issue.id] %>
               <% if spark&.any? { |v| v.to_i.positive? } %>
-                <div class="text-blue-500 dark:text-blue-400" title="Events per hour, last 24h. Dashed lines = deploys.">
+                <div class="text-blue-500 dark:text-blue-400" data-controller="sparkline-tooltip"
+                     title="Events per hour, last 24h. Dashed lines = deploys.">
                   <%= sparkline(spark, width: 120, height: 28,
                       title: "#{spark.sum} events in last 24h, #{@deploy_markers.size} deploy#{'s' if @deploy_markers.size != 1}",
-                      markers: @deploy_markers, time_range: @sparkline_range) %>
+                      markers: @deploy_markers, time_range: @sparkline_range,
+                      bar_titles: sparkline_bucket_titles(spark, range: @sparkline_range, empty: "no events") { |v| pluralize(v, "event") }) %>
                 </div>
               <% else %>
                 <div class="w-[120px] h-[28px]"></div>

@@ -45,9 +45,10 @@
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Events (24h)</div>
       <div class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= number_with_delimiter(@event_count_24h) %></div>
       <% if @events_by_hour.any? { |v| v.positive? } %>
-        <div class="text-blue-500 dark:text-blue-400 mt-2">
+        <div class="text-blue-500 dark:text-blue-400 mt-2" data-controller="sparkline-tooltip">
           <%= sparkline(@events_by_hour, width: 100, height: 24,
-              title: "events / hour, last 24h") %>
+              title: "events / hour, last 24h",
+              bar_titles: sparkline_bucket_titles(@events_by_hour, range: @sparkline_range, empty: "no events") { |v| pluralize(v, "event") }) %>
         </div>
         <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
           peak <%= number_with_delimiter(@events_by_hour.max) %> · low <%= number_with_delimiter(@events_by_hour.min) %> / hr
@@ -60,9 +61,10 @@
       <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Transactions (24h)</div>
       <div class="<%= @transaction_count_24h > 99_999 ? 'text-2xl' : 'text-3xl' %> font-bold text-gray-900 dark:text-gray-100"><%= number_with_delimiter(@transaction_count_24h) %></div>
       <% if @transactions_by_hour.any? { |v| v.positive? } %>
-        <div class="text-blue-500 dark:text-blue-400 mt-2">
+        <div class="text-blue-500 dark:text-blue-400 mt-2" data-controller="sparkline-tooltip">
           <%= sparkline(@transactions_by_hour, width: 100, height: 24,
-              title: "transactions / hour, last 24h") %>
+              title: "transactions / hour, last 24h",
+              bar_titles: sparkline_bucket_titles(@transactions_by_hour, range: @sparkline_range, empty: "no traffic") { |v| pluralize(v, "transaction") }) %>
         </div>
         <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
           peak <%= number_with_delimiter(@transactions_by_hour.max) %> · low <%= number_with_delimiter(@transactions_by_hour.min) %> / hr
@@ -145,10 +147,12 @@
               </div>
               <% spark = @issue_sparklines[issue.id] %>
               <% if spark&.any? { |v| v.to_i.positive? } %>
-                <span class="text-blue-500 dark:text-blue-400 shrink-0" title="Dashed lines = deploys">
+                <span class="text-blue-500 dark:text-blue-400 shrink-0" data-controller="sparkline-tooltip"
+                      title="Dashed lines = deploys">
                   <%= sparkline(spark, width: 100, height: 24,
                       title: "#{spark.sum} events in last 24h",
-                      markers: @deploy_markers, time_range: @sparkline_range) %>
+                      markers: @deploy_markers, time_range: @sparkline_range,
+                      bar_titles: sparkline_bucket_titles(spark, range: @sparkline_range, empty: "no events") { |v| pluralize(v, "event") }) %>
                 </span>
               <% end %>
             </div>
@@ -193,10 +197,12 @@
                 <td class="px-4 py-3 whitespace-nowrap text-center">
                   <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
-                    <span class="text-blue-500 dark:text-blue-400" title="Dashed lines = deploys">
+                    <span class="text-blue-500 dark:text-blue-400" data-controller="sparkline-tooltip"
+                          title="Dashed lines = deploys">
                       <%= sparkline(spark, width: 100, height: 24,
                           title: "p95 latency, last 24h — peak #{format_duration(spark.max)}",
-                          markers: @deploy_markers, time_range: @sparkline_range) %>
+                          markers: @deploy_markers, time_range: @sparkline_range,
+                          bar_titles: sparkline_bucket_titles(spark, range: @sparkline_range) { |v| "p95 #{format_duration(v)}" }) %>
                     </span>
                   <% end %>
                 </td>

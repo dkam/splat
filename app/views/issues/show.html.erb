@@ -116,10 +116,12 @@
         <h2 class="text-sm font-medium text-gray-600 dark:text-gray-400">Events · last 7 days</h2>
         <span class="text-xs text-gray-500 dark:text-gray-400">peak <%= number_with_delimiter(@spark_counts.max) %> / hr</span>
       </div>
-      <div class="text-blue-500 dark:text-blue-400 [&_svg]:w-full [&_svg]:h-20" title="Events per hour, last 7 days. Dashed lines = deploys.">
+      <div class="text-blue-500 dark:text-blue-400 [&_svg]:w-full [&_svg]:h-20" data-controller="sparkline-tooltip"
+           title="Events per hour, last 7 days. Dashed lines = deploys.">
         <%= sparkline(@spark_counts, width: 600, height: 80,
             title: "#{number_with_delimiter(@spark_counts.sum)} events in last 7 days — peak #{number_with_delimiter(@spark_counts.max)} / hr",
-            markers: @deploy_markers, time_range: @spark_range) %>
+            markers: @deploy_markers, time_range: @spark_range,
+            bar_titles: sparkline_bucket_titles(@spark_counts, range: @spark_range, empty: "no events") { |v| pluralize(v, "event") }) %>
       </div>
     </div>
   <% end %>

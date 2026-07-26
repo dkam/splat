@@ -33,13 +33,24 @@
 
   <!-- P95 Latency Trend -->
   <% if @p95_sparkline.any? { |v| v.to_i > 0 } %>
+    <% sparkline_titles = sparkline_bucket_titles(@p95_sparkline, range: @p95_sparkline_range) { |v| "p95 #{format_duration(v)}" } %>
+    <% seen = @p95_sparkline.reject { |v| v.to_i.zero? } %>
     <div class="mb-6 bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
-      <div class="flex items-center justify-between mb-3">
+      <%# mb-5 leaves room for the hover tooltip, which sits just above the chart. %>
+      <div class="flex items-center justify-between mb-5">
         <div class="text-sm font-medium text-gray-600 dark:text-gray-400">P95 Latency Trend</div>
-        <div class="text-xs text-gray-400 dark:text-gray-500"><%= @p95_sparkline.size %> buckets · <%= @p95_sparkline_days %>d</div>
+        <div class="text-xs text-gray-400 dark:text-gray-500"><%= @p95_sparkline.size %> buckets · <%= @p95_sparkline_days %>d · hover a bar for its hour</div>
       </div>
-      <div class="text-blue-600 dark:text-blue-400 [&>svg]:w-full [&>svg]:h-16">
-        <%= sparkline(@p95_sparkline, width: 600, height: 64, title: "P95 duration per bucket over #{@p95_sparkline_days} days") %>
+      <div class="text-blue-600 dark:text-blue-400 [&>svg]:w-full [&>svg]:h-16"
+           data-controller="sparkline-tooltip">
+        <%= sparkline(@p95_sparkline, width: 600, height: 64,
+            title: "P95 duration per hour over #{@p95_sparkline_days} days",
+            bar_titles: sparkline_titles) %>
+      </div>
+      <div class="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+        <span>Best hour <span class="font-semibold text-gray-700 dark:text-gray-300"><%= format_duration(seen.min) %></span></span>
+        <span><%= @p95_sparkline_range.begin.strftime("%-d %b") %> → now</span>
+        <span>Peak <span class="font-semibold text-gray-700 dark:text-gray-300"><%= format_duration(seen.max) %></span> · <%= sparkline_titles[@p95_sparkline.index(seen.max)].split(" · ").first %></span>
       </div>
     </div>
   <% end %>

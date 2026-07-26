@@ -106,11 +106,35 @@ module ApplicationHelper
     end
   end
 
+  # One hover label per bucket, for sparkline(bar_titles:). Buckets are evenly
+  # spaced across `range`, so bucket i starts at range.begin + i * bucket_seconds
+  # — no bucket timestamps need carrying through the query layer. The block turns
+  # a value into its reading ("p95 384ms", "12 events"); empty buckets say so
+  # rather than going unlabelled, which is the thing a bare chart can't tell you.
+  def sparkline_bucket_titles(values, range:, empty: "no traffic")
+    values = Array(values)
+    return [] if values.empty? || range.nil?
+
+    bucket_seconds = (range.end - range.begin) / values.size
+    # Within a day the date is just noise; over a longer window it's the point.
+    stamp = ((range.end - range.begin) > 36.hours) ? "%a %-d %b %H:%M" : "%H:%M"
+
+    values.each_with_index.map do |value, i|
+      at = range.begin + (i * bucket_seconds)
+      "#{at.strftime(stamp)} · #{value.to_i.zero? ? empty : yield(value)}"
+    end
+  end
+
   # Render a tiny inline-SVG bar sparkline. Each value becomes one bar; bars
   # scale to the max value in the series so a single chart's shape is what
   # tells you the story (not the absolute height).
+  #
+  # bar_titles: one label per value — turns the chart into a hoverable one, each
+  # bucket getting a native SVG tooltip ("Tue 3 Jun 14:00 · p95 384ms"). Wrap the
+  # chart in data-controller="sparkline-tooltip" to upgrade those to instant
+  # cursor-following tooltips; the native ones are the JS-off fallback.
   def sparkline(values, width: 96, height: 24, color: "currentColor", title: nil,
-    markers: nil, time_range: nil)
+    markers: nil, time_range: nil, bar_titles: nil)
     values = Array(values)
     return "".html_safe if values.empty?
 
@@ -140,10 +164,27 @@ module ApplicationHelper
       end
     end
 
+    # One invisible full-height column per bucket, each carrying its own <title>.
+    # Full height (rather than the bar itself) because a 168-bucket chart draws
+    # 3px bars that are near-impossible to point at; painted last so they sit
+    # above the bars and win the hover. Native SVG tooltips, no JS.
+    hover_targets = ""
+    if bar_titles.present?
+      column_width = (bar_width + gap).round(2)
+      hover_targets = values.each_index.map do |i|
+        label = bar_titles[i]
+        next if label.blank?
+        x = (i * (bar_width + gap)).round(2)
+        %(<rect class="sparkline-hover" x="#{x}" y="0" width="#{column_width}" height="#{height}" ) +
+          %(fill="currentColor" fill-opacity="0" pointer-events="all">) +
+          %(<title>#{ERB::Util.html_escape(label)}</title></rect>)
+      end.compact.join
+    end
+
     title_attr = title ? %(<title>#{ERB::Util.html_escape(title)}</title>) : ""
 
     tag.svg(
-      (title_attr + marker_lines + bars).html_safe,
+      (title_attr + marker_lines + bars + hover_targets).html_safe,
       viewBox: "0 0 #{width} #{height}",
       width: width,
       height: height,

@@ -38,6 +38,7 @@ class EndpointsController < ApplicationController
       limit: @name_query ? nil : 20
     )
 
+    @sparkline_range = time_range
     sparkline_names = @endpoints.map { |e| e["transaction_name"] }
     sparkline_key = [
       "endpoints_p95_sparklines/v1", @project.id, @time_range,
@@ -76,10 +77,10 @@ class EndpointsController < ApplicationController
     # of the filter window above. Hourly buckets (168 over 7d) read directly from
     # the pre-aggregated histograms, so this stays cheap.
     @p95_sparkline_days = 7
-    sparkline_range = @p95_sparkline_days.days.ago..Time.current
+    @p95_sparkline_range = @p95_sparkline_days.days.ago..Time.current
     @p95_sparkline = Transaction.p95_by_bucket(
       transaction_names: [@endpoint],
-      time_range: sparkline_range,
+      time_range: @p95_sparkline_range,
       buckets: 168,
       project_id: @project.id
     )[@endpoint] || []

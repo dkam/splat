@@ -1,3 +1,10 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* Sparkline hover columns (see ApplicationHelper#sparkline): invisible until
+   pointed at, then a faint tint so you can tell which bucket the tooltip is
+   describing. */
+.sparkline-hover:hover {
+  fill-opacity: 0.15;
+}

@@ -111,9 +111,10 @@
                 <td class="px-3 py-4 whitespace-nowrap text-center">
                   <% spark = @endpoint_sparklines[endpoint["transaction_name"]] %>
                   <% if spark&.any? { |v| v.to_i.positive? } %>
-                    <span class="text-blue-500 dark:text-blue-400">
+                    <span class="text-blue-500 dark:text-blue-400" data-controller="sparkline-tooltip">
                       <%= sparkline(spark, width: 80, height: 24,
-                          title: "p95 latency in window — peak #{format_duration(spark.max)}") %>
+                          title: "p95 latency in window — peak #{format_duration(spark.max)}",
+                          bar_titles: sparkline_bucket_titles(spark, range: @sparkline_range) { |v| "p95 #{format_duration(v)}" }) %>
                     </span>
                   <% else %>
                     <span class="text-gray-300 dark:text-gray-600 text-sm">—</span>
