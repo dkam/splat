@@ -1017,15 +1017,40 @@ Once configured, you can ask Claude:
 ### Security
 
 - **Token-based authentication** - Uses Bearer token for all requests
-- **Read-only access** - MCP tools can query data but not modify anything
+- **Mostly read-only** - all tools query; only `resolve_issue`, `ignore_issue` and
+  `reopen_issue` write, and they carry `readOnlyHint: false` annotations so
+  clients can tell them apart
 - **HTTPS recommended** - Use HTTPS in production to protect token in transit
 - **Simple token rotation** - Just update `MCP_AUTH_TOKEN` and restart
 
 ### Implementation
 
-- **No external dependencies** - Manual JSON-RPC 2.0 implementation
-- **Single controller** - All MCP logic in `app/controllers/mcp/mcp_controller.rb`
-- **Easy to extend** - Add new tools by defining in `tools_list` and implementing handler
+Built on the official [`mcp` gem](https://github.com/modelcontextprotocol/ruby-sdk)
+(since v1.15.0 — replaced a hand-rolled JSON-RPC server pinned to the 2024-11-05
+spec). Three pieces:
+
+- **`app/controllers/mcp/mcp_controller.rb`** - HTTP edge only: Bearer-token auth,
+  then `SplatMcpServer.build.handle(frame)`. No transport is used — Splat has no
+  need for SSE or sessions, and `handle` avoids the `StreamableHTTPTransport`
+  Host/Origin allow-list that would otherwise 403 behind a reverse proxy.
+- **`app/mcp/splat_mcp_server.rb`** - tool schemas, annotations, and the
+  `MCP::Server` itself. Built per request, because schemas interpolate the live
+  retention ceiling from `Setting`.
+- **`app/mcp/splat_mcp_tools.rb`** - the tool implementations and their markdown
+  formatting. Each takes a string-keyed hash and returns an `MCP::Tool::Response`.
+
+**Adding a tool:** add an entry to `SplatMcpServer.tool_definitions` and a method
+of the same name on `SplatMcpTools` returning `render_text(...)`.
+
+Notes:
+
+- Protocol version is negotiated, not pinned. `instructions` (the serial-calls
+  note) only reaches clients on 2025-03-26 and later.
+- Argument validation is off (`validate_tool_call_arguments: false`) — the tools
+  coerce leniently (`"20"` for an integer `limit` works), and turning it on would
+  make that a hard error. Flip it once the schemas match what's accepted.
+- Tool-argument failures come back as `isError: true` responses so the model can
+  read and correct them, not as JSON-RPC errors.
 
 ## Future Enhancements (Maybe)
 

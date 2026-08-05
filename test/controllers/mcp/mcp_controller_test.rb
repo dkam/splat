@@ -14,14 +14,68 @@ module Mcp
     end
 
     test "initialize tells the client to call serially" do
-      post "/mcp",
-        params: {jsonrpc: "2.0", id: 1, method: "initialize", params: {}}.to_json,
-        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+      initialize_with("2025-06-18")
 
       assert_response :success
       instructions = JSON.parse(response.body).dig("result", "instructions").to_s
       assert_match(/SERIALLY/, instructions)
       assert_match(/no server-side statement timeout/i, instructions)
+    end
+
+    test "initialize negotiates the client's protocol version" do
+      initialize_with("2025-06-18")
+      assert_equal "2025-06-18", JSON.parse(response.body).dig("result", "protocolVersion")
+
+      # An unrecognised version falls back to the SDK's default rather than
+      # failing the handshake.
+      initialize_with("1999-01-01")
+      assert_response :success
+      assert_match(/\A20\d\d-/, JSON.parse(response.body).dig("result", "protocolVersion").to_s)
+    end
+
+    # `instructions` didn't exist before 2025-03-26. The old hand-rolled server
+    # advertised 2024-11-05 and sent it anyway; the SDK is honest about it, so a
+    # client pinned that far back loses the note. Asserted so the loss is a
+    # deliberate, visible property rather than a silent one.
+    test "a client pinned to 2024-11-05 gets no instructions" do
+      initialize_with("2024-11-05")
+
+      assert_response :success
+      body = JSON.parse(response.body)
+      assert_equal "2024-11-05", body.dig("result", "protocolVersion")
+      assert_nil body.dig("result", "instructions")
+    end
+
+    # A notification has no id and must not be answered with a JSON-RPC frame.
+    test "notifications/initialized is accepted with no body" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", method: "notifications/initialized"}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :accepted
+      assert_empty response.body
+    end
+
+    test "ping is answered" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 9, method: "ping"}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      assert_equal({}, JSON.parse(response.body)["result"])
+    end
+
+    test "tools/list advertises read-only and write tools distinctly" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 2, method: "tools/list", params: {}}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      tools = JSON.parse(response.body).dig("result", "tools").index_by { |t| t["name"] }
+
+      assert_equal true, tools.dig("search_issues", "annotations", "readOnlyHint")
+      assert_equal false, tools.dig("resolve_issue", "annotations", "readOnlyHint")
+      assert_equal false, tools.dig("resolve_issue", "annotations", "destructiveHint")
     end
 
     test "get_status reports version, storage, and compression from the snapshot" do
@@ -239,9 +293,8 @@ module Mcp
       gone = (cap_days + 30).days.ago
       call_tool("search_slow_transactions", {"end_time" => gone.utc.iso8601, "time_range_hours" => 6})
 
-      error = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match(/retained for #{cap_days} days/, error)
-      assert_match(/Nothing from it remains/, error)
+      assert_match(/retained for #{cap_days} days/, tool_error)
+      assert_match(/Nothing from it remains/, tool_error)
     end
 
     test "a window straddling the retention cutoff is pulled forward with a note" do
@@ -261,15 +314,13 @@ module Mcp
       call_tool("search_slow_transactions", {
         "start_time" => 1.day.ago.utc.iso8601, "end_time" => 2.days.ago.utc.iso8601
       })
-      assert_match(/end_time must be after start_time/,
-        JSON.parse(response.body).dig("error", "message").to_s)
+      assert_match(/end_time must be after start_time/, tool_error)
     end
 
     test "an unparseable timestamp says which argument and what format" do
       call_tool("search_slow_transactions", {"end_time" => "last tuesday"})
-      error = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match(/Invalid end_time/, error)
-      assert_match(/ISO 8601/, error)
+      assert_match(/Invalid end_time/, tool_error)
+      assert_match(/ISO 8601/, tool_error)
     end
 
     test "output labels an absolute window with its bounds, not 'last Nh'" do
@@ -403,13 +454,11 @@ module Mcp
       end
     end
 
-    test "an unknown project is a bad request naming the real projects" do
+    test "an unknown project is a tool error naming the real projects" do
       call_tool("search_logs", {"query" => "inbound", "project" => "no-such-project"})
-      assert_response :bad_request
 
-      message = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match "Unknown project: no-such-project", message
-      assert_match projects(:one).slug, message
+      assert_match "Unknown project: no-such-project", tool_error
+      assert_match projects(:one).slug, tool_error
     end
 
     test "list_recent_issues honours the project filter" do
@@ -434,7 +483,7 @@ module Mcp
       seed_log_in(projects(:one), "alpha inbound line")
 
       call_tool("search_logs", {"query" => "inbound", "project" => "   "})
-      assert_response :bad_request
+      assert_match(/Unknown project/, tool_error)
       assert_no_match(/alpha inbound line/, response.body)
     end
 
@@ -443,12 +492,10 @@ module Mcp
         public_key: "dup-key")
 
       call_tool("search_logs", {"query" => "inbound", "project" => projects(:one).name})
-      assert_response :bad_request
 
-      message = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match "matches 2 projects by name", message
-      assert_match duplicate.slug, message
-      assert_match projects(:one).slug, message
+      assert_match "matches 2 projects by name", tool_error
+      assert_match duplicate.slug, tool_error
+      assert_match projects(:one).slug, tool_error
     end
 
     test "a slug still wins over another project's identical name" do
@@ -587,12 +634,11 @@ module Mcp
     end
 
     test "get_transaction with neither id nor trace_id explains what is needed" do
-      # Surfaces through the standard RecordNotFound mapping (JSON-RPC -32602),
-      # same as any other failed lookup — what matters is that the message names
-      # both arguments rather than reporting a blank transaction_id miss.
+      # Surfaces as a tool error, same as any other failed lookup — what matters
+      # is that the message names both arguments rather than reporting a blank
+      # transaction_id miss.
       call_tool("get_transaction", {})
-      assert_equal "Supply either transaction_id or trace_id",
-        JSON.parse(response.body).dig("error", "data")
+      assert_equal "Supply either transaction_id or trace_id", tool_error
     end
 
     test "get_transaction lists the errors thrown during the request" do
@@ -685,6 +731,27 @@ module Mcp
 
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+    end
+
+    # A tool that fails on its arguments answers with a successful JSON-RPC
+    # response carrying isError, not a JSON-RPC error — that's what puts the
+    # message in front of the model instead of the transport. See
+    # SplatMcpTools#render_error.
+    def tool_error
+      body = JSON.parse(response.body)
+      assert_equal true, body.dig("result", "isError"),
+        "expected a tool error, got: #{response.body}"
+      body.dig("result", "content", 0, "text").to_s
+    end
+
+    def initialize_with(protocol_version)
+      post "/mcp",
+        params: {
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: {protocolVersion: protocol_version, capabilities: {},
+                   clientInfo: {name: "test", version: "1.0"}}
+        }.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
     end
 
     def seed_log_in(project, body)
