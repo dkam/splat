@@ -1,4 +1,4 @@
-web: bin/rails server -b 0.0.0.0 -p 3030
+web: bin/rails server -b 0.0.0.0 -p 3304
 ingest: bin/worker ingest
 maintenance: bin/worker maintenance
 scheduler: bin/scheduler
