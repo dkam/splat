@@ -19,11 +19,30 @@ module Authentication
   end
 
   def require_authentication
+    return render_auth_misconfigured if SplatAuthorization.oidc_misconfigured?
     return if !SplatAuthorization.oidc_configured?  # Allow access if OIDC not configured
     return if authenticated? && oidc_session_valid?
 
     session[:return_to] = request.fullpath if request.get? && !request.xhr?
     redirect_to login_path
+  end
+
+  # Half-configured OIDC serves nothing rather than silently serving
+  # everything. The UI only: ingestion (Api::EnvelopesController,
+  # Api::OtlpLogsController), /_health and /mcp skip this filter outright and
+  # keep working, deliberately — a deploy typo that drops production error
+  # events on the floor is worse than an exposed UI on a trusted network, and
+  # MCP has its own token auth so it degrades to the instance token rather than
+  # falling open.
+  def render_auth_misconfigured
+    missing = SplatAuthorization.missing_oidc_vars
+    Rails.logger.error "Refusing request: OIDC is half-configured, missing #{missing.join(", ")}"
+
+    if request.format.html?
+      render "errors/auth_misconfigured", layout: false, status: :service_unavailable
+    else
+      head :service_unavailable
+    end
   end
 
   def start_new_session_for(user_info, sid: nil)

@@ -44,6 +44,23 @@
         </div>
       <% elsif SplatAuthorization.oidc_configured? %>
         <div class="space-y-4">
+          <%# An empty allowlist denies everyone. That's the right default, but %>
+          <%# without this warning you find out by completing the whole provider %>
+          <%# round trip and coming back to "your email is not authorized", %>
+          <%# which reads like the user's fault rather than a missing variable. %>
+          <% unless SplatAuthorization.allowlist_configured? %>
+            <div class="p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-md">
+              <p class="text-sm text-amber-800 dark:text-amber-300">
+                <strong>No allowlist configured.</strong>
+                Neither
+                <code class="font-mono text-xs">SPLAT_ALLOWED_USERS</code> nor
+                <code class="font-mono text-xs">SPLAT_ALLOWED_DOMAINS</code>
+                is set, so every login will be denied once you return from the provider.
+                Set one of them and restart Splat.
+              </p>
+            </div>
+          <% end %>
+
           <p class="text-center text-gray-600 dark:text-gray-400">
             Click below to log in with your OpenID Connect provider:
           </p>
@@ -54,7 +71,7 @@
             class: "w-full flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-900 transition duration-150 ease-in-out text-center"
           ) %>
         </div>
-      <% else %>
+      <% elsif SplatAuthorization.oidc_misconfigured? %>
         <div class="text-center space-y-4">
           <p class="text-red-600 dark:text-red-400">
             <svg class="inline-block w-8 h-8 mb-2" fill="currentColor" viewBox="0 0 20 20">
@@ -62,11 +79,28 @@
             </svg>
           </p>
 
-          <p class="font-semibold text-gray-900 dark:text-gray-100">Authentication Not Configured</p>
+          <p class="font-semibold text-gray-900 dark:text-gray-100">Authentication Half-Configured</p>
           <p class="text-gray-600 dark:text-gray-400 text-sm">
-            OpenID Connect authentication is not properly configured.
-            Please contact an administrator for assistance.
+            Some OpenID Connect settings are present but not all of them, so Splat is
+            refusing to serve the UI rather than run unauthenticated. Missing:
           </p>
+          <ul class="text-sm text-gray-900 dark:text-gray-100 space-y-1">
+            <% SplatAuthorization.missing_oidc_vars.each do |var| %>
+              <li><code class="font-mono text-xs bg-gray-100 dark:bg-gray-800 rounded px-1.5 py-0.5"><%= var %></code></li>
+            <% end %>
+          </ul>
+        </div>
+      <% else %>
+        <div class="text-center space-y-4">
+          <p class="font-semibold text-gray-900 dark:text-gray-100">Authentication Not Enabled</p>
+          <p class="text-gray-600 dark:text-gray-400 text-sm">
+            This Splat instance has no OpenID Connect provider configured and is serving
+            without authentication — its single-tenant default. There's nothing to log in to.
+          </p>
+
+          <div class="pt-2">
+            <%= link_to "Continue to Dashboard", root_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-900 transition-colors" %>
+          </div>
         </div>
       <% end %>
 

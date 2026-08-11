@@ -1,0 +1,83 @@
+<%#
+  Rendered with layout: false — the application layout's header calls out to
+  tuber for queue depth and ingest health, which is pointless work for a page
+  that exists to say "a variable is missing". Styles are inline for the same
+  reason: this page has to render even if something upstream of the asset
+  pipeline is unhappy.
+%><!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Splat — authentication misconfigured</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        background: #f9fafb;
+        color: #111827;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.5;
+      }
+      .card {
+        max-width: 34rem;
+        width: 100%;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+      p { margin: 0 0 0.75rem; font-size: 0.925rem; }
+      ul { margin: 0 0 0.75rem; padding-left: 1.25rem; }
+      li { font-size: 0.925rem; }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: #f3f4f6;
+        border-radius: 0.25rem;
+        padding: 0.1rem 0.3rem;
+      }
+      .muted { color: #6b7280; font-size: 0.825rem; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #030712; color: #f3f4f6; }
+        .card { background: #111827; border-color: #1f2937; }
+        code { background: #1f2937; }
+        .muted { color: #9ca3af; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>🐛💥 Authentication is half-configured</h1>
+
+      <p>
+        Splat found some OpenID Connect settings but not all of them, so it can't tell
+        whether this instance is meant to be open or protected. Rather than guess and
+        serve the UI unauthenticated, it is refusing to serve it at all.
+      </p>
+
+      <p>Set the missing variables and restart:</p>
+      <ul>
+        <% SplatAuthorization.missing_oidc_vars.each do |var| %>
+          <li><code><%= var %></code></li>
+        <% end %>
+      </ul>
+
+      <p>
+        To run Splat deliberately open instead, unset <em>all</em> of
+        <code><%= SplatAuthorization::OIDC_VARS.join("</code>, <code>").html_safe %></code>.
+      </p>
+
+      <p class="muted">
+        Event ingestion, <code>/_health</code> and <code>/mcp</code> are unaffected and
+        still accepting data.
+      </p>
+    </div>
+  </body>
+</html>
