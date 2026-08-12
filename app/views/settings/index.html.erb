@@ -501,6 +501,13 @@
         <dt class="text-sm text-gray-500 dark:text-gray-400">Splat</dt>
         <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100"><%= Splat::VERSION %></dd>
       </div>
+      <%# The release you asked for vs. the commit you actually got. Same %>
+      <%# number twice is the boring case; a mismatch is how you find out a %>
+      <%# deploy didn't land. %>
+      <div>
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Revision</dt>
+        <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100" title="Commit this build came from"><%= Rails.application.config.x.revision %></dd>
+      </div>
       <div>
         <dt class="text-sm text-gray-500 dark:text-gray-400">Rails</dt>
         <dd class="mt-1 font-mono text-gray-900 dark:text-gray-100"><%= Rails.version %></dd>

@@ -3,11 +3,19 @@ name: Build and publish image
 # Publishes the multi-arch image (amd64 + arm64) to GitHub Packages
 # (ghcr.io/dkam/splat) whenever config/version.rb changes on main — a version
 # bump IS the release. Each arch builds natively (no QEMU); a merge job stitches
-# them into one manifest tagged :vX.Y.Z (+ :latest for non-pre-releases).
+# them into one manifest tagged :vX.Y.Z (+ :latest for non-pre-releases), and a
+# final job creates the matching git tag and GitHub Release.
 #
 # To cut a release: edit Splat::VERSION in config/version.rb, commit, push.
 # For a dev build: set a pre-release version (e.g. "1.1.0-dev") — it publishes
-# :v1.1.0-dev but does not move :latest. Or run this workflow manually.
+# :v1.1.0-dev, does not move :latest, and creates no git tag. Or run this
+# workflow manually.
+#
+# The `tag` job at the bottom exists because of what happened without it: the
+# image tags kept moving and the git tags stopped, so config/version.rb reached
+# 1.14.0 while the newest git tag was still v1.7.8 — eight releases with no
+# commit you could check out. Tagging was a separate manual step, and manual
+# steps stop happening. Here the tag is a consequence of the release.
 
 on:
   push:
@@ -76,6 +84,10 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          # Read at boot by config/initializers/revision.rb, so a running
+          # container can say which commit it is.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -127,5 +139,49 @@ jobs:
           fi
           docker buildx imagetools create $tags $(printf '${{ env.IMAGE }}@sha256:%s ' *)
 
+      # Inspect the version tag, not :latest — a pre-release never moves
+      # :latest, so inspecting it would fail on exactly the builds that most
+      # want checking.
       - name: Inspect result
-        run: docker buildx imagetools inspect ${{ env.IMAGE }}:latest
+        run: docker buildx imagetools inspect ${{ env.IMAGE }}:v${{ needs.prepare.outputs.version }}
+
+  # Tag the commit the image was built from, so `git checkout vX.Y.Z` gets you
+  # exactly what is running. Only for real releases: a pre-release publishes an
+  # image but does not earn a permanent mark in the history.
+  tag:
+    needs: [prepare, merge]
+    if: needs.prepare.outputs.latest == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create the release tag
+        env:
+          VERSION: v${{ needs.prepare.outputs.version }}
+        run: |
+          # Idempotent: re-running the workflow on an unchanged version should
+          # be a no-op rather than a failure.
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "$VERSION already tagged — nothing to do."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Splat $VERSION"
+          git push origin "$VERSION"
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: v${{ needs.prepare.outputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists — nothing to do."
+            exit 0
+          fi
+          gh release create "$VERSION" \
+            --title "Splat $VERSION" \
+            --generate-notes

@@ -16,7 +16,14 @@ module Splat
     # Production must supply a real secret. In development/test Rails falls
     # back to a generated local secret (tmp/local_secret.txt), so CI tooling
     # and `bin/rails` work without the env var being set.
-    if Rails.env.production?
+    #
+    # SECRET_KEY_BASE_DUMMY is the exception, and the only one: Rails sets it
+    # for boots that compile assets rather than serve traffic — the Dockerfile's
+    # `assets:precompile` boots RAILS_ENV=production with no runtime config at
+    # all. A check that guards *serving* must not fire while *building*, or the
+    # image cannot be built. Reading ENV["SECRET_KEY_BASE"] directly here would
+    # bypass the mechanism Rails provides for exactly this case.
+    if Rails.env.production? && ENV["SECRET_KEY_BASE_DUMMY"].blank?
       config.secret_key_base = ENV.fetch("SECRET_KEY_BASE") do
         raise "SECRET_KEY_BASE environment variable is required but not set. " \
               "Set it in your .env file or environment."
