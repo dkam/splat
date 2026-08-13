@@ -14,7 +14,7 @@ class HistogramRollupJobTest < ActiveSupport::TestCase
     defaults = {
       project_id: @project.id, transaction_name: "GET /x", timestamp: @hour,
       duration: 100, db_time: nil, view_time: nil, http_status: nil,
-      query_count: 0, has_n_plus_one: false, spans_truncated: false
+      query_count: 0, has_n_plus_one: false, n_plus_one_time: nil, spans_truncated: false
     }
     Transaction.insert_all!(rows.map { |r|
       defaults.merge(r).merge(
@@ -28,7 +28,7 @@ class HistogramRollupJobTest < ActiveSupport::TestCase
     insert_raw([
       {duration: 100, db_time: 40, view_time: 10, query_count: 2, http_status: "200"},
       {duration: 100, db_time: 60, query_count: 4, http_status: "200"},
-      {duration: 1000, has_n_plus_one: true, query_count: 30, http_status: "500"}
+      {duration: 1000, has_n_plus_one: true, n_plus_one_time: 96, query_count: 30, http_status: "500"}
     ])
 
     Analytics::HistogramRollupJob.new.perform(@hour)
@@ -46,6 +46,7 @@ class HistogramRollupJobTest < ActiveSupport::TestCase
     assert_equal 36, row["sum_query_count"]
     assert_equal 30, row["max_query_count"]
     assert_equal 1, row["n_plus_one_count"]
+    assert_equal 96, row["sum_n_plus_one_time"]
     assert_equal 1, row["error_count"]
 
     hist = Transaction.connection.select_value(

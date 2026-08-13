@@ -238,4 +238,62 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     # The transient raw-SQL set never reaches the stored structure.
     result[:query_patterns].each_value { |d| refute d.key?(:raw_seen) }
   end
+
+  # ---- Duration weighting: db spans contribute timing to patterns. ----
+
+  def db_breadcrumb(sql)
+    {"category" => "sql.active_record", "data" => {"sql" => sql}}
+  end
+
+  def db_span(sql, duration_ms:, op: "db.sql.active_record", at: 1_700_000_000.0)
+    {"op" => op, "description" => sql, "start_timestamp" => at, "timestamp" => at + (duration_ms / 1000.0)}
+  end
+
+  test "span durations are summed into the pattern they normalize to" do
+    sqls = 5.times.map { |i| %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1) }
+    breadcrumbs = sqls.map { |s| db_breadcrumb(s) }
+    spans = sqls.map { |s| db_span(s, duration_ms: 8) }
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs, spans: spans)
+    data = result[:query_patterns].values.first
+    assert_in_delta 40.0, data[:total_time_ms], 0.5
+    # All the wasted time sits in the one flagged pattern.
+    assert_in_delta 40, result[:n_plus_one_time_ms], 1
+  end
+
+  test "n_plus_one_time_ms sums only flagged patterns, not one-off queries" do
+    n_plus_one = 5.times.map { |i| %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1) }
+    one_off = %(SELECT "posts".* FROM "posts" WHERE "posts"."id" = 1)
+    breadcrumbs = (n_plus_one + [one_off]).map { |s| db_breadcrumb(s) }
+    spans = n_plus_one.map { |s| db_span(s, duration_ms: 10) } + [db_span(one_off, duration_ms: 500)]
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs, spans: spans)
+    # The slow one-off keeps its own timing but never counts as waste.
+    assert_in_delta 50, result[:n_plus_one_time_ms], 1
+    one_off_pattern = result[:query_patterns].find { |k, _| k.include?("posts") }.last
+    assert_in_delta 500.0, one_off_pattern[:total_time_ms], 0.5
+  end
+
+  test "without spans, timing fields stay absent and n_plus_one_time_ms is nil" do
+    breadcrumbs = 5.times.map { |i| db_breadcrumb(%(SELECT "users".* FROM "users" WHERE "users"."id" = #{i})) }
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs)
+    assert_nil result[:n_plus_one_time_ms]
+    result[:query_patterns].each_value { |d| refute d.key?(:total_time_ms) }
+    # Unknown ≠ zero: the flag itself is unaffected.
+    assert_equal 1, result[:potential_n_plus_one].size
+  end
+
+  test "non-db spans and spans matching no pattern contribute nothing" do
+    sqls = 5.times.map { |i| %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i}) }
+    breadcrumbs = sqls.map { |s| db_breadcrumb(s) }
+    spans = [
+      db_span(sqls.first, duration_ms: 100, op: "view.process_action.action_controller"),
+      db_span(%(SELECT "unrelated".* FROM "unrelated"), duration_ms: 100),
+      db_span(sqls.first, duration_ms: 7)
+    ]
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs, spans: spans)
+    assert_in_delta 7, result[:n_plus_one_time_ms], 1
+  end
 end

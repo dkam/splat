@@ -27,29 +27,26 @@ class Transaction
       }
     end
 
-    # Analyze SQL queries for performance patterns and N+1 detection
-    def self.analyze_sql_queries(breadcrumbs = [])
-      if breadcrumbs.blank?
-        return {
-          total_queries: 0,
-          unique_patterns: 0,
-          potential_n_plus_one: [],
-          query_patterns: {}
-        }
-      end
+    # Analyze SQL queries for performance patterns and N+1 detection.
+    # Breadcrumbs are the source of truth for counts (every query leaves one);
+    # spans, when given, contribute timing — each db span's duration is
+    # attributed to the pattern its description normalizes to, so findings can
+    # be ranked by wasted time rather than repetition count.
+    def self.analyze_sql_queries(breadcrumbs = [], spans: [])
+      empty = {
+        total_queries: 0,
+        unique_patterns: 0,
+        potential_n_plus_one: [],
+        query_patterns: {},
+        n_plus_one_time_ms: nil
+      }
+      return empty if breadcrumbs.blank?
 
       sql_breadcrumbs = breadcrumbs
         .select { |bc| bc["category"] == "sql.active_record" }
         .reject { |bc| infrastructure_query?(bc.dig("data", "sql")) }
 
-      if sql_breadcrumbs.blank?
-        return {
-          total_queries: 0,
-          unique_patterns: 0,
-          potential_n_plus_one: [],
-          query_patterns: {}
-        }
-      end
+      return empty if sql_breadcrumbs.blank?
 
       # Extract and normalize SQL patterns
       query_patterns = {}
@@ -79,6 +76,8 @@ class Transaction
         data[:distinct_count] = data.delete(:raw_seen).size
       end
 
+      attribute_span_durations(query_patterns, spans)
+
       # Detect potential N+1 queries (same pattern executed multiple times)
       potential_n_plus_one = query_patterns.select { |pattern, data| data[:count] > N_PLUS_ONE_THRESHOLD }.keys
 
@@ -86,8 +85,43 @@ class Transaction
         total_queries: sql_breadcrumbs.size,
         unique_patterns: query_patterns.size,
         potential_n_plus_one: potential_n_plus_one,
-        query_patterns: query_patterns
+        query_patterns: query_patterns,
+        n_plus_one_time_ms: n_plus_one_time_ms(query_patterns, potential_n_plus_one)
       }
+    end
+
+    # Sum each db span's duration into the pattern its description normalizes
+    # to. Spans and breadcrumbs both originate from sql.active_record
+    # notifications, so the raw SQL text matches; patterns with no matching
+    # span (span cap hit, spans absent) simply get no total_time_ms — timing
+    # is additive information, never a substitute for the breadcrumb counts.
+    def self.attribute_span_durations(query_patterns, spans)
+      return if spans.blank?
+
+      spans.each do |span|
+        next unless span["op"].to_s.start_with?("db")
+        description = span["description"]
+        next if description.blank? || !span["start_timestamp"] || !span["timestamp"]
+
+        pattern = truncate_sql(normalize_sql_pattern(description))
+        data = query_patterns[pattern]
+        next unless data
+
+        data[:total_time_ms] = (data[:total_time_ms] || 0.0) + ((span["timestamp"] - span["start_timestamp"]) * 1000)
+      end
+
+      query_patterns.each_value do |data|
+        data[:total_time_ms] = data[:total_time_ms].round(1) if data[:total_time_ms]
+      end
+    end
+
+    # The transaction's wasted-time scalar: summed db time of its flagged
+    # patterns. nil (not 0) when no flagged pattern got span timing — unknown
+    # and zero must stay distinguishable in the hourly aggregates.
+    def self.n_plus_one_time_ms(query_patterns, potential_n_plus_one)
+      timed = potential_n_plus_one.filter_map { |p| query_patterns.dig(p, :total_time_ms) }
+      return nil if timed.empty?
+      timed.sum.round
     end
 
     # Calculate total duration for specific operation types
@@ -178,6 +212,7 @@ class Transaction
         .strip
     end
 
-    private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern, :truncate_sql
+    private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern, :truncate_sql,
+      :attribute_span_durations, :n_plus_one_time_ms
   end
 end

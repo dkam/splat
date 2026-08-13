@@ -784,7 +784,9 @@ class SplatMcpTools
           avg_queries: r["avg_queries"]&.to_f,
           max_queries: r["max_queries"]&.to_i,
           avg_duration: r["avg_duration"]&.to_f,
-          p95_duration: r["p95_duration"]&.to_f
+          p95_duration: r["p95_duration"]&.to_f,
+          n_plus_one_time_ms: r["n_plus_one_time"].to_i,
+          avg_n_plus_one_time_ms: r["avg_n_plus_one_time"]&.to_f
         }
       end
     }
@@ -1376,6 +1378,7 @@ class SplatMcpTools
         txn.potential_n_plus_one_queries.first(5).each do |pattern|
           count = txn.query_patterns.dig(pattern, "count")
           distinct = txn.query_patterns.dig(pattern, "distinct_count")
+          time_ms = txn.query_patterns.dig(pattern, "total_time_ms")
           # distinct == 1 means the byte-identical query fired N times
           # (memoisation/query-cache miss), not an N+1 over N records.
           note = if count && distinct == 1
@@ -1385,6 +1388,7 @@ class SplatMcpTools
           elsif count
             " (×#{count})"
           end
+          note = "#{note} — #{format_ms(time_ms)} total" if note && time_ms
           result += "  - `#{pattern}`#{note}\n"
         end
       end
@@ -1547,17 +1551,22 @@ class SplatMcpTools
       return header + "No N+1 patterns detected in this window.\n"
     end
 
-    header += "| Endpoint | N+1 / Total | % Affected | Avg Queries | Max Queries | Avg | P95 |\n"
-    header += "|---|---:|---:|---:|---:|---:|---:|\n"
+    header += "| Endpoint | N+1 / Total | % Affected | Avg Queries | Max Queries | Wasted | Wasted/req | Avg | P95 |\n"
+    header += "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
     rows.each do |r|
+      wasted = r["n_plus_one_time"].to_i
       header += "| #{r["transaction_name"]} " \
                "| #{r["n_plus_one_count"]} / #{r["total_count"]} " \
                "| #{r["n_plus_one_pct"]}% " \
                "| #{r["avg_queries"].to_f.round(1)} " \
                "| #{r["max_queries"]} " \
+               "| #{wasted.positive? ? format_ms(wasted) : "—"} " \
+               "| #{wasted.positive? ? format_ms(r["avg_n_plus_one_time"]) : "—"} " \
                "| #{format_ms(r["avg_duration"])} " \
                "| #{format_ms(r["p95_duration"])} |\n"
     end
+    header += "\nWasted = db time spent inside the repeated patterns across the window. " \
+      "— means no span timing was recorded for the flagged patterns (rows from before wasted-time tracking, or spans not sampled).\n"
     header
   end
 

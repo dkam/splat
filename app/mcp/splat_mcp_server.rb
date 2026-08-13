@@ -297,7 +297,9 @@ class SplatMcpServer
                   avg_queries: {type: ["number", "null"]},
                   max_queries: {type: ["integer", "null"]},
                   avg_duration: MS,
-                  p95_duration: MS
+                  p95_duration: MS,
+                  n_plus_one_time_ms: {type: "integer", description: "Total db ms spent inside the flagged patterns across the window; 0 when no span timing was recorded"},
+                  avg_n_plus_one_time_ms: {type: ["number", "null"], description: "n_plus_one_time_ms / affected transactions"}
                 }
               }
             }
@@ -466,7 +468,7 @@ class SplatMcpServer
       },
       {
         name: "find_n_plus_one_endpoints",
-        description: "List endpoints where transactions show N+1 query patterns (the same SQL pattern repeated >3 times in one request). Ranked by number of affected transactions. Returns N+1 count, total count, % affected, avg/max queries per request, and avg/p95 duration. Use this to find endpoints that need eager-loading or query consolidation.",
+        description: "List endpoints where transactions show N+1 query patterns (the same SQL pattern repeated >3 times in one request). Ranked by wasted time — total db time spent inside the repeated patterns — then by affected transactions where timing is unavailable. Returns N+1 count, total count, % affected, avg/max queries per request, wasted time, and avg/p95 duration. Use this to find endpoints that need eager-loading or query consolidation.",
         inputSchema: {
           type: "object",
           properties: {

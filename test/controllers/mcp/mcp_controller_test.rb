@@ -160,6 +160,26 @@ module Mcp
       assert_equal({"monitors" => []}, tool_structured)
     end
 
+    test "find_n_plus_one_endpoints carries wasted time in markdown and structured content" do
+      at = (Time.current - 2.hours).beginning_of_hour
+      3.times do
+        Transaction.create!(project: projects(:one), transaction_id: SecureRandom.uuid,
+          transaction_name: "BooksController#show", timestamp: at, duration: 500,
+          query_count: 40, has_n_plus_one: true, n_plus_one_time: 96)
+      end
+
+      call_tool("find_n_plus_one_endpoints", {})
+      assert_response :success
+
+      assert_match(/Wasted/, tool_text)
+      assert_match(/288(\.0)?\s*ms/, tool_text)
+
+      row = tool_structured["endpoints"].find { |e| e["transaction_name"] == "BooksController#show" }
+      assert row, "expected BooksController#show in structuredContent, got #{tool_structured.inspect}"
+      assert_equal 288, row["n_plus_one_time_ms"]
+      assert_in_delta 96.0, row["avg_n_plus_one_time_ms"], 0.1
+    end
+
     test "get_status reports version, storage, and compression from the snapshot" do
       fake = {
         total: 700_000_000,

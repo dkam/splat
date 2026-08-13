@@ -19,6 +19,7 @@ module TransactionAnalytics
     COALESCE(SUM(sum_query_count), 0)  AS sum_query_count,
     COALESCE(MAX(max_query_count), 0)  AS max_query_count,
     COALESCE(SUM(n_plus_one_count), 0) AS n_plus_one_count,
+    COALESCE(SUM(sum_n_plus_one_time), 0) AS sum_n_plus_one_time,
     COALESCE(SUM(error_count), 0)      AS error_count
   SQL
 
@@ -139,6 +140,7 @@ module TransactionAnalytics
       ranked = rows.map do |r|
         cnt = r["count"].to_i
         npo = r["n_plus_one_count"].to_i
+        wasted = r["sum_n_plus_one_time"].to_i
         {
           "transaction_name" => r["transaction_name"],
           "n_plus_one_count" => npo,
@@ -149,9 +151,16 @@ module TransactionAnalytics
           "avg_duration" => cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt).round(1),
           "max_duration" => r["max_duration"].to_i,
           "avg_queries" => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
-          "max_queries" => r["max_query_count"].to_i
+          "max_queries" => r["max_query_count"].to_i,
+          # Total db time spent inside flagged patterns across the window, and
+          # its per-affected-request average. 12 requests wasting 8ms each
+          # should outrank 40 wasting 0.2ms — repetition count can't say that.
+          "n_plus_one_time" => wasted,
+          "avg_n_plus_one_time" => npo.zero? ? 0.0 : (wasted.to_f / npo).round(1)
         }
-      end.sort_by { |r| -r["n_plus_one_count"] }.first(limit)
+      end.sort_by { |r| [-r["n_plus_one_time"], -r["n_plus_one_count"]] }.first(limit)
+      # Wasted time leads, affected count breaks ties — which also keeps rows
+      # from before the n_plus_one_time column (always 0) in a sane order.
 
       pcts = endpoint_percentiles_by_name(
         ranked.map { |r| r["transaction_name"] }, time_range, project_id: project_id, environment: environment
@@ -335,6 +344,7 @@ module TransactionAnalytics
         sum_query_count: r["sum_query_count"].to_i,
         max_query_count: r["max_query_count"].to_i,
         n_plus_one_count: r["n_plus_one_count"].to_i,
+        sum_n_plus_one_time: r["sum_n_plus_one_time"].to_i,
         error_count: r["error_count"].to_i
       }
     end

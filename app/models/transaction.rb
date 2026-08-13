@@ -59,7 +59,7 @@ class Transaction < TransactionsSpansRecord
     end
 
     breadcrumbs_values = payload.dig("breadcrumbs", "values") || []
-    query_analysis = SpanAnalyzer.analyze_sql_queries(breadcrumbs_values)
+    query_analysis = SpanAnalyzer.analyze_sql_queries(breadcrumbs_values, spans: payload["spans"] || [])
 
     # The JSON never duplicates a column: db/view are promoted to db_time/
     # view_time above, so they're excluded here (other client-sent
@@ -97,6 +97,7 @@ class Transaction < TransactionsSpansRecord
       measurements: enhanced_measurements,
       query_count: query_count,
       has_n_plus_one: has_n_plus_one,
+      n_plus_one_time: query_analysis[:n_plus_one_time_ms],
       spans_truncated: payload["spans"].is_a?(Array) && payload["spans"].size > SPAN_CAP
     }
 
