@@ -239,6 +239,11 @@
                   <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <%= (data["count"] || 0) > Transaction::SpanAnalyzer::N_PLUS_ONE_THRESHOLD ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' %>">
                     <%= data["count"] || 0 %>×
                   </span>
+                  <% if data["total_time_ms"] %>
+                    <div class="mt-1 text-xs font-medium text-gray-600 dark:text-gray-300 tabular-nums">
+                      <%= format_duration(data["total_time_ms"]) %>
+                    </div>
+                  <% end %>
                   <% if data["distinct_count"] && (data["count"] || 0) > 1 %>
                     <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       <%= data["distinct_count"] == 1 ? "identical query" : "#{data["distinct_count"]} distinct" %>

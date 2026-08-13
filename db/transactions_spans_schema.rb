@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_25_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_14_000001) do
   create_table "span_trees", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "dict_id"
@@ -69,6 +69,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_000003) do
     t.bigint "project_id", null: false
     t.bigint "sum_db_time", default: 0, null: false
     t.bigint "sum_duration", default: 0, null: false
+    t.bigint "sum_n_plus_one_time", default: 0, null: false
     t.bigint "sum_query_count", default: 0, null: false
     t.bigint "sum_view_time", default: 0, null: false
     t.string "transaction_name", null: false
@@ -87,6 +88,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_000003) do
     t.string "http_status"
     t.string "http_url"
     t.json "measurements"
+    t.integer "n_plus_one_time"
     t.string "op"
     t.integer "project_id", null: false
     t.integer "query_count", default: 0, null: false

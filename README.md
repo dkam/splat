@@ -327,8 +327,9 @@ Splat has no login by default — **authentication is off until you configure OI
 
 **Setting the OIDC values switches Splat into login-required mode.** As soon as all three `OIDC_*` variables are present, the UI is no longer open: every browser request must be authenticated via your OIDC provider, and the signed-in email must match the allowlist (`SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS`). Note:
 
-- **An empty allowlist locks everyone out.** If OIDC is configured but neither `SPLAT_ALLOWED_USERS` nor `SPLAT_ALLOWED_DOMAINS` is set, no email matches, so nobody can log in. Set at least one before enabling OIDC.
-- **Ingestion and tooling stay open.** The `/api/`, `/v1/logs`, `/mcp`, and `/_health` endpoints skip browser auth (they use token auth or are public), so enabling OIDC doesn't break event ingestion, log ingestion, MCP clients, or health checks.
+- **All three, or none.** Setting some but not all of the `OIDC_*` variables is treated as a fault, not as "open": the UI returns `503` and names the missing variable, rather than silently serving unauthenticated because of a typo. The login page and the startup log say the same thing. Unset all three to run open deliberately.
+- **An empty allowlist locks everyone out.** If OIDC is configured but neither `SPLAT_ALLOWED_USERS` nor `SPLAT_ALLOWED_DOMAINS` is set, no email matches, so nobody can log in. Set at least one before enabling OIDC. The login page warns about this before you make the round trip to your provider.
+- **Ingestion and tooling stay open.** The `/api/`, `/v1/logs`, `/mcp`, and `/_health` endpoints skip browser auth (they use token auth or are public), so enabling OIDC doesn't break event ingestion, log ingestion, MCP clients, or health checks — including while OIDC is half-configured, so a bad deploy costs you the UI, not your error events.
 
 
 ### Basic Auth

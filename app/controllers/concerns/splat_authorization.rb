@@ -5,6 +5,17 @@
 module SplatAuthorization
   extend ActiveSupport::Concern
 
+  # The three variables that together stand up an OIDC provider. All three or
+  # none — see .oidc_state.
+  OIDC_VARS = %w[OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_DISCOVERY_URL].freeze
+
+  # Allowlist variables. Set without a provider they express an intent to
+  # restrict access that nothing is enforcing, so boot warns about them — but
+  # they don't flip the instance into :misconfigured on their own, being the
+  # variables most likely to sit unused in a compose template shared across a
+  # fleet where one instance deliberately runs open.
+  ALLOWLIST_VARS = %w[SPLAT_ALLOWED_USERS SPLAT_ALLOWED_DOMAINS].freeze
+
   # Class methods for authorization checks
   class << self
     # Check if user is authorized to access Splat
@@ -23,11 +34,54 @@ module SplatAuthorization
       allowed_domains.any? { |allowed| domain_matches?(domain, allowed) }
     end
 
+    # Three states, not two:
+    #
+    #   :open          — no OIDC vars at all. Splat is single-tenant and trusts
+    #                    the network by design; serve everything.
+    #   :enforcing     — all three present. Require a session.
+    #   :misconfigured — some but not all. Somebody meant to turn auth on and a
+    #                    variable is missing or misspelled.
+    #
+    # The third state exists because oidc_configured? is not just the login
+    # gate: Mcp::McpController#mcp_auth_outcome consults it to decide whether
+    # MCP uses per-user tokens, and ApplicationController#refresh_mcp_authentication
+    # to decide whether to renew them. A single typo would otherwise flip three
+    # subsystems into a different security model with no signal at all, so the
+    # UI refuses to serve instead (Authentication#render_auth_misconfigured).
+    def oidc_state
+      case OIDC_VARS.count { |var| ENV[var].present? }
+      when OIDC_VARS.size then :enforcing
+      when 0 then :open
+      else :misconfigured
+      end
+    end
+
     # Check if OIDC is configured and ready
     def oidc_configured?
-      ENV["OIDC_CLIENT_ID"].present? &&
-        ENV["OIDC_CLIENT_SECRET"].present? &&
-        ENV["OIDC_DISCOVERY_URL"].present?
+      oidc_state == :enforcing
+    end
+
+    def oidc_misconfigured?
+      oidc_state == :misconfigured
+    end
+
+    def missing_oidc_vars
+      OIDC_VARS.reject { |var| ENV[var].present? }
+    end
+
+    # Allowlist set with no provider to authenticate against — nothing is
+    # enforcing it. Warned about at boot, not fatal.
+    def allowlist_without_provider?
+      oidc_state == :open && ALLOWLIST_VARS.any? { |var| ENV[var].present? }
+    end
+
+    # Whether anyone at all can pass authorized?. Both lists empty denies
+    # everyone, which is the right default — forgetting one variable shouldn't
+    # admit a whole domain — but it is indistinguishable from a provider
+    # problem once you're staring at "access denied", so the login page warns
+    # before the round trip.
+    def allowlist_configured?
+      allowed_emails.any? || allowed_domains.any?
     end
 
     private

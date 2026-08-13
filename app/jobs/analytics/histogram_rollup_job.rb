@@ -39,7 +39,7 @@ module Analytics
             (project_id, transaction_name, environment, hour_bucket,
              count, sum_duration, min_duration, max_duration,
              sum_db_time, db_time_count, sum_view_time, view_time_count,
-             sum_query_count, max_query_count, n_plus_one_count, error_count)
+             sum_query_count, max_query_count, n_plus_one_count, sum_n_plus_one_time, error_count)
           SELECT project_id,
                  transaction_name,
                  COALESCE(environment, '') AS environment,
@@ -55,6 +55,7 @@ module Analytics
                  COALESCE(SUM(query_count), 0),
                  COALESCE(MAX(query_count), 0),
                  SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END),
+                 COALESCE(SUM(n_plus_one_time), 0),
                  SUM(CASE WHEN CAST(http_status AS INTEGER) >= 500 THEN 1 ELSE 0 END)
             FROM transactions
            WHERE timestamp >= ? AND timestamp < ?
@@ -72,6 +73,7 @@ module Analytics
             sum_query_count = excluded.sum_query_count,
             max_query_count = excluded.max_query_count,
             n_plus_one_count = excluded.n_plus_one_count,
+            sum_n_plus_one_time = excluded.sum_n_plus_one_time,
             error_count = excluded.error_count
         SQL
       end

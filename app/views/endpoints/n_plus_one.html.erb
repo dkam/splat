@@ -4,7 +4,8 @@
     <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-2">Endpoints with N+1 Issues</h1>
     <p class="text-gray-600 dark:text-gray-400 mt-2">
       Endpoints where multiple requests showed the same SQL pattern repeated more than 3 times — a classic N+1
-      signal. Ranked by how many transactions are affected.
+      signal. Ranked by total db time spent inside the repeated patterns (then by transactions affected, which
+      also covers data from before wasted-time tracking).
     </p>
   </div>
 
@@ -25,6 +26,7 @@
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">N+1</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Avg Queries</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Max Queries</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Wasted</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Latency</th>
           </tr>
         </thead>
@@ -57,6 +59,20 @@
                 <span class="font-semibold <%= max_q > 50 ? 'text-red-700 dark:text-red-400' : max_q > 20 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-700 dark:text-gray-300' %>">
                   <%= max_q %>
                 </span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right">
+                <% wasted = endpoint["n_plus_one_time"].to_i %>
+                <% if wasted > 0 %>
+                  <div class="text-sm leading-tight">
+                    <span class="font-semibold <%= duration_color_class(endpoint["avg_n_plus_one_time"]) %> tabular-nums"
+                          title="<%= format_duration(wasted) %> of db time inside repeated patterns across <%= number_with_delimiter(endpoint["n_plus_one_count"].to_i) %> affected transactions">
+                      <%= format_duration(wasted) %>
+                    </span>
+                    <div class="text-xs text-gray-400 dark:text-gray-500 tabular-nums"><%= format_duration(endpoint["avg_n_plus_one_time"]) %>/req</div>
+                  </div>
+                <% else %>
+                  <span class="text-xs text-gray-400 dark:text-gray-500" title="No span timing recorded for this endpoint's flagged patterns in this window">—</span>
+                <% end %>
               </td>
               <td class="px-6 py-3 whitespace-nowrap text-right">
                 <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-0 text-sm leading-tight">

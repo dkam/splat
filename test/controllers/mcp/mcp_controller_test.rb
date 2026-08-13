@@ -14,14 +14,170 @@ module Mcp
     end
 
     test "initialize tells the client to call serially" do
-      post "/mcp",
-        params: {jsonrpc: "2.0", id: 1, method: "initialize", params: {}}.to_json,
-        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+      initialize_with("2025-06-18")
 
       assert_response :success
       instructions = JSON.parse(response.body).dig("result", "instructions").to_s
       assert_match(/SERIALLY/, instructions)
       assert_match(/no server-side statement timeout/i, instructions)
+    end
+
+    test "initialize negotiates the client's protocol version" do
+      initialize_with("2025-06-18")
+      assert_equal "2025-06-18", JSON.parse(response.body).dig("result", "protocolVersion")
+
+      # An unrecognised version falls back to the SDK's default rather than
+      # failing the handshake.
+      initialize_with("1999-01-01")
+      assert_response :success
+      assert_match(/\A20\d\d-/, JSON.parse(response.body).dig("result", "protocolVersion").to_s)
+    end
+
+    # `instructions` didn't exist before 2025-03-26. The old hand-rolled server
+    # advertised 2024-11-05 and sent it anyway; the SDK is honest about it, so a
+    # client pinned that far back loses the note. Asserted so the loss is a
+    # deliberate, visible property rather than a silent one.
+    test "a client pinned to 2024-11-05 gets no instructions" do
+      initialize_with("2024-11-05")
+
+      assert_response :success
+      body = JSON.parse(response.body)
+      assert_equal "2024-11-05", body.dig("result", "protocolVersion")
+      assert_nil body.dig("result", "instructions")
+    end
+
+    # A notification has no id and must not be answered with a JSON-RPC frame.
+    test "notifications/initialized is accepted with no body" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", method: "notifications/initialized"}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :accepted
+      assert_empty response.body
+    end
+
+    test "ping is answered" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 9, method: "ping"}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      assert_equal({}, JSON.parse(response.body)["result"])
+    end
+
+    test "tools/list advertises read-only and write tools distinctly" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 2, method: "tools/list", params: {}}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      tools = JSON.parse(response.body).dig("result", "tools").index_by { |t| t["name"] }
+
+      assert_equal true, tools.dig("search_issues", "annotations", "readOnlyHint")
+      assert_equal false, tools.dig("resolve_issue", "annotations", "readOnlyHint")
+      assert_equal false, tools.dig("resolve_issue", "annotations", "destructiveHint")
+    end
+
+    test "tools/list advertises output schemas only where they earn their tokens" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 2, method: "tools/list", params: {}}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      tools = JSON.parse(response.body).dig("result", "tools").index_by { |t| t["name"] }
+
+      assert tools.dig("list_recent_issues", "outputSchema"),
+        "a list of rows is worth handing over structured"
+      # Prose with units and caveats — a structured copy would be the same text
+      # in braces at twice the size. See SplatMcpServer.output_schemas.
+      assert_nil tools.dig("get_event", "outputSchema")
+      assert_nil tools.dig("get_transaction_spans", "outputSchema")
+    end
+
+    # ---- Argument validation (validate_tool_call_arguments). ----
+
+    test "an unknown enum value is refused instead of quietly answering something else" do
+      call_tool("list_recent_issues", {"status" => "opened"})
+
+      message = tool_error
+      assert_match(/status/, message)
+      assert_match(/resolved/, message, "the message should name the accepted values")
+    end
+
+    test "a numeric argument sent as a string is still accepted" do
+      seed_issue_in(projects(:one), "StringLimitError")
+
+      # Models routinely write "5" where the schema says integer, and every
+      # reader here goes through &.to_i. The schema says so explicitly now.
+      call_tool("list_recent_issues", {"status" => "all", "limit" => "5"})
+
+      assert_response :success
+      assert_equal false, JSON.parse(response.body).dig("result", "isError")
+      assert_match "StringLimitError", tool_text
+    end
+
+    test "a non-numeric limit is refused rather than silently becoming the minimum" do
+      call_tool("list_recent_issues", {"status" => "all", "limit" => "twenty"})
+
+      assert_match(/limit/, tool_error)
+    end
+
+    test "a project given as a bare integer resolves" do
+      seed_issue_in(projects(:two), "NumericProjectError")
+
+      call_tool("list_recent_issues", {"status" => "all", "project" => projects(:two).id})
+
+      assert_response :success
+      assert_match "NumericProjectError", tool_text
+    end
+
+    # ---- Structured content. ----
+
+    test "list_recent_issues carries a structured copy alongside the markdown" do
+      issue = seed_issue_in(projects(:one), "StructuredError")
+
+      call_tool("list_recent_issues", {"status" => "all"})
+      assert_response :success
+
+      # The markdown is still the answer; structuredContent is additive.
+      assert_match "StructuredError", tool_text
+
+      row = tool_structured["issues"].find { |i| i["id"] == issue.id }
+      assert row, "expected issue #{issue.id} in structuredContent, got #{tool_structured.inspect}"
+      assert_equal issue.title, row["title"]
+      assert_equal "open", row["status"]
+      assert_equal projects(:one).name, row["project"]
+      assert_match(/\A\d{4}-\d\d-\d\dT/, row["last_seen"], "timestamps go over the wire as ISO 8601")
+    end
+
+    # A tool that declares an outputSchema has to carry structuredContent on
+    # every success — an empty result is still a result, and validate_tool_call_results
+    # (on outside production) would raise if it went missing.
+    test "an empty result still carries structured content" do
+      call_tool("list_monitors", {})
+
+      assert_response :success
+      assert_equal({"monitors" => []}, tool_structured)
+    end
+
+    test "find_n_plus_one_endpoints carries wasted time in markdown and structured content" do
+      at = (Time.current - 2.hours).beginning_of_hour
+      3.times do
+        Transaction.create!(project: projects(:one), transaction_id: SecureRandom.uuid,
+          transaction_name: "BooksController#show", timestamp: at, duration: 500,
+          query_count: 40, has_n_plus_one: true, n_plus_one_time: 96)
+      end
+
+      call_tool("find_n_plus_one_endpoints", {})
+      assert_response :success
+
+      assert_match(/Wasted/, tool_text)
+      assert_match(/288(\.0)?\s*ms/, tool_text)
+
+      row = tool_structured["endpoints"].find { |e| e["transaction_name"] == "BooksController#show" }
+      assert row, "expected BooksController#show in structuredContent, got #{tool_structured.inspect}"
+      assert_equal 288, row["n_plus_one_time_ms"]
+      assert_in_delta 96.0, row["avg_n_plus_one_time_ms"], 0.1
     end
 
     test "get_status reports version, storage, and compression from the snapshot" do
@@ -239,9 +395,8 @@ module Mcp
       gone = (cap_days + 30).days.ago
       call_tool("search_slow_transactions", {"end_time" => gone.utc.iso8601, "time_range_hours" => 6})
 
-      error = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match(/retained for #{cap_days} days/, error)
-      assert_match(/Nothing from it remains/, error)
+      assert_match(/retained for #{cap_days} days/, tool_error)
+      assert_match(/Nothing from it remains/, tool_error)
     end
 
     test "a window straddling the retention cutoff is pulled forward with a note" do
@@ -261,15 +416,13 @@ module Mcp
       call_tool("search_slow_transactions", {
         "start_time" => 1.day.ago.utc.iso8601, "end_time" => 2.days.ago.utc.iso8601
       })
-      assert_match(/end_time must be after start_time/,
-        JSON.parse(response.body).dig("error", "message").to_s)
+      assert_match(/end_time must be after start_time/, tool_error)
     end
 
     test "an unparseable timestamp says which argument and what format" do
       call_tool("search_slow_transactions", {"end_time" => "last tuesday"})
-      error = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match(/Invalid end_time/, error)
-      assert_match(/ISO 8601/, error)
+      assert_match(/Invalid end_time/, tool_error)
+      assert_match(/ISO 8601/, tool_error)
     end
 
     test "output labels an absolute window with its bounds, not 'last Nh'" do
@@ -403,13 +556,11 @@ module Mcp
       end
     end
 
-    test "an unknown project is a bad request naming the real projects" do
+    test "an unknown project is a tool error naming the real projects" do
       call_tool("search_logs", {"query" => "inbound", "project" => "no-such-project"})
-      assert_response :bad_request
 
-      message = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match "Unknown project: no-such-project", message
-      assert_match projects(:one).slug, message
+      assert_match "Unknown project: no-such-project", tool_error
+      assert_match projects(:one).slug, tool_error
     end
 
     test "list_recent_issues honours the project filter" do
@@ -434,7 +585,7 @@ module Mcp
       seed_log_in(projects(:one), "alpha inbound line")
 
       call_tool("search_logs", {"query" => "inbound", "project" => "   "})
-      assert_response :bad_request
+      assert_match(/Unknown project/, tool_error)
       assert_no_match(/alpha inbound line/, response.body)
     end
 
@@ -443,12 +594,10 @@ module Mcp
         public_key: "dup-key")
 
       call_tool("search_logs", {"query" => "inbound", "project" => projects(:one).name})
-      assert_response :bad_request
 
-      message = JSON.parse(response.body).dig("error", "message").to_s
-      assert_match "matches 2 projects by name", message
-      assert_match duplicate.slug, message
-      assert_match projects(:one).slug, message
+      assert_match "matches 2 projects by name", tool_error
+      assert_match duplicate.slug, tool_error
+      assert_match projects(:one).slug, tool_error
     end
 
     test "a slug still wins over another project's identical name" do
@@ -587,12 +736,11 @@ module Mcp
     end
 
     test "get_transaction with neither id nor trace_id explains what is needed" do
-      # Surfaces through the standard RecordNotFound mapping (JSON-RPC -32602),
-      # same as any other failed lookup — what matters is that the message names
-      # both arguments rather than reporting a blank transaction_id miss.
+      # Surfaces as a tool error, same as any other failed lookup — what matters
+      # is that the message names both arguments rather than reporting a blank
+      # transaction_id miss.
       call_tool("get_transaction", {})
-      assert_equal "Supply either transaction_id or trace_id",
-        JSON.parse(response.body).dig("error", "data")
+      assert_equal "Supply either transaction_id or trace_id", tool_error
     end
 
     test "get_transaction lists the errors thrown during the request" do
@@ -614,6 +762,27 @@ module Mcp
       assert_match "IO::TimeoutError", tool_text
       assert_match "get_event", tool_text
       assert_match "id #{event.id}", tool_text
+    end
+
+    # The two readings need telling apart: many distinct queries is an N+1 over
+    # N records (eager-load it), one query repeated is a cache miss (memoise
+    # it). Asserted here because this rendering was written against the
+    # pre-gem controller and had to be carried across by hand.
+    test "get_transaction distinguishes an N+1 from a repeated identical query" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "WorksController#show", duration: 300,
+        query_count: 21, has_n_plus_one: true,
+        measurements: {"query_analysis" => {"query_patterns" => {
+          "SELECT * FROM covers WHERE id = ?" => {"count" => 12, "distinct_count" => 12},
+          "SELECT * FROM settings LIMIT ?" => {"count" => 9, "distinct_count" => 1}
+        }}})
+
+      call_tool("get_transaction", {"transaction_id" => txn.id})
+      assert_response :success
+
+      assert_match "(×12, 12 distinct)", tool_text
+      assert_match "(×9, identical — memoisation, not eager loading)", tool_text
     end
 
     test "get_transaction_spans renders the waterfall from the span_tree blob" do
@@ -685,6 +854,31 @@ module Mcp
 
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+    end
+
+    def tool_structured
+      JSON.parse(response.body).dig("result", "structuredContent")
+    end
+
+    # A tool that fails on its arguments answers with a successful JSON-RPC
+    # response carrying isError, not a JSON-RPC error — that's what puts the
+    # message in front of the model instead of the transport. See
+    # SplatMcpTools#render_error.
+    def tool_error
+      body = JSON.parse(response.body)
+      assert_equal true, body.dig("result", "isError"),
+        "expected a tool error, got: #{response.body}"
+      body.dig("result", "content", 0, "text").to_s
+    end
+
+    def initialize_with(protocol_version)
+      post "/mcp",
+        params: {
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: {protocolVersion: protocol_version, capabilities: {},
+                   clientInfo: {name: "test", version: "1.0"}}
+        }.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
     end
 
     def seed_log_in(project, body)

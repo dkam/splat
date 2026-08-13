@@ -1,6 +1,12 @@
 class OidcAuthController < ApplicationController
   allow_unauthenticated_access only: [:login, :start_oidc, :callback, :backchannel_logout]
 
+  # Asymmetric algorithms only — the JWKS can't verify an HS* token anyway, and
+  # naming the acceptable set explicitly is what stops an "alg": "none" token.
+  # A provider configured for HS256 id_token_signed_response_alg (rare; not
+  # Authentik or Keycloak's default) would need the client secret as the key.
+  ID_TOKEN_ALGORITHMS = %w[RS256 RS384 RS512 PS256 PS384 PS512 ES256 ES384 ES512].freeze
+
   # GET /login - Show login page
   def login
     # If user is authenticated and no special parameters, redirect to dashboard
@@ -9,8 +15,10 @@ class OidcAuthController < ApplicationController
       return
     end
 
-    # Always show login page
-    unless oidc_configured?
+    # Half-configured is a fault and says so with a 503. Deliberately open is
+    # not — that's Splat's documented single-tenant default, so it renders 200
+    # and explains itself rather than looking broken.
+    if SplatAuthorization.oidc_misconfigured?
       render "login/index", status: :service_unavailable
       return
     end
@@ -110,6 +118,11 @@ class OidcAuthController < ApplicationController
     rescue OpenIDConnect::Exception, Rack::OAuth2::Client::Error => e
       Rails.logger.error "OIDC token exchange error: #{e.class.name} - #{e.message}"
       redirect_to login_path, alert: "Authentication failed. Please try again."
+    rescue JWT::DecodeError => e
+      # Covers signature, issuer, audience and expiry failures — the ID token
+      # didn't check out, so no session is created.
+      Rails.logger.error "OIDC ID token verification failed: #{e.class.name} - #{e.message}"
+      redirect_to login_path, alert: "Could not verify the identity token from your provider. Please try again."
     rescue => e
       Rails.logger.error "OIDC callback error: #{e.class.name} - #{e.message}"
       Rails.logger.error e.backtrace.join("\n") if Rails.env.development?
@@ -198,9 +211,24 @@ class OidcAuthController < ApplicationController
     state.present? && expected_state.present? && state == expected_state
   end
 
+  # Verify the ID token rather than merely decoding it. OIDC Core 3.1.3.7 does
+  # permit skipping this for the authorization code flow — the token arrived
+  # over a direct TLS connection to the token endpoint, not via the browser —
+  # but discovery has already handed us the JWKS for backchannel logout, so
+  # checking signature, issuer, audience and expiry costs one call and removes
+  # the need to re-derive whether that exception applies every time somebody
+  # reads this method.
   def extract_claims_from_id_token(id_token)
-    # Decode JWT without verification for claim extraction
-    decoded_jwt = JWT.decode(id_token, nil, false).first
+    decoded_jwt = JWT.decode(id_token, nil, true, {
+      algorithms: ID_TOKEN_ALGORITHMS,
+      jwks: fetch_jwks,
+      iss: expected_issuer,
+      verify_iss: true,
+      aud: ENV.fetch("OIDC_CLIENT_ID"),
+      verify_aud: true,
+      verify_expiration: true,
+      verify_iat: true
+    }).first
 
     {
       email: decoded_jwt["email"],
@@ -277,7 +305,6 @@ class OidcAuthController < ApplicationController
     audience = unverified_claims["aud"]
 
     # Verify issuer and audience match our configuration
-    expected_issuer = ENV.fetch("OIDC_ISSUER", extract_issuer_from_discovery)
     expected_audience = ENV.fetch("OIDC_CLIENT_ID")
 
     if issuer != expected_issuer
@@ -317,14 +344,27 @@ class OidcAuthController < ApplicationController
     nil
   end
 
+  # The provider's discovery document, fetched once per request. Both the JWKS
+  # and the expected issuer come from here.
+  def discovery_document
+    @discovery_document ||= JSON.parse(Net::HTTP.get(URI.parse(ENV.fetch("OIDC_DISCOVERY_URL"))))
+  end
+
+  # Prefer the issuer the provider declares over one guessed from the discovery
+  # URL: they differ often enough (path-suffixed issuers, reverse proxies) that
+  # verify_iss would reject a perfectly good provider. OIDC_ISSUER still wins
+  # when set explicitly, and URL-munging remains the last resort so that a
+  # discovery outage degrades to the old behaviour instead of erroring.
+  def expected_issuer
+    ENV["OIDC_ISSUER"].presence || discovery_document["issuer"].presence || extract_issuer_from_discovery
+  rescue => e
+    Rails.logger.warn "OIDC issuer lookup failed (#{e.class.name}: #{e.message}); falling back to the discovery URL"
+    extract_issuer_from_discovery
+  end
+
   def fetch_jwks
     @jwks ||= begin
-      discovery_url = ENV.fetch("OIDC_DISCOVERY_URL")
-      uri = URI.parse(discovery_url)
-      discovery_response = Net::HTTP.get(uri)
-      discovery = JSON.parse(discovery_response)
-
-      jwks_uri = discovery["jwks_uri"]
+      jwks_uri = discovery_document["jwks_uri"]
       unless jwks_uri
         Rails.logger.error "OIDC discovery missing jwks_uri"
         raise "OIDC provider does not support JWKS"

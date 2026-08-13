@@ -109,6 +109,26 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     assert_equal 70, row["total_count"]
   end
 
+  test "N+1 worklist ranks by wasted time, falling back to affected count" do
+    # Few affected requests but expensive repeats — should rank first.
+    12.times { create_txn(name: "GET /costly", duration: 500, has_n_plus_one: true, n_plus_one_time: 96) }
+    # Many affected requests, trivially cheap repeats.
+    40.times { create_txn(name: "GET /chatty", duration: 100, has_n_plus_one: true, n_plus_one_time: 8) }
+    # Rows from before wasted-time tracking (NULL n_plus_one_time) sort last but stay listed.
+    50.times { create_txn(name: "GET /legacy", duration: 100, has_n_plus_one: true) }
+
+    rows = Transaction.endpoints_by_n_plus_one(@range, project_id: @project.id)
+    assert_equal %w[GET\ /costly GET\ /chatty GET\ /legacy], rows.map { |r| r["transaction_name"] }
+
+    costly = rows.first
+    assert_equal 12 * 96, costly["n_plus_one_time"]
+    assert_in_delta 96.0, costly["avg_n_plus_one_time"], 0.1
+
+    legacy = rows.last
+    assert_equal 0, legacy["n_plus_one_time"]
+    assert_equal 0.0, legacy["avg_n_plus_one_time"]
+  end
+
   test "p95_by_bucket and volume_by_bucket serve hourly sparklines from aggregates" do
     100.times { create_txn(duration: 200) }
 
