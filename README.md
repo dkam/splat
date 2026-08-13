@@ -298,6 +298,25 @@ services:
         max-file: "3"
 ```
 
+### Versioning and releases
+
+Splat reports two numbers, and they answer different questions. Settings → About shows both.
+
+| | Lives in | Set by | Answers |
+| --- | --- | --- | --- |
+| **version** | `config/version.rb` → `Splat::VERSION` | a human, by hand | *which release is this?* |
+| **revision** | `config.x.revision` | the build, from `--build-arg GIT_SHA` | *is what I built actually running?* |
+
+The revision is precise, automatic and meaningless to read. The version is SemVer, survives a rebuild of identical code, and is what you say out loud. If the two disagree with what you expect, a deploy didn't land.
+
+**Bumping `config/version.rb` on `main` is what cuts a release.** There is no `git tag` step for a human to forget:
+
+1. Edit `Splat::VERSION`, commit, push to `main`.
+2. `.github/workflows/build.yml` fires on that path, builds `linux/amd64` + `linux/arm64` natively, and publishes `ghcr.io/dkam/splat:vX.Y.Z` (plus `:latest`).
+3. The same run creates the `vX.Y.Z` git tag and a GitHub Release.
+
+A **pre-release** — any version containing a hyphen, e.g. `1.15.0-dev` — publishes `:v1.15.0-dev`, does *not* move `:latest`, and creates *no* git tag. `bin/build` applies the same rule for local multi-arch builds, and refuses to build a non-pre-release from anywhere but `main`.
+
 ## Authentication
 
 Splat has no login by default — **authentication is off until you configure OIDC**. The three pick-one options:

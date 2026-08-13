@@ -12,6 +12,8 @@
 ARG RUBY_VERSION=4.0.6
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 
+LABEL org.opencontainers.image.source=https://github.com/dkam/splat
+
 # Rails app lives here
 WORKDIR /rails
 
@@ -44,14 +46,24 @@ RUN bundle install && \
     rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git && \
     bundle exec bootsnap precompile --gemfile
 
-# Copy application code (REVISION file is created by bin/build script)
+# Copy application code
 COPY . .
+
+# The commit this image was built from, read at boot by
+# config/initializers/revision.rb. Declared here rather than at the top because
+# an ARG is only in scope for the stage that declares it — put it before the
+# FROM and the --build-arg would be silently ignored, which is the failure mode
+# where every deploy reports "unknown" and nobody notices for a month.
+ARG GIT_SHA=unknown
+RUN echo "${GIT_SHA}" > VERSION
 
 # Precompile bootsnap code for faster boot times
 RUN bundle exec bootsnap precompile app/ lib/
 
-# Precompiling assets for production without requiring secret RAILS_MASTER_KEY
-RUN SECRET_KEY_BASE=1 ./bin/rails assets:precompile
+# Precompiling assets for production without requiring secret RAILS_MASTER_KEY.
+# SECRET_KEY_BASE_DUMMY is Rails' own signal for "this boot will never serve a
+# request"; config/application.rb waives its SECRET_KEY_BASE requirement on it.
+RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
 
 # Final stage for app image
 FROM base

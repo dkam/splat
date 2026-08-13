@@ -744,6 +744,27 @@ module Mcp
       assert_match "id #{event.id}", tool_text
     end
 
+    # The two readings need telling apart: many distinct queries is an N+1 over
+    # N records (eager-load it), one query repeated is a cache miss (memoise
+    # it). Asserted here because this rendering was written against the
+    # pre-gem controller and had to be carried across by hand.
+    test "get_transaction distinguishes an N+1 from a repeated identical query" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "WorksController#show", duration: 300,
+        query_count: 21, has_n_plus_one: true,
+        measurements: {"query_analysis" => {"query_patterns" => {
+          "SELECT * FROM covers WHERE id = ?" => {"count" => 12, "distinct_count" => 12},
+          "SELECT * FROM settings LIMIT ?" => {"count" => 9, "distinct_count" => 1}
+        }}})
+
+      call_tool("get_transaction", {"transaction_id" => txn.id})
+      assert_response :success
+
+      assert_match "(×12, 12 distinct)", tool_text
+      assert_match "(×9, identical — memoisation, not eager loading)", tool_text
+    end
+
     test "get_transaction_spans renders the waterfall from the span_tree blob" do
       project = projects(:one)
       txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,

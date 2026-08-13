@@ -80,6 +80,11 @@ next to the claim it corrects, which is where a reader will actually look.
   maintain the filter-dropdown values (log/transaction environment, source,
   service) in a `facets` table populated at ingest, after `DISTINCT` scans made
   the logs page take ~100s. Why an index didn't fix it and the cache only hid it.
+- [`decisions/0004-file-driven-releases.md`](decisions/0004-file-driven-releases.md)
+  — bumping `config/version.rb` on main *is* the release, and CI creates the git
+  tag as a consequence. Written after the constant reached 1.14.0 while the
+  newest tag was still v1.7.8. Also: version vs. revision, and why a boot-time
+  guard must not fire during `assets:precompile`.
 
 ## Conventions
 

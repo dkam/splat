@@ -62,12 +62,21 @@ class Transaction
         # usual size offenders (IN-lists, literals), and truncating first
         # would cut queries at arbitrary points and fragment patterns.
         pattern = truncate_sql(normalize_sql_pattern(sql))
-        query_patterns[pattern] ||= {count: 0, examples: []}
+        query_patterns[pattern] ||= {count: 0, examples: [], raw_seen: Set.new}
         query_patterns[pattern][:count] += 1
+        query_patterns[pattern][:raw_seen] << sql
         # One example (with real literal values) is all the UI ever renders;
         # extra copies of full SQL strings were the transactions table's
         # biggest storage cost.
         query_patterns[pattern][:examples] << truncate_sql(sql) if query_patterns[pattern][:examples].empty?
+      end
+
+      # distinct_count separates the two failure modes a repeated pattern can
+      # mean: count high + distinct high → N+1 over N records (fix: eager
+      # loading); count high + distinct 1 → the byte-identical query fired
+      # N times (fix: memoisation / query cache). Only the integer is stored.
+      query_patterns.each_value do |data|
+        data[:distinct_count] = data.delete(:raw_seen).size
       end
 
       # Detect potential N+1 queries (same pattern executed multiple times)
@@ -107,6 +116,11 @@ class Transaction
     # grouping; we only have the SQL text, so we filter by table name. Matched
     # against raw SQL so quoting (PG "ident", SQLite/MySQL bareword/backtick)
     # doesn't matter — \b sits on the quote/word boundary either way.
+    #
+    # The Postgres entries name the catalog surface Rails introspection
+    # actually touches (pg_catalog-qualified refs, specific pg_* relations,
+    # pg_get_* functions) rather than a blanket pg_\w+ — application tables
+    # like pg_search_documents must keep counting as app queries.
     INFRA_TABLE = Regexp.union(
       /\bsolid_cache_entries\b/i,
       /\bsolid_queue_\w+/i,
@@ -114,7 +128,10 @@ class Transaction
       /\bschema_migrations\b/i,
       /\bar_internal_metadata\b/i,
       /\bsqlite_(?:master|sequence|stat\d*)\b/i,
-      /\bdbstat\b/i
+      /\bdbstat\b/i,
+      /\bpg_catalog\b/i,
+      /\binformation_schema\b/i,
+      /\bpg_(?:attribute|attrdef|class|index(?:es)?|type|namespace|constraint|depend|enum|range|proc|am|opclass|collation|description|database|settings|sequences?|tables|matviews|get_\w+)\b/i
     ).freeze
 
     def self.infrastructure_query?(sql)
@@ -131,11 +148,14 @@ class Transaction
     BLOCK_COMMENT = SqlNormalizer::BLOCK_COMMENT
 
     # Single union covers everything we collapse to "?" — UUID first so it
-    # doesn't get pre-eaten by the bare \d+ rule, then IN-lists, IPs, emails,
-    # URLs, single-quoted strings, and finally bare numbers. Double-quoted
-    # tokens are deliberately omitted — they're Postgres identifiers
-    # (table/column names) and must survive so different tables yield
-    # different patterns.
+    # doesn't get pre-eaten by the numeric rule, then IN-lists, IPs, emails,
+    # URLs, single-quoted strings, booleans, and finally bare numbers
+    # (SqlNormalizer's literal rule, so floats/negatives/scientific notation
+    # group the same way in both normalizers). Booleans collapse because
+    # `active = TRUE` and `active = FALSE` are the same query shape — split
+    # patterns halve counts and hide detections. Double-quoted tokens are
+    # deliberately omitted — they're Postgres identifiers (table/column
+    # names) and must survive so different tables yield different patterns.
     VALUES = Regexp.union(
       /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
       /\bIN\s*\([^)]+\)/i,
@@ -143,7 +163,8 @@ class Transaction
       /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
       %r{https?://\S+},
       /'[^']*'/,
-      /\b\d+\b/
+      /\b(?:TRUE|FALSE)\b/i,
+      SqlNormalizer::NUMERIC_LITERAL
     )
 
     # Normalize SQL into a pattern key for grouping (N+1 detection).

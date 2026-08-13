@@ -61,7 +61,13 @@ esac
 # Use the multi-builder
 docker buildx use multi-builder
 
+# The revision is the other half of the story: VERSION says which release this
+# is, GIT_SHA says which commit it was actually built from. The Dockerfile
+# writes it to a VERSION file, read at boot by config/initializers/revision.rb.
+GIT_SHA=$(git rev-parse HEAD)
+
 docker buildx build \
   --platform "$PLATFORMS" \
+  --build-arg "GIT_SHA=${GIT_SHA}" \
   "${TAGS[@]}" \
   --push .
