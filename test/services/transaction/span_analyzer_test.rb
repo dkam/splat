@@ -160,4 +160,82 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     refute Transaction::SpanAnalyzer.infrastructure_query?(%(SELECT * FROM "products"))
     refute Transaction::SpanAnalyzer.infrastructure_query?(nil)
   end
+
+  test "infrastructure_query? matches Postgres catalog introspection" do
+    # The shapes Rails' PG adapter actually fires on connection/boot.
+    assert Transaction::SpanAnalyzer.infrastructure_query?(
+      "SELECT a.attnum, a.attname FROM pg_attribute a WHERE a.attrelid = 1234"
+    )
+    assert Transaction::SpanAnalyzer.infrastructure_query?(
+      "SELECT pg_get_indexdef(indexrelid) FROM pg_index"
+    )
+    assert Transaction::SpanAnalyzer.infrastructure_query?(
+      "SELECT pg_catalog.obj_description(1234, 'pg_class')"
+    )
+    assert Transaction::SpanAnalyzer.infrastructure_query?(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+    )
+    assert Transaction::SpanAnalyzer.infrastructure_query?(
+      "SELECT t.oid, t.typname FROM pg_type t WHERE t.typtype = 'e'"
+    )
+  end
+
+  test "application tables with a pg_ prefix are NOT infrastructure" do
+    # pg_search gem's table — a blanket /pg_\w+/ would swallow it.
+    refute Transaction::SpanAnalyzer.infrastructure_query?(
+      %(SELECT "pg_search_documents".* FROM "pg_search_documents" WHERE "pg_search_documents"."searchable_id" = 5)
+    )
+  end
+
+  test "boolean literals collapse so TRUE and FALSE variants share a pattern" do
+    a = normalize('SELECT "users".* FROM "users" WHERE "users"."active" = TRUE')
+    b = normalize('SELECT "users".* FROM "users" WHERE "users"."active" = FALSE')
+    c = normalize('SELECT "users".* FROM "users" WHERE "users"."active" = false')
+    assert_equal a, b
+    assert_equal a, c
+    refute_match(/TRUE|FALSE/i, a)
+  end
+
+  test "floats, negatives, and scientific notation collapse like integers" do
+    a = normalize('SELECT 1 FROM "prices" WHERE "prices"."amount" > 19.99')
+    b = normalize('SELECT 1 FROM "prices" WHERE "prices"."amount" > 24.50')
+    assert_equal a, b
+
+    c = normalize('SELECT 1 FROM "prices" WHERE "prices"."delta" = -5')
+    d = normalize('SELECT 1 FROM "prices" WHERE "prices"."delta" = -12')
+    assert_equal c, d
+
+    e = normalize('SELECT 1 FROM "prices" WHERE "prices"."tiny" < 1.5e10')
+    f = normalize('SELECT 1 FROM "prices" WHERE "prices"."tiny" < 2.5e12')
+    assert_equal e, f
+  end
+
+  test "numeric collapse leaves identifiers containing digits alone" do
+    out = normalize('SELECT "books"."column_2" FROM "books" WHERE "books"."id" = 7')
+    assert_includes out, '"column_2"'
+    assert_includes out, "= ?"
+  end
+
+  test "distinct_count separates N+1 over N records from the identical query repeated" do
+    n_plus_one = 5.times.map do |i|
+      {"category" => "sql.active_record",
+       "data" => {"sql" => %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i} LIMIT 1)}}
+    end
+    repeated = 5.times.map do
+      {"category" => "sql.active_record",
+       "data" => {"sql" => %(SELECT "settings".* FROM "settings" WHERE "settings"."key" = 'theme' LIMIT 1)}}
+    end
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(n_plus_one + repeated)
+    assert_equal 2, result[:unique_patterns]
+
+    by_distinct = result[:query_patterns].values.sort_by { |d| d[:distinct_count] }
+    assert_equal 1, by_distinct.first[:distinct_count]   # settings: byte-identical ×5
+    assert_equal 5, by_distinct.first[:count]
+    assert_equal 5, by_distinct.last[:distinct_count]    # users: 5 different ids
+    assert_equal 5, by_distinct.last[:count]
+
+    # The transient raw-SQL set never reaches the stored structure.
+    result[:query_patterns].each_value { |d| refute d.key?(:raw_seen) }
+  end
 end

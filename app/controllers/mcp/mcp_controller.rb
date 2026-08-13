@@ -2135,7 +2135,17 @@ module Mcp
           result += "- ⚠️ Potential N+1 patterns (#{txn.potential_n_plus_one_queries.size}):\n"
           txn.potential_n_plus_one_queries.first(5).each do |pattern|
             count = txn.query_patterns.dig(pattern, "count")
-            result += "  - `#{pattern}`#{" (×#{count})" if count}\n"
+            distinct = txn.query_patterns.dig(pattern, "distinct_count")
+            # distinct == 1 means the byte-identical query fired N times
+            # (memoisation/query-cache miss), not an N+1 over N records.
+            note = if count && distinct == 1
+              " (×#{count}, identical — memoisation, not eager loading)"
+            elsif count && distinct
+              " (×#{count}, #{distinct} distinct)"
+            elsif count
+              " (×#{count})"
+            end
+            result += "  - `#{pattern}`#{note}\n"
           end
         end
       end
