@@ -78,6 +78,88 @@ module Mcp
       assert_equal false, tools.dig("resolve_issue", "annotations", "destructiveHint")
     end
 
+    test "tools/list advertises output schemas only where they earn their tokens" do
+      post "/mcp",
+        params: {jsonrpc: "2.0", id: 2, method: "tools/list", params: {}}.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+
+      assert_response :success
+      tools = JSON.parse(response.body).dig("result", "tools").index_by { |t| t["name"] }
+
+      assert tools.dig("list_recent_issues", "outputSchema"),
+        "a list of rows is worth handing over structured"
+      # Prose with units and caveats — a structured copy would be the same text
+      # in braces at twice the size. See SplatMcpServer.output_schemas.
+      assert_nil tools.dig("get_event", "outputSchema")
+      assert_nil tools.dig("get_transaction_spans", "outputSchema")
+    end
+
+    # ---- Argument validation (validate_tool_call_arguments). ----
+
+    test "an unknown enum value is refused instead of quietly answering something else" do
+      call_tool("list_recent_issues", {"status" => "opened"})
+
+      message = tool_error
+      assert_match(/status/, message)
+      assert_match(/resolved/, message, "the message should name the accepted values")
+    end
+
+    test "a numeric argument sent as a string is still accepted" do
+      seed_issue_in(projects(:one), "StringLimitError")
+
+      # Models routinely write "5" where the schema says integer, and every
+      # reader here goes through &.to_i. The schema says so explicitly now.
+      call_tool("list_recent_issues", {"status" => "all", "limit" => "5"})
+
+      assert_response :success
+      assert_equal false, JSON.parse(response.body).dig("result", "isError")
+      assert_match "StringLimitError", tool_text
+    end
+
+    test "a non-numeric limit is refused rather than silently becoming the minimum" do
+      call_tool("list_recent_issues", {"status" => "all", "limit" => "twenty"})
+
+      assert_match(/limit/, tool_error)
+    end
+
+    test "a project given as a bare integer resolves" do
+      seed_issue_in(projects(:two), "NumericProjectError")
+
+      call_tool("list_recent_issues", {"status" => "all", "project" => projects(:two).id})
+
+      assert_response :success
+      assert_match "NumericProjectError", tool_text
+    end
+
+    # ---- Structured content. ----
+
+    test "list_recent_issues carries a structured copy alongside the markdown" do
+      issue = seed_issue_in(projects(:one), "StructuredError")
+
+      call_tool("list_recent_issues", {"status" => "all"})
+      assert_response :success
+
+      # The markdown is still the answer; structuredContent is additive.
+      assert_match "StructuredError", tool_text
+
+      row = tool_structured["issues"].find { |i| i["id"] == issue.id }
+      assert row, "expected issue #{issue.id} in structuredContent, got #{tool_structured.inspect}"
+      assert_equal issue.title, row["title"]
+      assert_equal "open", row["status"]
+      assert_equal projects(:one).name, row["project"]
+      assert_match(/\A\d{4}-\d\d-\d\dT/, row["last_seen"], "timestamps go over the wire as ISO 8601")
+    end
+
+    # A tool that declares an outputSchema has to carry structuredContent on
+    # every success — an empty result is still a result, and validate_tool_call_results
+    # (on outside production) would raise if it went missing.
+    test "an empty result still carries structured content" do
+      call_tool("list_monitors", {})
+
+      assert_response :success
+      assert_equal({"monitors" => []}, tool_structured)
+    end
+
     test "get_status reports version, storage, and compression from the snapshot" do
       fake = {
         total: 700_000_000,
@@ -731,6 +813,10 @@ module Mcp
 
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+    end
+
+    def tool_structured
+      JSON.parse(response.body).dig("result", "structuredContent")
     end
 
     # A tool that fails on its arguments answers with a successful JSON-RPC

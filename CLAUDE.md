@@ -1046,11 +1046,24 @@ Notes:
 
 - Protocol version is negotiated, not pinned. `instructions` (the serial-calls
   note) only reaches clients on 2025-03-26 and later.
-- Argument validation is off (`validate_tool_call_arguments: false`) — the tools
-  coerce leniently (`"20"` for an integer `limit` works), and turning it on would
-  make that a hard error. Flip it once the schemas match what's accepted.
 - Tool-argument failures come back as `isError: true` responses so the model can
   read and correct them, not as JSON-RPC errors.
+- **Arguments are validated** against the input schemas. The schemas describe
+  what the tools actually accept, not an idealised form — numeric arguments are
+  declared `["integer", "string"]` via `SplatMcpServer.integer_arg` because
+  every reader goes through `&.to_i` and clients do send `"20"`. Same reason
+  `project`, `transaction_id` and `http_status` accept both forms. If you add
+  an argument, declare what the code tolerates or you'll reject calls that work.
+- **A few tools declare an `outputSchema`** and return `structuredContent`
+  alongside the markdown (`render_text(text, structured:)`): the issue lists,
+  `list_monitors`, `get_transaction_stats`, `find_n_plus_one_endpoints`,
+  `get_endpoint_timeseries`. Most tools deliberately don't — their markdown
+  carries units and caveats a schema can't, so a structured copy would be the
+  same text in braces at twice the size. A tool that declares one must return
+  it on *every* success, empty results included.
+- Result validation is on outside production, so structured payloads that drift
+  from their schema fail in CI. It's off in production because that failure is
+  raised, not returned, and would cost the caller the markdown answer too.
 
 ## Future Enhancements (Maybe)
 

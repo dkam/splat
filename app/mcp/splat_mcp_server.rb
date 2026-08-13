@@ -19,7 +19,9 @@ class SplatMcpServer
   # every project by default and label each row with its project name. This
   # narrows a single call without changing that default.
   PROJECT_ARG = {
-    type: "string",
+    # integer as well as string: the description offers "its numeric id", and
+    # resolve_project_id `to_s`es whatever arrives, so a bare 3 has always worked.
+    type: ["string", "integer"],
     description: "Restrict results to one project, given as its slug, its display name, or its numeric id. Omit to cover every project on this instance."
   }.freeze
 
@@ -50,6 +52,31 @@ class SplatMcpServer
     type: "string",
     description: "Restrict to issues seen at least once in this release version. Grouping spans releases, so an issue can match several."
   }.freeze
+
+  # Every numeric argument is read through `&.to_i` and then clamped, so a JSON
+  # string of digits has always worked exactly as well as a JSON number — and
+  # clients do send "20" where the schema says integer. Now that arguments are
+  # validated against these schemas, the schema has to say so, or a call that
+  # always worked starts coming back as a tool error.
+  #
+  # `pattern` constrains only the string branch (it is a no-op on numbers).
+  # json_schemer compiles it as a Ruby Regexp, where `$` also matches before a
+  # newline, so "12\nx" slips through — immaterial, since `.to_i` reads the
+  # leading digits and the clamp bounds the result. What it does catch is
+  # "twenty", which used to pass silently and land on the minimum.
+  #
+  # No minimum/maximum: every reader clamps to its own range, so an
+  # out-of-range limit is already handled, and rejecting it here would fail a
+  # call that currently succeeds.
+  def self.integer_arg(description, default: nil)
+    arg = {
+      type: ["integer", "string"],
+      pattern: "^[0-9]+$",
+      description: description
+    }
+    arg[:default] = default if default
+    arg
+  end
 
   # Parallelising independent reads is normally the right instinct, and here
   # it is actively dangerous: Splat is one Puma process with a small thread
@@ -85,12 +112,20 @@ class SplatMcpServer
       version: Splat::VERSION,
       instructions: concurrency_note,
       configuration: ::MCP::Configuration.new(
-        # Splat's own argument handling is deliberately tolerant — limits go
-        # through `&.to_i`, blank strings through `.presence` — and models do
-        # send "20" where the schema says integer. Turning the gem's validator on
-        # would make those a hard error where they used to just work, so it stays
-        # off until the schemas have been tightened to match what's accepted.
-        validate_tool_call_arguments: false
+        # On, now that the schemas describe what the tools actually accept
+        # (see integer_arg). A failure comes back as a tool error carrying
+        # json_schemer's message, not a JSON-RPC error, so the model reads
+        # "value at `/status` is not one of: [...]" and corrects itself —
+        # where before, a bad enum value was quietly dropped and the result
+        # silently answered a different question.
+        validate_tool_call_arguments: true,
+
+        # Only bites on tools that declare an outputSchema, and only on
+        # success. On outside production so schema drift fails loudly in CI;
+        # off in production because a validation error is raised, not
+        # returned — a nit in the structured copy would cost the caller the
+        # markdown answer as well.
+        validate_tool_call_results: !Rails.env.production?
       )
     )
 
@@ -101,6 +136,7 @@ class SplatMcpServer
         name: name,
         description: definition[:description],
         input_schema: definition[:inputSchema],
+        output_schema: output_schemas[name],
         annotations: annotations_for(name)
         # define_tool installs this as a singleton method on an anonymous Tool
         # subclass, so `self` inside is that class, not SplatMcpServer — hence the
@@ -141,6 +177,163 @@ class SplatMcpServer
     end
   end
 
+  # ---- Output schemas. ----
+  #
+  # Only a handful of tools declare one, and that is deliberate. The markdown a
+  # tool returns is not a rendering of some underlying record — it is the
+  # answer, carrying units, retention caveats and read-this-way notes that no
+  # schema can express ("×12, identical — memoisation, not eager loading"). A
+  # structured copy earns its tokens only where the output is genuinely a
+  # table or a series a caller might sort, chart or feed back in as an
+  # argument. For get_event or get_transaction_spans it would just be the
+  # markdown again in braces, at roughly twice the size.
+  #
+  # The markdown stays the `content` block; structuredContent is additive.
+  # (The spec's SHOULD about also emitting the serialized JSON as text is
+  # declined on purpose — that text would displace the better answer.)
+  #
+  # Schemas are permissive by design: every field optional, nothing forbidden.
+  # A structured payload is a convenience, and it should never be the reason a
+  # call fails — see validate_tool_call_results in build.
+  TIMESTAMP = {type: ["string", "null"], format: "date-time"}.freeze
+  MS = {type: ["number", "null"], description: "Milliseconds"}.freeze
+
+  # start/end are the window actually used, after retention clamping — not
+  # what was asked for. `label` is the same phrasing the markdown header uses.
+  WINDOW_OUT = {
+    type: "object",
+    properties: {start: TIMESTAMP, end: TIMESTAMP, label: {type: ["string", "null"]}}
+  }.freeze
+
+  def self.output_schemas
+    @output_schemas ||= begin
+      issue = {
+        type: "object",
+        properties: {
+          id: {type: "integer"},
+          title: {type: ["string", "null"]},
+          exception_type: {type: ["string", "null"]},
+          status: {type: "string", enum: ["open", "resolved", "ignored"]},
+          count: {type: "integer", description: "Occurrences recorded for this issue"},
+          first_seen: TIMESTAMP,
+          last_seen: TIMESTAMP,
+          project: {type: ["string", "null"]}
+        }
+      }
+
+      issue_list = {type: "object", properties: {issues: {type: "array", items: issue}}}
+
+      {
+        "list_recent_issues" => issue_list,
+        "search_issues" => issue_list,
+
+        "list_monitors" => {
+          type: "object",
+          properties: {
+            monitors: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  slug: {type: "string"},
+                  state: {type: "string", enum: ["ok", "missed", "error", "overrun", "unknown"]},
+                  project: {type: ["string", "null"]},
+                  schedule: {type: ["string", "null"]},
+                  checkin_margin_minutes: {type: ["integer", "null"]},
+                  max_runtime_minutes: {type: ["integer", "null"]},
+                  last_checkin_at: TIMESTAMP,
+                  last_status: {type: ["string", "null"]},
+                  last_duration_seconds: {type: ["number", "null"]},
+                  in_progress_since: TIMESTAMP,
+                  environment: {type: ["string", "null"]}
+                }
+              }
+            }
+          }
+        },
+
+        "get_transaction_stats" => {
+          type: "object",
+          properties: {
+            window: WINDOW_OUT,
+            endpoint: {type: ["string", "null"], description: "Set only when the percentiles were narrowed to one endpoint"},
+            environment: {type: ["string", "null"]},
+            total_count: {type: "integer"},
+            percentiles: {
+              type: "object",
+              properties: {avg: MS, p50: MS, p95: MS, p99: MS, min: MS, max: MS}
+            },
+            top_endpoints: {
+              type: "array",
+              description: "Ranked by time_spent (avg × count), never narrowed by the endpoint filter",
+              items: {
+                type: "object",
+                properties: {
+                  transaction_name: {type: ["string", "null"]},
+                  time_spent: MS,
+                  avg_duration: MS,
+                  p95_duration: MS,
+                  count: {type: "integer"}
+                }
+              }
+            }
+          }
+        },
+
+        "find_n_plus_one_endpoints" => {
+          type: "object",
+          properties: {
+            window: WINDOW_OUT,
+            environment: {type: ["string", "null"]},
+            endpoints: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  transaction_name: {type: ["string", "null"]},
+                  n_plus_one_count: {type: "integer"},
+                  total_count: {type: "integer"},
+                  n_plus_one_pct: {type: ["number", "null"]},
+                  avg_queries: {type: ["number", "null"]},
+                  max_queries: {type: ["integer", "null"]},
+                  avg_duration: MS,
+                  p95_duration: MS
+                }
+              }
+            }
+          }
+        },
+
+        "get_endpoint_timeseries" => {
+          type: "object",
+          properties: {
+            endpoint: {type: ["string", "null"]},
+            window: WINDOW_OUT,
+            environment: {type: ["string", "null"]},
+            release: {type: ["string", "null"]},
+            bucket_seconds: {type: "integer", description: "Effective bucket width; may exceed what was requested"},
+            buckets: {type: "integer"},
+            requested_buckets: {type: "integer"},
+            series: {
+              type: "array",
+              description: "Zero-filled — a bucket with no traffic is present with count 0",
+              items: {
+                type: "object",
+                properties: {
+                  bucket_start: TIMESTAMP,
+                  count: {type: "integer"},
+                  p50: MS,
+                  p95: MS,
+                  p99: MS
+                }
+              }
+            }
+          }
+        }
+      }.freeze
+    end
+  end
+
   # Tool definitions
   def self.tool_definitions
     [
@@ -161,7 +354,9 @@ class SplatMcpServer
             state: {
               type: "string",
               description: "Filter by evaluated state (default: all)",
-              enum: ["ok", "missed", "error", "overrun", "unknown"]
+              # Derived, not restated: an enum the validator enforces has to
+              # track the model, or adding a state silently starts rejecting it.
+              enum: CronMonitor::STATES
             },
             project: PROJECT_ARG
           }
@@ -176,13 +371,9 @@ class SplatMcpServer
             status: {
               type: "string",
               description: "Filter by status: 'open', 'resolved', 'ignored', or 'all' (default: 'open')",
-              enum: ["open", "resolved", "ignored", "all"]
+              enum: Issue.statuses.keys + ["all"]
             },
-            limit: {
-              type: "integer",
-              description: "Maximum number of results (default: 20, max: 100)",
-              default: 20
-            },
+            limit: integer_arg("Maximum number of results (default: 20, max: 100)", default: 20),
             environment: ENVIRONMENT_ARG,
             release: RELEASE_ARG,
             project: PROJECT_ARG
@@ -202,17 +393,13 @@ class SplatMcpServer
             status: {
               type: "string",
               description: "Filter by status",
-              enum: ["open", "resolved", "ignored"]
+              enum: Issue.statuses.keys
             },
             exception_type: {
               type: "string",
               description: "Filter by specific exception type"
             },
-            limit: {
-              type: "integer",
-              description: "Maximum results (default: 20, max: 100)",
-              default: 20
-            },
+            limit: integer_arg("Maximum results (default: 20, max: 100)", default: 20),
             environment: ENVIRONMENT_ARG,
             release: RELEASE_ARG,
             project: PROJECT_ARG
@@ -225,10 +412,7 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            issue_id: {
-              type: "integer",
-              description: "The ID of the issue"
-            }
+            issue_id: integer_arg("The ID of the issue")
           },
           required: ["issue_id"]
         }
@@ -239,15 +423,8 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            issue_id: {
-              type: "integer",
-              description: "The ID of the issue"
-            },
-            limit: {
-              type: "integer",
-              description: "Maximum events to return (default: 10, max: 50)",
-              default: 10
-            }
+            issue_id: integer_arg("The ID of the issue"),
+            limit: integer_arg("Maximum events to return (default: 10, max: 50)", default: 10)
           },
           required: ["issue_id"]
         }
@@ -276,17 +453,9 @@ class SplatMcpServer
               type: "string",
               description: "Filter the overall percentile block to one endpoint (e.g., 'AlertsController#index'). The top-endpoints list is never narrowed by this — it always covers whatever the project filter allows."
             },
-            time_range_hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:rollup),
-              default: 24
-            },
+            time_range_hours: integer_arg(SplatMcpTools.hours_description(:rollup), default: 24),
             **WINDOW_ARGS,
-            limit: {
-              type: "integer",
-              description: "Maximum number of top endpoints to return (default: 10, max: 50)",
-              default: 10
-            },
+            limit: integer_arg("Maximum number of top endpoints to return (default: 10, max: 50)", default: 10),
             environment: {
               type: "string",
               description: "Restrict every figure — percentiles, count and the top-endpoints list — to one environment (e.g. 'staging')."
@@ -301,21 +470,13 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            time_range_hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:rollup),
-              default: 24
-            },
+            time_range_hours: integer_arg(SplatMcpTools.hours_description(:rollup), default: 24),
             **WINDOW_ARGS,
             environment: {
               type: "string",
               description: "Filter by environment (optional)"
             },
-            limit: {
-              type: "integer",
-              description: "Maximum endpoints to return (default: 20, max: 100)",
-              default: 20
-            },
+            limit: integer_arg("Maximum endpoints to return (default: 20, max: 100)", default: 20),
             project: PROJECT_ARG
           }
         }
@@ -330,17 +491,9 @@ class SplatMcpServer
               type: "string",
               description: "Endpoint name (e.g., 'AlertsController#index')"
             },
-            hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:rollup, "Time range in hours") + ". A release filter restricts it to #{SplatMcpTools.max_hours(:transactions)}h, since release isn't carried on the rollups.",
-              default: 24
-            },
+            hours: integer_arg(SplatMcpTools.hours_description(:rollup, "Time range in hours") + ". A release filter restricts it to #{SplatMcpTools.max_hours(:transactions)}h, since release isn't carried on the rollups.", default: 24),
             **WINDOW_ARGS,
-            buckets: {
-              type: "integer",
-              description: "Number of buckets to split the range into (default: 24 → 1-hour buckets for a 24h range; min: 4, max: 168). Buckets an hour or wider are widened to a whole number of hours so the series can be served from the hourly rollups, so the count returned may be slightly lower than requested — the response states the effective width.",
-              default: 24
-            },
+            buckets: integer_arg("Number of buckets to split the range into (default: 24 → 1-hour buckets for a 24h range; min: 4, max: 168). Buckets an hour or wider are widened to a whole number of hours so the series can be served from the hourly rollups, so the count returned may be slightly lower than requested — the response states the effective width.", default: 24),
             environment: {
               type: "string",
               description: "Filter by environment (optional)"
@@ -360,21 +513,14 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            min_duration_ms: {
-              type: "integer",
-              description: "Minimum duration in milliseconds (default: 1000)",
-              default: 1000
-            },
-            max_duration_ms: {
-              type: "integer",
-              description: "Optional upper bound, making the duration filter a band. Results are ordered slowest-first, so over a wide window a few multi-minute outliers crowd out everything else — pair this with min_duration_ms (e.g. 10000..20000) to surface a plateau of merely-slow requests that would otherwise never reach the page."
-            },
+            min_duration_ms: integer_arg("Minimum duration in milliseconds (default: 1000)", default: 1000),
+            max_duration_ms: integer_arg("Optional upper bound, making the duration filter a band. Results are ordered slowest-first, so over a wide window a few multi-minute outliers crowd out everything else — pair this with min_duration_ms (e.g. 10000..20000) to surface a plateau of merely-slow requests that would otherwise never reach the page."),
             endpoint: {
               type: "string",
               description: "Filter by endpoint name (case-insensitive substring match, e.g. 'works' matches 'WorksController#show')"
             },
             http_status: {
-              type: "string",
+              type: ["string", "integer"],
               description: "Filter by HTTP status code"
             },
             http_method: {
@@ -389,17 +535,9 @@ class SplatMcpServer
               type: "string",
               description: "Filter to one release (e.g. '1.12.0'). Indexed, unlike a tag filter. Every window here is measured back from now, so when a deploy brackets the period you care about this is the way to pin results to it."
             },
-            time_range_hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:transactions),
-              default: 24
-            },
+            time_range_hours: integer_arg(SplatMcpTools.hours_description(:transactions), default: 24),
             **WINDOW_ARGS,
-            limit: {
-              type: "integer",
-              description: "Maximum results (default: 20, max: 100)",
-              default: 20
-            },
+            limit: integer_arg("Maximum results (default: 20, max: 100)", default: 20),
             tags: {
               type: "object",
               description: "Filter by Sentry tags. Keys are AND'd; string equality. " \
@@ -407,7 +545,12 @@ class SplatMcpServer
                            "NOTE: tags are unindexed JSON, so this scans every transaction in the " \
                            "window and holds a thread until it finishes — prefer release, endpoint " \
                            "or environment to narrow first, and keep the window tight.",
-              additionalProperties: {type: "string"}
+              # Values are `to_s`'d before they reach the query, so a number or
+              # boolean is as good as a string — and a model filtering on
+              # user_id naturally writes it as a number. Only the keys are
+              # constrained (to the tag-name charset), and that check lives in
+              # the tool, which can explain itself better than a schema can.
+              additionalProperties: {type: ["string", "integer", "number", "boolean"]}
             },
             project: PROJECT_ARG
           }
@@ -420,7 +563,7 @@ class SplatMcpServer
           type: "object",
           properties: {
             transaction_id: {
-              type: "string",
+              type: ["string", "integer"],
               description: "Either the internal numeric ID (e.g. '12345') or the Sentry transaction UUID (32 hex chars, e.g. 'abc123...'). UUIDs match the event_id used by get_event."
             },
             trace_id: {
@@ -438,7 +581,7 @@ class SplatMcpServer
           type: "object",
           properties: {
             transaction_id: {
-              type: "string",
+              type: ["string", "integer"],
               description: "Either the internal numeric ID or the Sentry transaction UUID — same value accepted by get_transaction."
             },
             trace_id: {
@@ -450,11 +593,7 @@ class SplatMcpServer
               type: "string",
               description: "Filter spans by op prefix (e.g. 'db' for all db.* spans, 'db.sql' for SQL only, 'http' for outbound HTTP, 'view' for renders). Default: no filter."
             },
-            limit: {
-              type: "integer",
-              description: "Max spans to render in the list (default: 100, max: 1000). Op summary and repeated-description sections always cover all spans.",
-              default: 100
-            }
+            limit: integer_arg("Max spans to render in the list (default: 100, max: 1000). Op summary and repeated-description sections always cover all spans.", default: 100)
           }
         }
       },
@@ -468,11 +607,7 @@ class SplatMcpServer
               type: "string",
               description: "Endpoint name (e.g., 'AlertsController#index')"
             },
-            hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:rollup, "Time range in hours") + ". A release filter restricts it to #{SplatMcpTools.max_hours(:transactions)}h, since release isn't carried on the rollups.",
-              default: 24
-            },
+            hours: integer_arg(SplatMcpTools.hours_description(:rollup, "Time range in hours") + ". A release filter restricts it to #{SplatMcpTools.max_hours(:transactions)}h, since release isn't carried on the rollups.", default: 24),
             **WINDOW_ARGS,
             environment: {
               type: "string",
@@ -497,16 +632,8 @@ class SplatMcpServer
               type: "string",
               description: "Endpoint name (e.g., 'AlertsController#index')"
             },
-            limit: {
-              type: "integer",
-              description: "Number of results (default: 20, max: 100)",
-              default: 20
-            },
-            hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:transactions, "Time range in hours"),
-              default: 24
-            },
+            limit: integer_arg("Number of results (default: 20, max: 100)", default: 20),
+            hours: integer_arg(SplatMcpTools.hours_description(:transactions, "Time range in hours"), default: 24),
             **WINDOW_ARGS,
             environment: {
               type: "string",
@@ -547,16 +674,8 @@ class SplatMcpServer
               type: "string",
               description: "ISO timestamp after comparison (mutually exclusive with after_release)"
             },
-            hours_before: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:transactions, "Hours before comparison point"),
-              default: 24
-            },
-            hours_after: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:transactions, "Hours after comparison point"),
-              default: 24
-            },
+            hours_before: integer_arg(SplatMcpTools.hours_description(:transactions, "Hours before comparison point"), default: 24),
+            hours_after: integer_arg(SplatMcpTools.hours_description(:transactions, "Hours after comparison point"), default: 24),
             environment: {
               type: "string",
               description: "Filter by environment (optional)"
@@ -572,10 +691,7 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            issue_id: {
-              type: "integer",
-              description: "The ID of the issue to resolve"
-            }
+            issue_id: integer_arg("The ID of the issue to resolve")
           },
           required: ["issue_id"]
         }
@@ -586,10 +702,7 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            issue_id: {
-              type: "integer",
-              description: "The ID of the issue to ignore"
-            }
+            issue_id: integer_arg("The ID of the issue to ignore")
           },
           required: ["issue_id"]
         }
@@ -600,10 +713,7 @@ class SplatMcpServer
         inputSchema: {
           type: "object",
           properties: {
-            issue_id: {
-              type: "integer",
-              description: "The ID of the issue to reopen"
-            }
+            issue_id: integer_arg("The ID of the issue to reopen")
           },
           required: ["issue_id"]
         }
@@ -621,7 +731,7 @@ class SplatMcpServer
             level: {
               type: "string",
               description: "Filter by severity level",
-              enum: %w[trace debug info warn error fatal]
+              enum: Log.levels.keys
             },
             logger: {
               type: "string",
@@ -639,17 +749,9 @@ class SplatMcpServer
               type: "string",
               description: "Filter to one release (e.g. '1.12.0'). Indexed, unlike a tag filter — use it to scope logs to a single deploy."
             },
-            time_range_hours: {
-              type: "integer",
-              description: SplatMcpTools.hours_description(:logs, "Look back this many hours"),
-              default: 24
-            },
+            time_range_hours: integer_arg(SplatMcpTools.hours_description(:logs, "Look back this many hours"), default: 24),
             **WINDOW_ARGS,
-            limit: {
-              type: "integer",
-              description: "Maximum results (default: 50, max: 200)",
-              default: 50
-            },
+            limit: integer_arg("Maximum results (default: 50, max: 200)", default: 50),
             project: PROJECT_ARG
           }
         }
@@ -678,11 +780,7 @@ class SplatMcpServer
               type: "string",
               description: "The trace_id to collect logs for"
             },
-            limit: {
-              type: "integer",
-              description: "Maximum results (default: 100, max: 500)",
-              default: 100
-            }
+            limit: integer_arg("Maximum results (default: 100, max: 500)", default: 100)
           },
           required: ["trace_id"]
         }

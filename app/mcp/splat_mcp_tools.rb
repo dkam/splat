@@ -413,7 +413,12 @@ class SplatMcpTools
     monitors = monitors.to_a
 
     if monitors.empty?
-      return render_text("No monitors#{args["state"].present? ? " in state '#{args["state"]}'" : " registered"}. Monitors auto-register when a service sends a Sentry Crons check-in envelope to its project DSN.")
+      # structured: {} even here — a tool that declares an outputSchema has to
+      # carry structuredContent on every success, empty result included.
+      return render_text(
+        "No monitors#{args["state"].present? ? " in state '#{args["state"]}'" : " registered"}. Monitors auto-register when a service sends a Sentry Crons check-in envelope to its project DSN.",
+        structured: {monitors: []}
+      )
     end
 
     lines = ["# Check-In Monitors (#{monitors.size})", ""]
@@ -435,7 +440,23 @@ class SplatMcpTools
       lines << ""
     end
 
-    render_text(lines.join("\n"))
+    structured = monitors.map do |m|
+      {
+        slug: m.slug,
+        state: m.state,
+        project: m.project&.name,
+        schedule: m.schedule_description,
+        checkin_margin_minutes: m.checkin_margin,
+        max_runtime_minutes: m.max_runtime,
+        last_checkin_at: m.last_checkin_at&.utc&.iso8601,
+        last_status: m.last_status,
+        last_duration_seconds: m.last_duration,
+        in_progress_since: m.in_progress_since&.utc&.iso8601,
+        environment: m.environment
+      }
+    end
+
+    render_text(lines.join("\n"), structured: {monitors: structured})
   end
 
   def list_recent_issues(args)
@@ -448,11 +469,11 @@ class SplatMcpTools
     issues = issues.where(project_id: project_id) if project_id
     issues = issues.where(status: status) unless status == "all"
     issues = apply_issue_facet_filters(issues, args, project_id)
-    issues = issues.limit(limit)
+    issues = issues.limit(limit).to_a
 
     text = format_issues_list(issues, status)
 
-    render_text(text)
+    render_text(text, structured: {issues: issues.map { |i| issue_out(i) }})
   end
 
   def search_issues(args)
@@ -469,11 +490,11 @@ class SplatMcpTools
     issues = issues.where(status: status) if status.present?
     issues = issues.where(exception_type: exception_type) if exception_type.present?
     issues = apply_issue_facet_filters(issues, args, project_id)
-    issues = issues.limit(limit)
+    issues = issues.limit(limit).to_a
 
     text = format_issues_list(issues)
 
-    render_text(text)
+    render_text(text, structured: {issues: issues.map { |i| issue_out(i) }})
   end
 
   def get_issue(args)
@@ -572,7 +593,24 @@ class SplatMcpTools
 
     text = format_transaction_stats(percentiles, top_endpoints, total_count, window_label(time_range), endpoint)
 
-    render_text("#{window_note}#{text}")
+    structured = {
+      window: window_out(time_range),
+      endpoint: endpoint.presence,
+      environment: environment,
+      total_count: total_count,
+      percentiles: percentiles.slice(:avg, :p50, :p95, :p99, :min, :max).transform_values { |v| v&.to_f },
+      top_endpoints: top_endpoints.map do |row|
+        {
+          transaction_name: row["transaction_name"],
+          time_spent: row["time_spent"]&.to_f,
+          avg_duration: row["avg_duration"]&.to_f,
+          p95_duration: row["p95_duration"]&.to_f,
+          count: row["count"].to_i
+        }
+      end
+    }
+
+    render_text("#{window_note}#{text}", structured: structured)
   end
 
   def search_slow_transactions(args)
@@ -591,7 +629,7 @@ class SplatMcpTools
     tags = nil unless tags.is_a?(Hash) && tags.any?
     if tags
       bad_key = tags.keys.find { |k| !k.is_a?(String) || k !~ /\A[a-zA-Z0-9_.-]+\z/ }
-      return render_text("Invalid tag key: #{bad_key.inspect}") if bad_key
+      return render_error("Invalid tag key: #{bad_key.inspect}. Tag keys may contain letters, digits, underscore, dot and hyphen.") if bad_key
       tags = tags.transform_values(&:to_s)
     end
 
@@ -734,7 +772,24 @@ class SplatMcpTools
 
     text = format_n_plus_one_endpoints(rows, window_label(time_range), environment)
 
-    render_text("#{window_note}#{text}")
+    structured = {
+      window: window_out(time_range),
+      environment: environment,
+      endpoints: rows.map do |r|
+        {
+          transaction_name: r["transaction_name"],
+          n_plus_one_count: r["n_plus_one_count"].to_i,
+          total_count: r["total_count"].to_i,
+          n_plus_one_pct: r["n_plus_one_pct"]&.to_f,
+          avg_queries: r["avg_queries"]&.to_f,
+          max_queries: r["max_queries"]&.to_i,
+          avg_duration: r["avg_duration"]&.to_f,
+          p95_duration: r["p95_duration"]&.to_f
+        }
+      end
+    }
+
+    render_text("#{window_note}#{text}", structured: structured)
   end
 
   def get_endpoint_timeseries(args)
@@ -758,7 +813,28 @@ class SplatMcpTools
       environment, release, time_range.begin
     )
 
-    render_text("#{window_note}#{text}")
+    structured = {
+      endpoint: endpoint,
+      window: window_out(time_range),
+      environment: environment,
+      release: release,
+      bucket_seconds: bucket_seconds,
+      buckets: buckets,
+      requested_buckets: requested_buckets,
+      # Same derivation the table uses: the reader returns a bucket *index*,
+      # so wall-clock start is the window origin plus index × width.
+      series: series.map do |b|
+        {
+          bucket_start: (time_range.begin + (b["bucket"] * bucket_seconds)).utc.iso8601,
+          count: b["count"].to_i,
+          p50: b["p50"]&.to_f,
+          p95: b["p95"]&.to_f,
+          p99: b["p99"]&.to_f
+        }
+      end
+    }
+
+    render_text("#{window_note}#{text}", structured: structured)
   end
 
   def endpoint_extreme_row(endpoint, time_range, environment, release, direction, project_id = nil)
@@ -952,8 +1028,34 @@ class SplatMcpTools
 
   # Every tool returns through one of these two. Both produce a successful
   # JSON-RPC response; the difference is the isError flag inside the result.
-  def render_text(text)
-    ::MCP::Tool::Response.new([{type: "text", text: text}])
+  # The markdown is the answer; `structured` is an optional machine-readable
+  # copy for the tools that declare an outputSchema (SplatMcpServer.output_schemas).
+  # Both travel together — nothing is moved out of the text to make room for it.
+  def render_text(text, structured: nil)
+    ::MCP::Tool::Response.new([{type: "text", text: text}], structured_content: structured)
+  end
+
+  # The window as the caller should read it back: the range actually queried
+  # after retention clamping, plus the same label the markdown header carries.
+  def window_out(time_range)
+    {
+      start: time_range.begin.utc.iso8601,
+      end: time_range.end.utc.iso8601,
+      label: window_label(time_range)
+    }
+  end
+
+  def issue_out(issue)
+    {
+      id: issue.id,
+      title: issue.title,
+      exception_type: issue.exception_type,
+      status: issue.status,
+      count: issue.count,
+      first_seen: issue.first_seen&.utc&.iso8601,
+      last_seen: issue.last_seen&.utc&.iso8601,
+      project: issue.project&.name
+    }
   end
 
   # A tool-level failure, not a protocol one. This used to be a JSON-RPC
