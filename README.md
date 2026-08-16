@@ -137,9 +137,6 @@ SMTP_STARTTLS_AUTO=true
 SPLAT_HOST=splat.example.com
 SPLAT_INTERNAL_HOST=100.x.x.x:3030  # Your Tailscale IP maybe? Used for displaying alternate DSN
 
-# For local development with self-signed certificates, use:
-SMTP_OPENSSL_VERIFY_MODE=none
-
 # Email recipients
 SPLAT_ADMIN_EMAILS=admin@example.com,dev-team@example.com
 SPLAT_EMAIL_FROM=noreply@splat.com
@@ -972,7 +969,6 @@ OIDC_PROVIDER_NAME=Your Provider
   SMTP_PASSWORD' - default nil
   SMTP_AUTHENTICATION' - default 'plain'
   SMTP_STARTTLS_AUTO' - default 'true'
-  SMTP_OPENSSL_VERIFY_MODE - default'none').to_sym
   ```
 
 ### Development
