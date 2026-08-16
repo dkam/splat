@@ -239,6 +239,7 @@ class SplatMcpServer
                   state: {type: "string", enum: ["ok", "missed", "error", "overrun", "unknown"]},
                   project: {type: ["string", "null"]},
                   schedule: {type: ["string", "null"]},
+                  timezone: {type: ["string", "null"]},
                   checkin_margin_minutes: {type: ["integer", "null"]},
                   max_runtime_minutes: {type: ["integer", "null"]},
                   last_checkin_at: TIMESTAMP,

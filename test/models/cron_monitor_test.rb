@@ -114,6 +114,44 @@ class CronMonitorTest < ActiveSupport::TestCase
     assert monitor.missed?(next_two_am + 11.minutes)
   end
 
+  # Regression: every zoned crontab monitor was reported missed daily while
+  # running exactly on time. `basis.in_time_zone(tz)` looked like it applied the
+  # zone, but fugit only ever reads one from the cron expression, so the
+  # schedule was evaluated against UTC. The real case: DeadShopSweepJob runs at
+  # 03:45 Melbourne, checks in at 17:45Z, and UTC scored that 14 hours late.
+  test "crontab schedules are evaluated in the monitor's declared timezone" do
+    payload = heartbeat_payload(
+      "monitor_slug" => "dead-shop-sweep",
+      "monitor_config" => {
+        "schedule" => {"type" => "crontab", "value" => "45 3 * * *"},
+        "checkin_margin" => 60,
+        "timezone" => "Australia/Melbourne"
+      }
+    )
+    monitor = CronMonitor.record_check_in!(payload, @project)
+    # 03:45 Melbourne on the 16th, the check-in the job actually sends.
+    monitor.update!(last_checkin_at: Time.utc(2026, 8, 15, 17, 45, 1))
+
+    # Next run is 03:45 Melbourne on the 17th — 17:45Z, not 03:45Z.
+    assert_equal Time.utc(2026, 8, 16, 17, 45), monitor.next_expected_at.utc
+    refute monitor.missed?(Time.utc(2026, 8, 16, 13, 20)), "on time, mid-interval"
+    refute monitor.missed?(Time.utc(2026, 8, 16, 18, 30)), "inside the 60m margin"
+    assert monitor.missed?(Time.utc(2026, 8, 16, 19, 0)), "genuinely late"
+  end
+
+  test "an unknown timezone leaves the schedule unevaluable rather than missed" do
+    payload = heartbeat_payload(
+      "monitor_slug" => "bogus-zone",
+      "monitor_config" => {
+        "schedule" => {"type" => "crontab", "value" => "45 3 * * *"},
+        "timezone" => "Mars/Olympus_Mons"
+      }
+    )
+    monitor = CronMonitor.record_check_in!(payload, @project)
+    assert_nil monitor.next_expected_at
+    refute monitor.missed?(1.year.from_now)
+  end
+
   test "unparsable schedules never fire missed?" do
     payload = heartbeat_payload(
       "monitor_config" => {"schedule" => {"type" => "crontab", "value" => "not a cron"}}

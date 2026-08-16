@@ -113,14 +113,31 @@ class CronMonitor < ApplicationRecord
       seconds = interval_seconds
       seconds && basis + seconds
     when "crontab"
-      cron = Fugit.parse_cron(schedule_value.to_s)
+      cron = Fugit.parse_cron(crontab_expression)
       return nil unless cron
-      from = timezone.present? ? basis.in_time_zone(timezone) : basis
-      cron.next_time(from)&.to_t
+      cron.next_time(basis)&.to_t
     end
   rescue ArgumentError
     # Unknown timezone string — treat the schedule as unevaluable.
     nil
+  end
+
+  # The crontab as fugit needs it: zone appended to the *expression*.
+  #
+  # Fugit reads a cron's timezone from the expression and nowhere else — the
+  # zone of the `from` argument to #next_time is ignored, so the previous
+  # `basis.in_time_zone(timezone)` was a no-op and every zoned crontab was
+  # evaluated against UTC. A job declaring `crontab: "45 3 * * *", timezone:
+  # "Australia/Melbourne"` checks in at 17:45Z, which UTC reads as 14 hours
+  # late — so it was reported missed every single day while running perfectly
+  # on time. Interval schedules were unaffected, which is why only the crontab
+  # monitors were ever red.
+  #
+  # An unrecognised zone makes Fugit.parse_cron return nil, so the schedule
+  # falls through to "unevaluable" and missed? can't fire — same safe outcome
+  # the ArgumentError rescue gives.
+  def crontab_expression
+    [schedule_value.to_s.strip, timezone.presence].compact.join(" ")
   end
 
   def missed?(now = Time.current)

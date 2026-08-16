@@ -426,6 +426,9 @@ class SplatMcpTools
       lines << "## #{m.slug} — #{m.state}"
       lines << "- **Project:** #{m.project&.name}"
       schedule = m.schedule_description
+      # A crontab means nothing without the zone it's read in — without this a
+      # monitor checking in dead on time looks 14 hours late.
+      schedule += " #{m.timezone}" if m.timezone.present?
       schedule += " (+#{m.checkin_margin}m margin)" if m.checkin_margin.to_i.positive?
       lines << "- **Schedule:** #{schedule}"
       lines << "- **Max runtime:** #{m.max_runtime}m" if m.max_runtime.to_i.positive?
@@ -446,6 +449,7 @@ class SplatMcpTools
         state: m.state,
         project: m.project&.name,
         schedule: m.schedule_description,
+        timezone: m.timezone,
         checkin_margin_minutes: m.checkin_margin,
         max_runtime_minutes: m.max_runtime,
         last_checkin_at: m.last_checkin_at&.utc&.iso8601,
