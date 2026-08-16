@@ -96,7 +96,56 @@ class OidcIdTokenTest < ActiveSupport::TestCase
     end
   end
 
+  # ---- discovery URL normalisation --------------------------------------
+
+  # OIDC_DISCOVERY_URL is documented as the issuer base in README.md and as the
+  # full well-known URL in .env.example, so both reach real deployments. Fetching
+  # the base lands on the provider's home page — a 302 with an empty body, which
+  # used to surface as "Failed to fetch JWKS: unexpected end of input".
+  test "discovery_url appends the well-known path to an issuer base" do
+    assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
+      from: "https://idp.example.com"
+  end
+
+  test "discovery_url leaves a full well-known URL alone" do
+    assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
+      from: "https://idp.example.com/.well-known/openid-configuration"
+  end
+
+  test "discovery_url keeps the path of a realm-scoped provider" do
+    assert_discovery_url "https://idp.example.com/realms/splat/.well-known/openid-configuration",
+      from: "https://idp.example.com/realms/splat"
+  end
+
+  test "discovery_url tolerates a trailing slash" do
+    assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
+      from: "https://idp.example.com/"
+  end
+
+  # Splat's own README recommended the underscore spelling for Google, Okta,
+  # Auth0 and Microsoft. It 404s at every one of them.
+  test "discovery_url corrects the underscore spelling" do
+    assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
+      from: "https://idp.example.com/.well-known/openid_configuration"
+  end
+
+  test "extract_issuer_from_discovery strips the well-known suffix" do
+    controller = OidcAuthController.new
+
+    with_env("OIDC_DISCOVERY_URL" => "https://idp.example.com/.well-known/openid-configuration") do
+      assert_equal "https://idp.example.com", controller.send(:extract_issuer_from_discovery)
+    end
+  end
+
   private
+
+  def assert_discovery_url(expected, from:)
+    controller = OidcAuthController.new
+
+    with_env("OIDC_DISCOVERY_URL" => from) do
+      assert_equal expected, controller.send(:discovery_url)
+    end
+  end
 
   def default_payload
     {

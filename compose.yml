@@ -75,6 +75,10 @@ services:
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
       OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL}
+      # Only needed when the issuer the provider declares isn't the one you want
+      # verified against. Unset, it's read from the discovery document — but it
+      # has to be listed here or setting it in .env silently does nothing.
+      OIDC_ISSUER: ${OIDC_ISSUER}
       OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME}
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}

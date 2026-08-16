@@ -7,6 +7,14 @@ class OidcAuthController < ApplicationController
   # Authentik or Keycloak's default) would need the client secret as the key.
   ID_TOKEN_ALGORITHMS = %w[RS256 RS384 RS512 PS256 PS384 PS512 ES256 ES384 ES512].freeze
 
+  # OIDC_DISCOVERY_URL is set both ways in the wild — as the issuer base, which
+  # is what the README asks for, and as the full well-known URL, which is what
+  # .env.example shows — so every reader normalises rather than trusting it. The
+  # underscore spelling is accepted on the way in because Splat's own README
+  # recommended it for four providers; only the hyphenated form is real.
+  WELL_KNOWN_PATH = "/.well-known/openid-configuration"
+  WELL_KNOWN_SUFFIX = %r{/\.well-known/openid[-_]configuration/?\z}
+
   # GET /login - Show login page
   def login
     # If user is authenticated and no special parameters, redirect to dashboard
@@ -174,8 +182,8 @@ class OidcAuthController < ApplicationController
 
   def oidc_client
     @oidc_client ||= begin
-      # Strip .well-known/openid-configuration if present (discover! adds it automatically)
-      issuer_url = ENV.fetch("OIDC_DISCOVERY_URL").sub(%r{/?\.well-known/openid-configuration/?$}, "").chomp("/")
+      # discover! appends the well-known path itself, so it wants the base.
+      issuer_url = extract_issuer_from_discovery
 
       # Use gem's discovery directly
       discovery = OpenIDConnect::Discovery::Provider::Config.discover!(issuer_url)
@@ -192,8 +200,7 @@ class OidcAuthController < ApplicationController
       # If discovery fails with validation, try manual fallback
       Rails.logger.warn "OIDC discovery validation failed: #{e.message}. Trying manual fallback."
 
-      config_url = "#{issuer_url}/.well-known/openid-configuration"
-      response = Faraday.get(config_url)
+      response = Faraday.get(discovery_url)
       config = JSON.parse(response.body)
 
       OpenIDConnect::Client.new(
@@ -347,7 +354,31 @@ class OidcAuthController < ApplicationController
   # The provider's discovery document, fetched once per request. Both the JWKS
   # and the expected issuer come from here.
   def discovery_document
-    @discovery_document ||= JSON.parse(Net::HTTP.get(URI.parse(ENV.fetch("OIDC_DISCOVERY_URL"))))
+    @discovery_document ||= fetch_json(discovery_url, "OIDC discovery")
+  end
+
+  # The full well-known URL, whichever end of it OIDC_DISCOVERY_URL was set to.
+  # Fetching the issuer base instead lands on the provider's home page, which
+  # for a real IdP is a redirect to a login form — an empty body that surfaces
+  # as a JSON parse error nowhere near the thing that caused it.
+  def discovery_url
+    "#{extract_issuer_from_discovery}#{WELL_KNOWN_PATH}"
+  end
+
+  # Net::HTTP.get hands back the body whatever the status and doesn't follow
+  # redirects, so a 302 or a 404 arrives as something JSON.parse chokes on
+  # rather than as the HTTP problem it actually is. Check the status here so
+  # the log names the URL and the code.
+  def fetch_json(url, purpose)
+    response = Net::HTTP.get_response(URI.parse(url))
+
+    unless response.is_a?(Net::HTTPSuccess)
+      raise "#{purpose} returned HTTP #{response.code} from #{url}"
+    end
+
+    JSON.parse(response.body)
+  rescue JSON::ParserError => e
+    raise "#{purpose} returned invalid JSON from #{url}: #{e.message}"
   end
 
   # Prefer the issuer the provider declares over one guessed from the discovery
@@ -370,20 +401,23 @@ class OidcAuthController < ApplicationController
         raise "OIDC provider does not support JWKS"
       end
 
-      jwks_response = Net::HTTP.get(URI.parse(jwks_uri))
-      jwks_data = JSON.parse(jwks_response)
+      jwks_data = fetch_json(jwks_uri, "OIDC JWKS")
 
       JWT::JWK::Set.new(jwks_data["keys"])
     rescue => e
       Rails.logger.error "Failed to fetch JWKS: #{e.message}"
-      raise "Unable to fetch JWKS from OIDC provider"
+      # Carry the cause forward: this raise is what the callback's rescue logs,
+      # and "Unable to fetch JWKS" on its own points at the JWKS endpoint even
+      # when the fetch that failed was discovery.
+      raise "Unable to fetch JWKS from OIDC provider: #{e.message}"
     end
   end
 
+  # The issuer base — OIDC_DISCOVERY_URL with any well-known suffix removed.
+  # Used as the issuer of last resort, and as the base every other URL is
+  # built from.
   def extract_issuer_from_discovery
-    # Extract issuer from discovery URL if not explicitly configured
-    discovery_url = ENV.fetch("OIDC_DISCOVERY_URL")
-    discovery_url.sub(%r{/?\.well-known/openid-configuration/?$}, "").chomp("/")
+    ENV.fetch("OIDC_DISCOVERY_URL").strip.sub(WELL_KNOWN_SUFFIX, "").chomp("/")
   end
 
   def process_backchannel_logout(claims)

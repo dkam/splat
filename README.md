@@ -880,12 +880,17 @@ Splat supports OpenID Connect (OIDC) authentication with automatic discovery URL
 The preferred method is using OIDC discovery URLs - just set 3 environment variables:
 
 ```bash
-# Required for OIDC authentication (app automatically adds .well-known path)
-OIDC_DISCOVERY_URL=https://your-provider.com
+# Required for OIDC authentication
+OIDC_DISCOVERY_URL=https://your-provider.com/.well-known/openid-configuration
 OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 OIDC_PROVIDER_NAME=Your Provider Name  # Optional: Display name for login button
 ```
+
+The full well-known URL is the form to prefer, and the one `.env.example` and
+the provider examples below use. The issuer base on its own
+(`https://your-provider.com`) also works — Splat appends the well-known path
+when it's missing — but say what you mean and the logs stay easier to read.
 
 **Important**: Configure your OIDC provider with the callback URL: `https://your-splat-domain.com/auth/callback`
 
@@ -893,7 +898,7 @@ OIDC_PROVIDER_NAME=Your Provider Name  # Optional: Display name for login button
 
 **Google:**
 ```bash
-OIDC_DISCOVERY_URL=https://accounts.google.com/.well-known/openid_configuration
+OIDC_DISCOVERY_URL=https://accounts.google.com/.well-known/openid-configuration
 OIDC_CLIENT_ID=your-google-client-id
 OIDC_CLIENT_SECRET=your-google-client-secret
 OIDC_PROVIDER_NAME=Google
@@ -901,7 +906,7 @@ OIDC_PROVIDER_NAME=Google
 
 **Okta:**
 ```bash
-OIDC_DISCOVERY_URL=https://your-domain.okta.com/.well-known/openid_configuration
+OIDC_DISCOVERY_URL=https://your-domain.okta.com/.well-known/openid-configuration
 OIDC_CLIENT_ID=your-okta-client-id
 OIDC_CLIENT_SECRET=your-okta-client-secret
 OIDC_PROVIDER_NAME=Okta
@@ -909,7 +914,7 @@ OIDC_PROVIDER_NAME=Okta
 
 **Auth0:**
 ```bash
-OIDC_DISCOVERY_URL=https://your-domain.auth0.com/.well-known/openid_configuration
+OIDC_DISCOVERY_URL=https://your-domain.auth0.com/.well-known/openid-configuration
 OIDC_CLIENT_ID=your-auth0-client-id
 OIDC_CLIENT_SECRET=your-auth0-client-secret
 OIDC_PROVIDER_NAME=Auth0
@@ -917,7 +922,7 @@ OIDC_PROVIDER_NAME=Auth0
 
 **Microsoft Azure AD:**
 ```bash
-OIDC_DISCOVERY_URL=https://login.microsoftonline.com/your-tenant-id/v2.0/.well-known/openid_configuration
+OIDC_DISCOVERY_URL=https://login.microsoftonline.com/your-tenant-id/v2.0/.well-known/openid-configuration
 OIDC_CLIENT_ID=your-azure-client-id
 OIDC_CLIENT_SECRET=your-azure-client-secret
 OIDC_PROVIDER_NAME=Microsoft
