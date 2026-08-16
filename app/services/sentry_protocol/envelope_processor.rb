@@ -11,6 +11,28 @@ module SentryProtocol
       ActiveStorage::
     ].freeze
 
+    # Well-formed envelope items Splat has no use for. They carry no event_id —
+    # they aren't occurrences — so they have to be dropped before the event_id
+    # guard in process_item, the way logs and check-ins are, or a valid item
+    # gets reported as malformed.
+    #
+    # "sessions" is release health: per-minute counts of requests that exited or
+    # errored, which Sentry turns into crash-free rates. Every server SDK sends
+    # it by default (sentry-ruby's auto_session_tracking), one envelope per
+    # process per minute — ~21 a minute from Booko alone, each of which logged
+    # an error here. "session" is the same thing unaggregated.
+    IGNORED_ITEM_TYPES = %w[
+      session
+      sessions
+      client_report
+      statsd
+      metric_buckets
+      replay_event
+      replay_recording
+      profile
+      profile_chunk
+    ].freeze
+
     attr_reader :raw_body, :project
 
     def initialize(raw_body, project)
@@ -224,6 +246,11 @@ module SentryProtocol
         return
       end
 
+      if IGNORED_ITEM_TYPES.include?(item_type)
+        Rails.logger.debug "Skipping #{item_type} item — not stored by Splat"
+        return
+      end
+
       # Get event_id from payload first, then envelope headers, following GlitchTip pattern
       event_id = extract_event_id(item[:payload]) || envelope_headers[:event_id]
 
@@ -272,9 +299,6 @@ module SentryProtocol
       when "attachment"
         # Skip attachments for now - we don't need them for error tracking
         Rails.logger.debug "Skipping attachment item"
-      when "session"
-        # Skip session data for now
-        Rails.logger.debug "Skipping session item"
       else
         # Unknown item type - log but don't fail
         Rails.logger.info "Unknown item type: #{item_type}"

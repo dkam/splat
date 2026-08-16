@@ -92,6 +92,40 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     assert processor.process
   end
 
+  test "skips release-health sessions without queuing anything" do
+    put_calls = []
+    with_stub(Ingest::Tuber, :put, ->(*args, **kw) { put_calls << [args, kw] }) do
+      assert SentryProtocol::EnvelopeProcessor.new(sessions_envelope, @project).process
+    end
+
+    assert_empty put_calls
+  end
+
+  # The regression: sessions carry no event_id, so before IGNORED_ITEM_TYPES they
+  # fell through to the event_id guard and were reported as malformed. Once those
+  # errors started reaching Sentry they were ~31k log records a day.
+  test "does not log an error for release-health sessions" do
+    logged = capture_error_logs do
+      SentryProtocol::EnvelopeProcessor.new(sessions_envelope, @project).process
+    end
+
+    assert_empty logged, "expected no error logs, got: #{logged.inspect}"
+  end
+
+  # The guard still has to fire for an item type Splat does ingest.
+  test "still logs an error for an event with no event_id" do
+    envelope = build_envelope_with_empty_headers(
+      items: [{type: "event", payload: {"message" => "Test"}}]
+    )
+
+    logged = capture_error_logs do
+      SentryProtocol::EnvelopeProcessor.new(envelope, @project).process
+    end
+
+    assert_equal 1, logged.size
+    assert_match(/Missing event_id/, logged.first)
+  end
+
   test "rejects envelope with no items" do
     envelope_body = '{"event_id":"abc123","sent_at":"2025-10-18T08:00:00Z"}'
 
@@ -561,6 +595,48 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
   end
 
   private
+
+  # Collect only what the block logs at error level, so a test can assert on the
+  # absence of an error without depending on everything else Rails logs.
+  def capture_error_logs
+    logged = []
+    collector = Class.new do
+      def initialize(sink) = @sink = sink
+
+      def error(message = nil) = @sink << (message || yield)
+
+      def method_missing(*, **, &) = nil
+
+      def respond_to_missing?(*) = true
+    end.new(logged)
+
+    original = Rails.logger
+    Rails.logger = collector
+    begin
+      yield
+    ensure
+      Rails.logger = original
+    end
+    logged
+  end
+
+  # The real shape sentry-ruby's session flusher sends: no event_id anywhere,
+  # aggregate counters bucketed by minute. Splat stores no release health, but
+  # the item is perfectly well-formed and must not be logged as malformed —
+  # Booko's flushers produced ~21 of those errors a minute.
+  def sessions_envelope
+    build_envelope_with_empty_headers(
+      items: [
+        {
+          type: "sessions",
+          payload: {
+            "attrs" => {"release" => "1.2.3", "environment" => "production"},
+            "aggregates" => [{"started" => "2026-08-16T13:00:00Z", "exited" => 412, "errored" => 3}]
+          }
+        }
+      ]
+    )
+  end
 
   def build_envelope(event_id: nil, sent_at: nil, items: [])
     headers = {}
