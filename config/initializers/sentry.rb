@@ -57,6 +57,22 @@ Rails.application.configure do
         action_controller: Sentry::Rails::LogSubscribers::ActionControllerSubscriber
       }
 
+      # Those subscribers only cover Rails' instrumentation events — one log per
+      # request — so a bare Rails.logger.error went to the container log and
+      # nowhere else. That's how most of Splat's rescue blocks report what
+      # actually went wrong, and it left OIDC login broken for a week showing
+      # only healthy-looking 302s in splat-splat while the reason ("Failed to
+      # fetch JWKS") sat in docker logs. The :logger patch forwards std-lib
+      # Logger calls as well.
+      #
+      # The filter is what makes that affordable: unfiltered, this fires at the
+      # logger's level, so every "Started GET" and "Completed 200" would arrive
+      # too and bury the instance. Errors are rare and are the whole point.
+      config.enabled_patches += [:logger]
+      config.std_lib_logger_filter = lambda do |_logger, _message, level|
+        [:error, :fatal].include?(level)
+      end
+
       # Keep splat-splat low-traffic: drop request logs from Splat's high-volume
       # server paths (envelope ingest, MCP, health/up) — the same paths the
       # traces sampler treats as pipeline — leaving just the admin web UI.
