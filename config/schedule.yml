@@ -26,6 +26,24 @@ monitor_evaluation:
   schedule: every 60s
   idp: monitor_evaluation
 
+# Explicit TRUNCATE checkpoint of the write-heavy DBs. SQLite's automatic
+# checkpoint is passive — it yields to readers and lets the WAL keep growing —
+# and on the logs DB, where every insert also writes the logs_fts_* triggers'
+# index entries, it loses the race and never recovers. Left alone it ran away to
+# a 4.2 GB WAL on 2026-08-17 and took ingest down with it. See the job.
+#
+# Rides splat.checkins (NOT splat.maintenance) for the same reason
+# monitor_evaluation does: this is the job that stops the WAL running away, so
+# it must never queue behind RetentionJob or the deep storage pass — those are
+# exactly the hours when the WAL is growing fastest. Cheap when there's nothing
+# to do (the checkpoint is a no-op on a small WAL), and bounded by busy_timeout
+# when there is.
+wal_checkpoint:
+  class: Maintenance::WalCheckpointJob
+  tube: splat.checkins
+  schedule: every 10m
+  idp: wal_checkpoint
+
 # Hourly rollup of the previous hour's transactions into per-bucket counts in
 # transaction_histograms. Runs a few minutes past the hour so any in-flight
 # inserts for that hour have landed. Idempotent — re-running overwrites.
@@ -46,9 +64,10 @@ data_retention:
   con: 1
 
 # Nightly FTS5 segment merge on the logs search index, plus vacuum. Retention
-# deletes only write delete-markers into logs_fts; without an explicit
-# 'optimize' the index grows without bound. Runs after data_retention so the
-# night's deletes are merged away immediately.
+# deletes only write delete-markers into logs_fts; without an explicit merge the
+# index grows without bound. Runs after data_retention so the night's deletes
+# are merged away immediately. Time-budgeted and stepped (see the job) — it is
+# expected to leave work behind on a big index and pick it up the next night.
 logs_fts_optimize:
   class: Maintenance::LogsFtsOptimizeJob
   tube: splat.maintenance
@@ -87,14 +106,20 @@ storage_stats:
   idp: storage_stats
 
 # The deep pass: per-table dbstat page walk + COUNT(*) per table, which is
-# ~two full reads of every DB (~80 min at 100GB). Daily, off-peak. This was
-# once folded into the 15-minute job above, which meant the maintenance worker
-# ran a full-dataset scan permanently and starved every other job on the tube.
-# If it needs to be more frequent than daily, make it cheaper first.
+# ~two full reads of every DB. This was once folded into the 15-minute job
+# above, which meant the maintenance worker ran a full-dataset scan permanently
+# and starved every other job on the tube.
+#
+# Weekly, not daily. The ~80 min in the original note was measured at 100 GB; at
+# 277 GB the 2026-08-16 run took just under 8 hours (03:40 -> 11:34), i.e. it
+# ran straight through the morning peak, holding read snapshots and saturating
+# the disk the whole way. It populates a table-size display — that is not worth
+# a full-dataset scan every day. Sunday, so the long tail lands on a quiet day.
+# If it needs to be more frequent, make it cheaper first.
 storage_stats_deep:
   class: Maintenance::StorageStatsJob
   args: ["deep"]
   tube: splat.maintenance
-  schedule: cron 40 3 * * *
+  schedule: cron 40 3 * * 0
   con: 1
   idp: storage_stats_deep
