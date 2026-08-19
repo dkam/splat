@@ -68,8 +68,16 @@
   <% if @issues.any? %>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 divide-y divide-gray-200 dark:divide-gray-800">
       <% @issues.each do |issue| %>
-        <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 dark:hover:bg-gray-800/60 p-6 transition-colors" do %>
-          <div class="flex justify-between items-start">
+        <div class="relative p-6 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+          <%# Stretched link — keeps the whole row clickable now that the row is
+              a div rather than an <a>. Anything that needs its own clicks or
+              hover (the sparkline, the status buttons) is positioned, which
+              paints it above this. %>
+          <%= link_to project_issue_path(@project.slug, issue), class: "absolute inset-0" do %>
+            <span class="sr-only">View issue #<%= issue.id %>: <%= issue.title %></span>
+          <% end %>
+
+          <div class="flex justify-between items-start gap-4">
             <div class="flex-1">
               <div class="flex items-center gap-3 mb-2">
                 <span class="text-lg font-mono text-gray-500 dark:text-gray-400 font-medium">#<%= issue.id %></span>
@@ -113,7 +121,7 @@
             <div class="flex items-center gap-4">
               <% spark = @sparklines[issue.id] %>
               <% if spark&.any? { |v| v.to_i.positive? } %>
-                <div class="text-blue-500 dark:text-blue-400" data-controller="sparkline-tooltip"
+                <div class="relative text-blue-500 dark:text-blue-400" data-controller="sparkline-tooltip"
                      title="Events per hour, last 24h. Dashed lines = deploys.">
                   <%= sparkline(spark, width: 120, height: 28,
                       title: "#{spark.sum} events in last 24h, #{@deploy_markers.size} deploy#{'s' if @deploy_markers.size != 1}",
@@ -127,9 +135,11 @@
                 <div class="text-2xl font-bold text-gray-900 dark:text-gray-100"><%= issue.count %></div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">events</div>
               </div>
+
+              <%= render "issues/row_actions", project: @project, issue: issue %>
             </div>
           </div>
-        <% end %>
+        </div>
       <% end %>
     </div>
 

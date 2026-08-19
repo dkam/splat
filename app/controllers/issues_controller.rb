@@ -75,19 +75,28 @@ class IssuesController < ApplicationController
       .pluck(:first_seen_at)
   end
 
+  # The status actions are triggered from two places — the issue page and the
+  # rows on the issues list — so they return to whichever one asked. Coming from
+  # the list, that redirect lands back on the URL the browser is already showing
+  # (status tab, environment filter and page intact), which Turbo treats as a
+  # page refresh and morphs: the row leaves the tab it no longer belongs to and
+  # the tab counts move, without losing scroll position.
   def resolve
     @issue.resolved!
-    redirect_to project_issue_path(@project.slug, @issue), notice: "Issue marked as resolved"
+    redirect_back_or_to project_issue_path(@project.slug, @issue),
+      allow_other_host: false, notice: "Issue marked as resolved"
   end
 
   def ignore
     @issue.ignored!
-    redirect_to project_issue_path(@project.slug, @issue), notice: "Issue ignored"
+    redirect_back_or_to project_issue_path(@project.slug, @issue),
+      allow_other_host: false, notice: "Issue ignored"
   end
 
   def reopen
     @issue.open!
-    redirect_to project_issue_path(@project.slug, @issue), notice: "Issue reopened"
+    redirect_back_or_to project_issue_path(@project.slug, @issue),
+      allow_other_host: false, notice: "Issue reopened"
   end
 
   private

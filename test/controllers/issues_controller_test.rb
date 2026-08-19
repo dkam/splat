@@ -69,6 +69,43 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href*='status=resolved'][href*='environment=staging']"
   end
 
+  test "index offers resolve and ignore per open row, reopen once it has left the open tab" do
+    issue = create_issue("row-actions", "RowActions")
+
+    get project_issues_url(@project.slug)
+    assert_response :success
+    assert_select "form[action=?]", resolve_project_issue_path(@project.slug, issue)
+    assert_select "form[action=?]", ignore_project_issue_path(@project.slug, issue)
+    # A <form> inside an <a> is invalid HTML and swallows the button's click,
+    # which is why the row is a div with a stretched link rather than an anchor.
+    assert_select "a form", count: 0
+
+    issue.resolved!
+    get project_issues_url(@project.slug, status: "resolved")
+    assert_response :success
+    assert_select "form[action=?]", reopen_project_issue_path(@project.slug, issue)
+    assert_select "form[action=?]", resolve_project_issue_path(@project.slug, issue), count: 0
+  end
+
+  test "resolving from the list returns to the list with its filters intact" do
+    issue = create_issue("resolve-from-list", "ResolveFromList")
+    list = project_issues_url(@project.slug, status: "open", page: 2)
+
+    patch resolve_project_issue_url(@project.slug, issue), headers: {"HTTP_REFERER" => list}
+
+    assert_redirected_to list
+    assert_predicate issue.reload, :resolved?
+  end
+
+  test "status actions fall back to the issue page when there is nowhere to go back to" do
+    issue = create_issue("no-referer", "NoReferer")
+
+    patch ignore_project_issue_url(@project.slug, issue)
+
+    assert_redirected_to project_issue_path(@project.slug, issue)
+    assert_predicate issue.reload, :ignored?
+  end
+
   private
 
   def create_issue(fingerprint, title)

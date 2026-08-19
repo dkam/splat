@@ -1,0 +1,30 @@
+<%# Status buttons for a row on the issues list. Icon-only to keep 25 rows
+    readable; `relative` lifts them above the row's stretched link so their
+    clicks land on the button rather than navigating to the issue. %>
+<div class="relative flex items-center gap-1 shrink-0">
+  <% if issue.open? %>
+    <%= button_to resolve_project_issue_path(project.slug, issue),
+        method: :patch,
+        class: "inline-flex items-center justify-center w-8 h-8 rounded-md border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors",
+        title: "Resolve",
+        aria: {label: "Resolve issue ##{issue.id}"} do %>
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    <% end %>
+
+    <%= button_to ignore_project_issue_path(project.slug, issue),
+        method: :patch,
+        class: "inline-flex items-center justify-center w-8 h-8 rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
+        title: "Ignore",
+        aria: {label: "Ignore issue ##{issue.id}"} do %>
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+    <% end %>
+  <% else %>
+    <%= button_to reopen_project_issue_path(project.slug, issue),
+        method: :patch,
+        class: "inline-flex items-center justify-center w-8 h-8 rounded-md border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors",
+        title: "Reopen",
+        aria: {label: "Reopen issue ##{issue.id}"} do %>
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+    <% end %>
+  <% end %>
+</div>
