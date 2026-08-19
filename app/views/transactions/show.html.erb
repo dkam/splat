@@ -1,6 +1,9 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-8">
-    <%= link_to "← Performance", project_endpoints_path(@project.slug), class: "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" %>
+    <%= breadcrumbs([@project.name, project_path(@project.slug)],
+                    ["Performance", project_endpoints_path(@project.slug)],
+                    [@transaction.transaction_name, detail_project_endpoints_path(@project.slug, name: @transaction.transaction_name)],
+                    ["Transaction ##{@transaction.id}", nil]) %>
   </div>
 
   <div class="mb-6">

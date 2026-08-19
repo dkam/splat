@@ -308,4 +308,40 @@ module ApplicationHelper
       "text-green-600 dark:text-green-400"
     end
   end
+
+  BREADCRUMB_LINK = "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100".freeze
+  BREADCRUMB_CURRENT = "text-gray-900 dark:text-gray-100 font-medium".freeze
+
+  # Renders a breadcrumb trail from [label, path] pairs. A crumb with a nil
+  # path is the current page: rendered as plain text, not a link. Pages that
+  # nest (issue -> event) use this so the trail keeps its ancestors instead of
+  # collapsing to a single "back" link.
+  def breadcrumbs(*crumbs)
+    crumbs = crumbs.compact
+    return if crumbs.empty?
+
+    tag.nav("aria-label": "Breadcrumb") do
+      tag.ol(class: "flex items-center flex-wrap gap-2 text-sm") do
+        safe_join(crumbs.each_with_index.map { |crumb, index| breadcrumb_item(crumb, first: index.zero?) })
+      end
+    end
+  end
+
+  # Keep this last in the module — anything defined below it would be private
+  # to views too.
+  private
+
+  def breadcrumb_item((label, path), first:)
+    tag.li(class: "flex items-center gap-2") do
+      separator = first ? "" : tag.span("/", class: "text-gray-400 dark:text-gray-600", "aria-hidden": "true")
+      crumb =
+        if path
+          link_to(label, path, class: BREADCRUMB_LINK)
+        else
+          tag.span(label, class: BREADCRUMB_CURRENT, "aria-current": "page")
+        end
+
+      safe_join([ separator, crumb ])
+    end
+  end
 end

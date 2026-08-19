@@ -1,7 +1,8 @@
 <div class="max-w-5xl mx-auto px-4 py-8">
-  <div class="flex justify-between items-center mb-8">
-    <h1 class="font-bold text-3xl text-gray-900 dark:text-gray-100">Settings</h1>
-    <%= link_to "← Back to Projects", projects_path, class: "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300" %>
+  <div class="mb-8">
+    <%= breadcrumbs(["Projects", root_path],
+                    ["Settings", nil]) %>
+    <h1 class="font-bold text-3xl text-gray-900 dark:text-gray-100 mt-2">Settings</h1>
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">

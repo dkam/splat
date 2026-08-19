@@ -19,7 +19,7 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
     # Numbered page link to page 2 plus the current-page marker.
     assert_select "a[rel=next]", 1
-    assert_select "span[aria-current=page]", 1
+    assert_select "nav[aria-label=Pagination] span[aria-current=page]", 1
     assert_select "a", text: "2"
 
     get project_issues_url(@project.slug, page: 2)

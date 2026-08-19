@@ -53,4 +53,20 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a", text: /View transaction/, count: 0
     assert_select "a", text: /for this trace/, count: 0
   end
+
+  test "show breadcrumbs keep the issue's ancestors instead of a lone back link" do
+    event = Event.create_from_sentry_payload!(
+      "evt-breadcrumb",
+      {"exception" => {"values" => [{"type" => "NoMethodError", "value" => "boom"}]},
+       "timestamp" => "2026-07-17T08:00:00Z"},
+      @project
+    )
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select "nav[aria-label=Breadcrumb] li", 4
+    assert_select "nav[aria-label=Breadcrumb] a[href=?]", project_issues_path(@project.slug)
+    assert_select "nav[aria-label=Breadcrumb] a[href=?]", project_issue_path(@project.slug, event.issue)
+    assert_select "nav[aria-label=Breadcrumb] [aria-current=page]", "Event ##{event.id}"
+  end
 end

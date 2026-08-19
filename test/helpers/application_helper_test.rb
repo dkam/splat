@@ -63,4 +63,22 @@ class ApplicationHelperTest < ActionView::TestCase
 
     assert_equal 1, svg.scan("sparkline-hover").size
   end
+
+  test "breadcrumbs links every crumb but the current page" do
+    html = breadcrumbs(["Issues", "/projects/one/issues"], ["Issue #89", nil])
+
+    assert_includes html, %(<a class="#{ApplicationHelper::BREADCRUMB_LINK}" href="/projects/one/issues">Issues</a>)
+    assert_includes html, %(aria-current="page">Issue #89</span>)
+    refute_includes html, ">Issue #89</a>"
+  end
+
+  test "breadcrumbs puts a separator between crumbs but not before the first" do
+    assert_equal 2, breadcrumbs(["A", "/a"], ["B", "/b"], ["C", nil]).scan("aria-hidden").size
+    assert_equal 0, breadcrumbs(["A", nil]).scan("aria-hidden").size
+  end
+
+  test "breadcrumbs skips nil crumbs and renders nothing when none are left" do
+    assert_nil breadcrumbs(nil)
+    assert_equal 1, breadcrumbs(["A", "/a"], nil).scan("<li").size
+  end
 end

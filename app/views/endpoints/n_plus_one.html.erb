@@ -1,6 +1,8 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <div class="mb-6">
-    <%= link_to "← Back to Performance", project_endpoints_path(@project.slug, time_range: @time_range), class: "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm" %>
+    <%= breadcrumbs([@project.name, project_path(@project.slug)],
+                    ["Performance", project_endpoints_path(@project.slug, time_range: @time_range)],
+                    ["N+1 Queries", nil]) %>
     <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-2">Endpoints with N+1 Issues</h1>
     <p class="text-gray-600 dark:text-gray-400 mt-2">
       Endpoints where multiple requests showed the same SQL pattern repeated more than 3 times — a classic N+1
