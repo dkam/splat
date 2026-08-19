@@ -66,8 +66,9 @@ data_retention:
 # Nightly FTS5 segment merge on the logs search index, plus vacuum. Retention
 # deletes only write delete-markers into logs_fts; without an explicit merge the
 # index grows without bound. Runs after data_retention so the night's deletes
-# are merged away immediately. Time-budgeted and stepped (see the job) — it is
-# expected to leave work behind on a big index and pick it up the next night.
+# start getting merged away right away. Time-budgeted and stepped (see the
+# job) — on a big index it is expected to leave work behind and pick it up
+# the next night, not merge everything away in one run.
 logs_fts_optimize:
   class: Maintenance::LogsFtsOptimizeJob
   tube: splat.maintenance

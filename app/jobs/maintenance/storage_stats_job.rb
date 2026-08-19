@@ -6,14 +6,13 @@ module Maintenance
   # Two modes, because the costs differ by orders of magnitude:
   #
   #   perform          — the cheap pass (hourly). Index seeks and PRAGMA reads.
-  #   perform("deep")  — the full pass (daily, and on a cold cache). Walks every
+  #   perform("deep")  — the full pass (weekly, and on a cold cache). Walks every
   #                      page of every DB via dbstat and COUNT(*)s every table,
   #                      so it costs roughly two full reads of the whole dataset.
   #
-  # The deep pass used to run every 15 minutes. Once the DBs passed ~100GB a
-  # single pass took ~80 minutes, so the maintenance worker never idled and
-  # every other job on the tube (histogram rollups, OIDC cleanup) was starved
-  # behind it. Keep the deep pass daily.
+  # The deep pass used to run every 15 minutes, then daily. Once the DBs passed
+  # ~100GB a single daily pass took ~8 hours at 277GB, running straight through
+  # the morning peak — see config/schedule.yml for the current weekly cadence.
   class StorageStatsJob
     def perform(mode = nil)
       deep = mode.to_s == "deep"

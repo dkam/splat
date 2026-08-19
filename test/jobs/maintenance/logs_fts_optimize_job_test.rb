@@ -49,4 +49,19 @@ class Maintenance::LogsFtsOptimizeJobTest < ActiveSupport::TestCase
       "SELECT rowid FROM logs_fts WHERE logs_fts MATCH 'budgeted'"
     ).size
   end
+
+  test "gives merge a strictly earlier deadline than vacuum, not a shared one" do
+    job = Maintenance::LogsFtsOptimizeJob.new
+    seen_deadlines = []
+
+    with_stub(job, :merge!, ->(_conn, deadline) { seen_deadlines << deadline; 0 }) do
+      with_stub(job, :vacuum!, ->(_conn, deadline) { seen_deadlines << deadline; 0 }) do
+        job.perform(max_seconds: 100)
+      end
+    end
+
+    merge_deadline, vacuum_deadline = seen_deadlines
+    assert_operator merge_deadline, :<, vacuum_deadline,
+      "a merge! that keeps finding work for the whole budget would otherwise leave vacuum! nothing"
+  end
 end

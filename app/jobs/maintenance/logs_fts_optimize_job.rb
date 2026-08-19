@@ -37,6 +37,14 @@ module Maintenance
     # lock for hours is not. Whatever is left is picked up by the next run.
     MAX_SECONDS = 20 * 60
 
+    # merge! gets at most this fraction of the total budget, guaranteeing vacuum!
+    # a slice of its own. Under sustained heavy write load — the exact condition
+    # this job exists for — merge! can keep finding >=2 changed rows on every
+    # step for the whole budget, so a shared deadline would starve vacuum! every
+    # single run: dead entries merged away, but freed pages never handed back to
+    # the OS, silently growing the file forever.
+    MERGE_BUDGET_FRACTION = 0.75
+
     # Freelist pages reclaimed per incremental_vacuum step. Uncapped
     # `PRAGMA incremental_vacuum` has the same unbounded-transaction problem as
     # 'optimize' — on the logs DB that is ~2M free pages (8 GB) in one shot.
@@ -44,11 +52,13 @@ module Maintenance
 
     def perform(max_seconds: MAX_SECONDS)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      deadline = started + max_seconds.to_i
+      total_seconds = max_seconds.to_i
+      deadline = started + total_seconds
+      merge_deadline = started + (total_seconds * MERGE_BUDGET_FRACTION)
       conn = LogsRecord.connection
 
       pages_before = conn.select_value("PRAGMA page_count").to_i
-      merge_steps = merge!(conn, deadline)
+      merge_steps = merge!(conn, merge_deadline)
       vacuumed = vacuum!(conn, deadline)
       pages_after = conn.select_value("PRAGMA page_count").to_i
 
@@ -66,6 +76,13 @@ module Maintenance
     rescue ActiveRecord::StatementInvalid => e
       # logs_fts may not exist (fresh DB before Logs::Fts.ensure! ran, or a
       # non-SQLite adapter) — skip rather than crash the maintenance worker.
+      # ActiveRecord::StatementTimeout/LockWaitTimeout are also
+      # StatementInvalid subclasses, so narrow the match to the missing-table
+      # case: WalCheckpointJob now TRUNCATEs this same DB every 10 minutes, and
+      # a real busy_timeout mid-run should fail loud (and retry) rather than be
+      # discarded as "skipped" indistinguishably from a fresh DB.
+      raise unless e.message.match?(/no such table/i)
+
       Rails.logger.warn "[#{self.class.name}] skipped: #{e.message}"
       nil
     end

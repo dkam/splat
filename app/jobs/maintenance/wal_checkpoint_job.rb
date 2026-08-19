@@ -29,30 +29,59 @@ module Maintenance
   # the backlog cannot accumulate across runs.
   #
   # A busy result is a normal outcome, not a failure: it means a reader held on
-  # and the WAL is unchanged. The next run picks it up. We log it and move to the
-  # next database rather than raising, because one contended DB must not stop the
-  # others from being checkpointed.
+  # and the WAL is unchanged. The next run picks it up. We log it and move on
+  # rather than raising, because one contended DB must not stop the others from
+  # being checkpointed. A genuine per-DB error is isolated the same way so the
+  # rest still run, but is re-raised once all DBs have been attempted, so it
+  # doesn't look like an ordinary busy skip with nothing to alert on.
   class WalCheckpointJob
-    # Ordered most- to least- at risk. logs first: it is the one that actually
-    # runs away, and if the job is cut short it's the one that matters.
+    # SQLite errors that mean "someone else has the file right now" rather than
+    # "something is actually broken" — the same non-failure as busy=1. Threaded
+    # checkpoints only ever target distinct DB files, so these can only come
+    # from contention with a real writer elsewhere (e.g. LogConsumer), not from
+    # this job's own threads colliding with each other.
+    CONTENDED_ERRORS = [SQLite3::BusyException, SQLite3::LockedException].freeze
+
+    # All 6 SQLite connections (config/database.yml) — including cache and
+    # cable, both named as casualties of the 2026-08-17 incident this job
+    # exists to prevent. Checkpointed concurrently below, so this ordering is
+    # cosmetic, not a priority queue.
     DATABASES = {
       "logs" => "LogsRecord",
       "transactions_spans" => "TransactionsSpansRecord",
       "issues_events" => "IssuesEventsRecord",
-      "primary" => "ApplicationRecord"
+      "primary" => "ApplicationRecord",
+      "cache" => "SolidCache::Record",
+      "cable" => "SolidCable::Record"
     }.freeze
 
     def perform(*names)
       targets = names.flatten.map(&:to_s).presence || DATABASES.keys
-      results = {}
 
-      targets.each do |name|
+      # Concurrent, not sequential: this job shares splat.checkins with
+      # Monitors::EvaluateJob, whose CheckInConsumer processes a batch on one
+      # thread — a sequential loop's worst case stacks additively (~4-6x
+      # busy_timeout) and can delay the dead-man's-switch sweep behind it,
+      # defeating the reason this job is on that tube at all. Checkpointing
+      # concurrently bounds the worst case to a single busy_timeout instead.
+      threads = targets.filter_map do |name|
         klass = DATABASES[name]
         unless klass
           Rails.logger.warn "[#{self.class.name}] unknown database #{name.inspect}, skipping"
           next
         end
-        results[name] = checkpoint(name, klass.constantize)
+        Thread.new { [name, checkpoint(name, klass.constantize)] }
+      end
+
+      results = threads.to_h { |t| t.value }
+
+      # checkpoint() isolates a per-DB failure so the others still run, but a
+      # real failure (as opposed to routine busy=1 contention) must not come
+      # back looking like an ordinary :ok run with nothing to alert on.
+      failed = results.select { |_, r| r.is_a?(Hash) && r.key?(:error) }
+      if failed.any?
+        raise "[#{self.class.name}] failed for #{failed.keys.join(", ")}: " \
+              "#{failed.map { |name, r| "#{name}: #{r[:error]}" }.join("; ")}"
       end
 
       results
@@ -86,9 +115,14 @@ module Maintenance
 
       result
     rescue => e
-      # One unreachable/locked DB must not stop the rest from being checkpointed.
-      Rails.logger.error "[#{self.class.name}] #{name} failed: #{e.class}: #{e.message}"
-      {error: "#{e.class}: #{e.message}"}
+      if CONTENDED_ERRORS.any? { |klass| e.cause.is_a?(klass) }
+        Rails.logger.warn "[#{self.class.name}] #{name}: contended (#{e.cause.class}), unchanged — next run picks it up"
+        {busy: 1, frames: 0, checkpointed: 0, ms: 0}
+      else
+        # One unreachable/broken DB must not stop the rest from being checkpointed.
+        Rails.logger.error "[#{self.class.name}] #{name} failed: #{e.class}: #{e.message}"
+        {error: "#{e.class}: #{e.message}"}
+      end
     end
   end
 end

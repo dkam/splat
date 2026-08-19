@@ -27,7 +27,7 @@
       refreshed hourly by <code>Maintenance::StorageStatsJob</code>.
       <% if @storage[:deep_collected_at] %>
         Per-table sizes and row counts need a full <code>dbstat</code> page walk of every DB, so they
-        refresh daily — last <%= time_ago_in_words(@storage[:deep_collected_at]) %> ago
+        refresh weekly — last <%= time_ago_in_words(@storage[:deep_collected_at]) %> ago
         (<%= @storage[:deep_collected_at].localtime.strftime("%Y-%m-%d %H:%M") %>).
       <% end %>
     <% else %>
@@ -314,7 +314,7 @@
 
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Counts</h2>
-      <%# Counts come from the StorageStats snapshot's daily deep pass (a COUNT(*) %>
+      <%# Counts come from the StorageStats snapshot's weekly deep pass (a COUNT(*) %>
       <%# per table) — never a live scan on the request path, and not part of the %>
       <%# hourly refresh. "—" until the first deep snapshot lands after a deploy. %>
       <%# Spans is the true total: legacy spans rows + the spans packed inside %>

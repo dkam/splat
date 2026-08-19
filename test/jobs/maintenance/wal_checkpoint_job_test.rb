@@ -23,6 +23,22 @@ class Maintenance::WalCheckpointJobTest < ActiveSupport::TestCase
     assert_equal ["logs"], results.keys
   end
 
+  test "covers all 6 database connections, including cache and cable" do
+    assert_equal %w[logs transactions_spans issues_events primary cache cable].sort,
+      Maintenance::WalCheckpointJob::DATABASES.keys.sort
+  end
+
+  test "raises when a database checkpoint fails for a reason other than busy/locked contention" do
+    conn = LogsRecord.connection
+
+    with_stub(conn, :select_rows, ->(*) { raise ActiveRecord::ConnectionNotEstablished, "no connection" }) do
+      error = assert_raises(RuntimeError) do
+        Maintenance::WalCheckpointJob.new.perform("logs")
+      end
+      assert_match(/logs/, error.message)
+    end
+  end
+
   test "skips an unknown database without raising" do
     results = Maintenance::WalCheckpointJob.new.perform("nope")
 
