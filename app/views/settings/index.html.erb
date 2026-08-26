@@ -321,25 +321,25 @@
       <%# span_trees blobs. %>
       <% counts = @storage&.dig(:counts) %>
       <% show = ->(key) { counts ? number_with_delimiter(counts[key]) : "—" } %>
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= show.call(:issues) %></div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-hidden">
+          <div class="text-xl xl:text-2xl font-bold text-blue-600 dark:text-blue-400 truncate" title="<%= show.call(:issues) %>"><%= show.call(:issues) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Issues</div>
         </div>
-        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400"><%= show.call(:events) %></div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-hidden">
+          <div class="text-xl xl:text-2xl font-bold text-blue-600 dark:text-blue-400 truncate" title="<%= show.call(:events) %>"><%= show.call(:events) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Events</div>
         </div>
-        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-green-600 dark:text-green-400"><%= show.call(:transactions) %></div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-hidden">
+          <div class="text-xl xl:text-2xl font-bold text-green-600 dark:text-green-400 truncate" title="<%= show.call(:transactions) %>"><%= show.call(:transactions) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Transactions</div>
         </div>
-        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= show.call(:spans) %></div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-hidden">
+          <div class="text-xl xl:text-2xl font-bold text-amber-600 dark:text-amber-400 truncate" title="<%= show.call(:spans) %>"><%= show.call(:spans) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Spans</div>
         </div>
-        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded">
-          <div class="text-2xl font-bold text-purple-600 dark:text-purple-400"><%= show.call(:logs) %></div>
+        <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-hidden">
+          <div class="text-xl xl:text-2xl font-bold text-purple-600 dark:text-purple-400 truncate" title="<%= show.call(:logs) %>"><%= show.call(:logs) %></div>
           <div class="text-sm text-gray-600 dark:text-gray-400">Logs</div>
         </div>
       </div>
