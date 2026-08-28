@@ -45,6 +45,19 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_match(/Error updating settings/, flash[:alert])
   end
 
+  test "About shortens a full commit SHA so it cannot overrun its column" do
+    original = Rails.application.config.x.revision
+    sha = "0f902100b64768f6cceb16c8b1e2529bb5054b46"
+    Rails.application.config.x.revision = sha
+
+    get settings_url
+
+    assert_response :success
+    assert_select "dd[title=?]", "Commit this build came from: #{sha}", text: sha[0, 12]
+  ensure
+    Rails.application.config.x.revision = original
+  end
+
   # --- MCP panel, without OIDC: one shared instance token ---------------------
 
   test "index offers the shared instance token when there is no OIDC" do
