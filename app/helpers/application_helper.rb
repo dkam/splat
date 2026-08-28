@@ -341,7 +341,7 @@ module ApplicationHelper
           tag.span(label, class: BREADCRUMB_CURRENT, "aria-current": "page")
         end
 
-      safe_join([ separator, crumb ])
+      safe_join([separator, crumb])
     end
   end
 end

@@ -54,8 +54,14 @@ class Maintenance::LogsFtsOptimizeJobTest < ActiveSupport::TestCase
     job = Maintenance::LogsFtsOptimizeJob.new
     seen_deadlines = []
 
-    with_stub(job, :merge!, ->(_conn, deadline) { seen_deadlines << deadline; 0 }) do
-      with_stub(job, :vacuum!, ->(_conn, deadline) { seen_deadlines << deadline; 0 }) do
+    with_stub(job, :merge!, ->(_conn, deadline) {
+      seen_deadlines << deadline
+      0
+    }) do
+      with_stub(job, :vacuum!, ->(_conn, deadline) {
+        seen_deadlines << deadline
+        0
+      }) do
         job.perform(max_seconds: 100)
       end
     end
