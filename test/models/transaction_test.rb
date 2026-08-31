@@ -443,4 +443,156 @@ class TransactionTest < ActiveSupport::TestCase
     assert_includes slow_transactions, slow_txn
     assert_not_includes slow_transactions, fast_txn
   end
+
+  # ---- contexts.trace.data ----
+  #
+  # Where every SDK but Rails puts span attributes. sentry-go's
+  # Span.SetData(k, v) lands here and nowhere else; the same is true of
+  # Python, Node and Rust. Payload below is a real one, from Silo.
+
+  test "create_from_sentry_payload! keeps contexts.trace.data as span_data" do
+    payload = {
+      "transaction" => "PUT /entries/*",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.25,
+      "contexts" => {
+        "trace" => {
+          "op" => "http.server",
+          "trace_id" => "33516906fc968944c509a1154ea29c1d",
+          "span_id" => "2bd89dd71100c94f",
+          "status" => "ok",
+          "data" => {
+            "http.request.method" => "POST",
+            "http.response.status_code" => 200,
+            "http.request_content_length" => 10,
+            "http.response_content_length" => 4
+          }
+        }
+      }
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data", payload, @project)
+
+    # Method and status are promoted to their columns — this is what the Silo
+    # middleware existed to do by hand.
+    assert_equal "POST", transaction.http_method
+    assert_equal "200", transaction.http_status
+
+    # Everything not promoted survives instead of being dropped at ingest.
+    assert_equal({
+      "http.request_content_length" => 10,
+      "http.response_content_length" => 4
+    }, transaction.span_data)
+  end
+
+  test "an explicit request/response context beats contexts.trace.data" do
+    payload = {
+      "transaction" => "GET /files",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.25,
+      "request" => {"method" => "GET", "url" => "https://example.com/files"},
+      "contexts" => {
+        "response" => {"status_code" => 500},
+        "trace" => {"op" => "http.server", "data" => {"http.request.method" => "POST", "http.response.status_code" => 200}}
+      }
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data-loses", payload, @project)
+
+    assert_equal "GET", transaction.http_method
+    assert_equal "500", transaction.http_status
+    assert_equal "https://example.com/files", transaction.http_url
+    # Promoted keys are not also kept as span data.
+    assert_empty transaction.span_data
+  end
+
+  test "legacy http.method / http.status_code spellings promote too" do
+    payload = {
+      "transaction" => "GET /old",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.1,
+      "contexts" => {
+        "trace" => {"op" => "http.server", "data" => {"http.method" => "DELETE", "http.status_code" => 404, "http.url" => "https://example.com/old"}}
+      }
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data-legacy", payload, @project)
+
+    assert_equal "DELETE", transaction.http_method
+    assert_equal "404", transaction.http_status
+    assert_equal "https://example.com/old", transaction.http_url
+  end
+
+  test "span_data rides in measurements without disturbing client measurements" do
+    payload = {
+      "transaction" => "GET /mixed",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.1,
+      "measurements" => {"custom_metric" => {"value" => 42}},
+      "contexts" => {"trace" => {"data" => {"queue.depth" => 3}}}
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data-mixed", payload, @project)
+
+    assert_equal({"value" => 42}, transaction.measurements["custom_metric"])
+    assert_equal({"queue.depth" => 3}, transaction.span_data)
+    # span_data is namespaced, not smeared across the measurement keys.
+    assert_equal 42, transaction.measurement("custom_metric")
+    assert_nil transaction.measurement("queue.depth")
+  end
+
+  test "span_data is empty, not nil, when the client sends none" do
+    payload = {
+      "transaction" => "GET /bare",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.1
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data-none", payload, @project)
+
+    assert_empty transaction.span_data
+    assert_empty transaction.measurements
+  end
+
+  test "span_data is bounded — measurements is a plain, uncompressed column" do
+    payload = {
+      "transaction" => "GET /fat",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.1,
+      "contexts" => {
+        "trace" => {
+          "data" => 200.times.to_h { |i| ["key.#{i}", i] }.merge(
+            "body" => "x" * 5_000,
+            "nested" => {"deep" => "y" * 5_000}
+          )
+        }
+      }
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data-fat", payload, @project)
+
+    assert_equal Transaction::SPAN_DATA_MAX_KEYS, transaction.span_data.size
+    transaction.span_data.each_value do |value|
+      text = value.is_a?(String) ? value : value.to_json
+      assert_operator text.length, :<=, Transaction::SPAN_DATA_MAX_VALUE_LENGTH + 1
+    end
+  end
+
+  test "a long span_data value is truncated but a structured one under the cap keeps its shape" do
+    payload = {
+      "transaction" => "GET /shapes",
+      "start_timestamp" => 1729238400.0,
+      "timestamp" => 1729238400.1,
+      "contexts" => {
+        "trace" => {"data" => {"long" => "z" * 5_000, "small" => {"a" => 1}, "count" => 7}}
+      }
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-trace-data-shapes", payload, @project)
+
+    assert_equal Transaction::SPAN_DATA_MAX_VALUE_LENGTH + 1, transaction.span_data["long"].length
+    assert transaction.span_data["long"].end_with?("…")
+    assert_equal({"a" => 1}, transaction.span_data["small"])
+    assert_equal 7, transaction.span_data["count"]
+  end
 end

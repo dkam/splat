@@ -14,12 +14,29 @@ class Transaction
     # key + raw example). Sentry truncates around 1 KB for the same reason.
     MAX_SQL_LENGTH = 1000
 
+    # The Rails view op. Left as a literal exact match rather than widened to a
+    # `view.` prefix the way db is: this is not an oversight. A non-Rails
+    # service usually has no view layer at all, and there is no cross-SDK
+    # convention to widen to — view_time being null for a Go or Python client
+    # is the truth about that client, not a gap in the matching.
+    VIEW_OP = "view.process_action.action_controller"
+
+    # Sentry's cross-SDK convention for database work is a `db.` prefix with a
+    # driver-specific suffix — db.sql.query (Go, Python, Node), db.query,
+    # db.redis — of which Rails' db.sql.active_record is one instance rather
+    # than the canonical form. Matching the prefix instead of the Rails op is
+    # the whole reason db_time can be non-null outside Rails. A bare `db` is
+    # legal; `dbal.*` is a different word and must not match.
+    def self.db_op?(op)
+      op == "db" || op.start_with?("db.")
+    end
+
     # Extract timing data from spans when measurements are unavailable
     def self.extract_timing_data(spans = [])
       return {db_time: nil, view_time: nil} if spans.blank?
 
-      db_time = calculate_total_time_for_operations(spans, "db.sql.active_record")
-      view_time = calculate_total_time_for_operations(spans, "view.process_action.action_controller")
+      db_time = calculate_total_time_for_operations(spans) { |op| db_op?(op) }
+      view_time = calculate_total_time_for_operations(spans) { |op| op == VIEW_OP }
 
       {
         db_time: db_time&.round,
@@ -28,10 +45,21 @@ class Transaction
     end
 
     # Analyze SQL queries for performance patterns and N+1 detection.
-    # Breadcrumbs are the source of truth for counts (every query leaves one);
-    # spans, when given, contribute timing — each db span's duration is
-    # attributed to the pattern its description normalizes to, so findings can
-    # be ranked by wasted time rather than repetition count.
+    #
+    # Breadcrumbs are the source of truth for counts wherever they exist (under
+    # Rails every query leaves one), and spans then contribute timing — each db
+    # span's duration is attributed to the pattern its description normalizes
+    # to, so findings can be ranked by wasted time rather than repetition count.
+    #
+    # Where they don't exist, db spans supply the counts as well. sentry-go
+    # emits no SQL breadcrumbs at all, and Python and Node emit none by
+    # default; all three emit db.* spans carrying the statement in the
+    # description. That is a second source feeding this pipeline, not a second
+    # pipeline — normalization, truncation, distinct_count and the threshold
+    # all read SQL text and none of them are Rails-shaped.
+    #
+    # Never both: the spans and the breadcrumbs describe the same queries, so
+    # taking counts from each would double every figure.
     def self.analyze_sql_queries(breadcrumbs = [], spans: [])
       empty = {
         total_queries: 0,
@@ -40,20 +68,29 @@ class Transaction
         query_patterns: {},
         n_plus_one_time_ms: nil
       }
-      return empty if breadcrumbs.blank?
 
-      sql_breadcrumbs = breadcrumbs
+      sql_breadcrumbs = Array(breadcrumbs)
         .select { |bc| bc["category"] == "sql.active_record" }
         .reject { |bc| infrastructure_query?(bc.dig("data", "sql")) }
 
-      return empty if sql_breadcrumbs.blank?
+      # total_queries counts the source rows, not the parsed statements: a
+      # sql.active_record breadcrumb carrying no SQL text is still a query that
+      # happened, it just can't be pattern-matched. That is the pre-existing
+      # Rails count and the N+1 dashboards are built on it, so widening the
+      # sources must not quietly shift it.
+      statements, total_queries =
+        if sql_breadcrumbs.any?
+          [sql_breadcrumbs.filter_map { |bc| bc.dig("data", "sql").presence }, sql_breadcrumbs.size]
+        else
+          span_statements = span_sql_statements(spans)
+          [span_statements, span_statements.size]
+        end
+
+      return empty if statements.blank?
 
       # Extract and normalize SQL patterns
       query_patterns = {}
-      sql_breadcrumbs.each do |breadcrumb|
-        sql = breadcrumb.dig("data", "sql")
-        next if sql.blank?
-
+      statements.each do |sql|
         # Normalize SQL by removing literal values and focusing on structure.
         # Truncate AFTER normalizing — normalization already collapses the
         # usual size offenders (IN-lists, literals), and truncating first
@@ -82,12 +119,27 @@ class Transaction
       potential_n_plus_one = query_patterns.select { |pattern, data| data[:count] > N_PLUS_ONE_THRESHOLD }.keys
 
       {
-        total_queries: sql_breadcrumbs.size,
+        total_queries: total_queries,
         unique_patterns: query_patterns.size,
         potential_n_plus_one: potential_n_plus_one,
         query_patterns: query_patterns,
         n_plus_one_time_ms: n_plus_one_time_ms(query_patterns, potential_n_plus_one)
       }
+    end
+
+    # The SQL a non-Rails client sends: one statement per db span, taken from
+    # the span description. Infrastructure tables are filtered here exactly as
+    # they are for breadcrumbs — a cache or job-queue query is not an
+    # application N+1 whichever transport carried it.
+    def self.span_sql_statements(spans)
+      return [] if spans.blank?
+
+      spans.filter_map do |span|
+        next unless db_op?(span["op"].to_s)
+        sql = span["description"]
+        next if sql.blank? || infrastructure_query?(sql)
+        sql
+      end
     end
 
     # Sum each db span's duration into the pattern its description normalizes
@@ -99,7 +151,7 @@ class Transaction
       return if spans.blank?
 
       spans.each do |span|
-        next unless span["op"].to_s.start_with?("db")
+        next unless db_op?(span["op"].to_s)
         description = span["description"]
         next if description.blank? || !span["start_timestamp"] || !span["timestamp"]
 
@@ -124,9 +176,9 @@ class Transaction
       timed.sum.round
     end
 
-    # Calculate total duration for specific operation types
-    def self.calculate_total_time_for_operations(spans, operation_type)
-      matching_spans = spans.select { |span| span["op"] == operation_type }
+    # Calculate total duration for the spans whose op the block accepts.
+    def self.calculate_total_time_for_operations(spans, &matches_op)
+      matching_spans = spans.select { |span| matches_op.call(span["op"].to_s) }
       return nil if matching_spans.empty?
 
       total_time = matching_spans.sum do |span|
@@ -213,6 +265,6 @@ class Transaction
     end
 
     private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern, :truncate_sql,
-      :attribute_span_durations, :n_plus_one_time_ms
+      :attribute_span_durations, :n_plus_one_time_ms, :span_sql_statements
   end
 end

@@ -60,6 +60,7 @@ class TransactionsController < ApplicationController
       http_url: @transaction.http_url,
       tags: @transaction.tags,
       measurements: @transaction.measurements,
+      span_data: @transaction.span_data,
       query_analysis: {
         total_queries: @transaction.query_count,
         unique_patterns: @transaction.unique_query_patterns,

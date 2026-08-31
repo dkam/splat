@@ -709,6 +709,37 @@ module Mcp
       assert_match "get_trace_logs", tool_text
     end
 
+    test "get_transaction shows the span data a non-Rails SDK attached" do
+      # End to end: a real sentry-go payload in, the attributes visible to an
+      # agent out. Before contexts.trace.data was read at ingest these were
+      # discarded, and the client saw a successful ingest either way.
+      project = projects(:one)
+      Transaction.create_from_sentry_payload!("go-span-data", {
+        "transaction" => "PUT /entries/*",
+        "start_timestamp" => 1729238400.0,
+        "timestamp" => 1729238400.25,
+        "contexts" => {
+          "trace" => {
+            "op" => "http.server",
+            "data" => {
+              "http.request.method" => "PUT",
+              "http.response.status_code" => 201,
+              "http.request_content_length" => 4096
+            }
+          }
+        }
+      }, project)
+
+      call_tool("get_transaction", {"transaction_id" => "go-span-data"})
+      assert_response :success
+      assert_match "http.request_content_length", tool_text
+      assert_match "4096", tool_text
+      # Promoted to the HTTP section rather than repeated as span data.
+      assert_match(/Method: PUT/, tool_text)
+      assert_match(/Status: 201/, tool_text)
+      refute_match "http.request.method", tool_text
+    end
+
     test "get_transaction resolves by trace_id, closing the log to transaction gap" do
       project = projects(:one)
       Transaction.create!(project: project, transaction_id: SecureRandom.uuid,

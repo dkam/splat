@@ -296,4 +296,103 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs, spans: spans)
     assert_in_delta 7, result[:n_plus_one_time_ms], 1
   end
+
+  # ---- Non-Rails SDKs ----
+  #
+  # The Rails SDK is instrumented off ActiveSupport::Notifications, so its op
+  # strings are the notification names and every query also leaves a breadcrumb.
+  # No other SDK has that bus: sentry-go, and by default sentry-python and
+  # sentry-node, emit db.* spans carrying the statement in the description and
+  # no SQL breadcrumbs at all. These tests pin the span-only path.
+
+  test "db_time is summed from any db.* span, not just the Rails op" do
+    spans = [
+      db_span("SELECT * FROM files WHERE id = 1", duration_ms: 12, op: "db.sql.query"),
+      db_span("SELECT * FROM chunks WHERE file_id = 1", duration_ms: 8, op: "db.query"),
+      db_span("GET user:1", duration_ms: 5, op: "db.redis")
+    ]
+
+    timing = Transaction::SpanAnalyzer.extract_timing_data(spans)
+    assert_equal 25, timing[:db_time]
+  end
+
+  test "a bare db op counts, and non-db ops sharing the prefix do not" do
+    spans = [
+      db_span("SELECT 1", duration_ms: 10, op: "db"),
+      db_span("noise", duration_ms: 99, op: "dbal.something")
+    ]
+
+    assert_equal 10, Transaction::SpanAnalyzer.extract_timing_data(spans)[:db_time]
+  end
+
+  test "N+1 is detected from db spans when the client sends no breadcrumbs" do
+    spans = 5.times.map { |i| db_span("SELECT * FROM files WHERE id = #{i}", duration_ms: 9, op: "db.sql.query") }
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries([], spans: spans)
+
+    assert_equal 5, result[:total_queries]
+    assert_equal 1, result[:unique_patterns]
+    assert_equal 1, result[:potential_n_plus_one].size
+    assert_in_delta 45, result[:n_plus_one_time_ms], 1
+  end
+
+  test "span-derived patterns keep distinct_count and one example" do
+    spans = 4.times.map { |i| db_span("SELECT * FROM files WHERE id = #{i}", duration_ms: 5, op: "db.sql.query") } +
+      [db_span("SELECT * FROM files WHERE id = 0", duration_ms: 5, op: "db.sql.query")]
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries([], spans: spans)
+    data = result[:query_patterns].values.first
+
+    assert_equal 5, data[:count]
+    # Five executions, four distinct texts: an N+1 over N records, not one
+    # byte-identical query fired five times.
+    assert_equal 4, data[:distinct_count]
+    assert_equal 1, data[:examples].size
+  end
+
+  test "breadcrumbs stay the source of truth when both are present" do
+    sqls = 5.times.map { |i| %(SELECT "users".* FROM "users" WHERE "users"."id" = #{i}) }
+    breadcrumbs = sqls.map { |s| db_breadcrumb(s) }
+    spans = sqls.map { |s| db_span(s, duration_ms: 4) }
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs, spans: spans)
+    # Not 10 — the spans describe the same five queries the breadcrumbs do.
+    assert_equal 5, result[:total_queries]
+  end
+
+  test "infrastructure queries are excluded on the span path too" do
+    spans = 5.times.map { |i| db_span("SELECT value FROM solid_cache_entries WHERE key = '#{i}'", duration_ms: 2, op: "db.sql.query") }
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries([], spans: spans)
+    assert_equal 0, result[:total_queries]
+    assert_empty result[:potential_n_plus_one]
+  end
+
+  test "spans with no SQL-ish description are not counted as queries" do
+    spans = 5.times.map { |_| db_span(nil, duration_ms: 3, op: "db.redis") }
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries([], spans: spans)
+    assert_equal 0, result[:total_queries]
+  end
+
+  test "bare identifiers group the same way quoted ones do" do
+    # A Go SQLite driver does not quote like Active Record. Patterns must not
+    # fragment per-row just because the quoting style differs.
+    a = normalize("SELECT * FROM files WHERE id = 1")
+    b = normalize("SELECT * FROM files WHERE id = 999")
+    assert_equal a, b
+    refute_equal a, normalize("SELECT * FROM chunks WHERE id = 1")
+  end
+
+  test "a Rails breadcrumb carrying no SQL text still counts as a query" do
+    # It happened; it just can't be pattern-matched. Counting breadcrumbs
+    # rather than parsed statements is the pre-existing Rails behaviour and
+    # the N+1 dashboards are built on it.
+    breadcrumbs = 4.times.map { db_breadcrumb(%(SELECT "users".* FROM "users" WHERE "users"."id" = 1)) } +
+      [{"category" => "sql.active_record", "data" => {}}]
+
+    result = Transaction::SpanAnalyzer.analyze_sql_queries(breadcrumbs)
+    assert_equal 5, result[:total_queries]
+    assert_equal 1, result[:unique_patterns]
+  end
 end

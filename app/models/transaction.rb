@@ -6,6 +6,32 @@ class Transaction < TransactionsSpansRecord
   # Spans beyond this cap are dropped at ingest.
   SPAN_CAP = 1000
 
+  # contexts.trace.data is where every SDK but Rails puts the attributes of
+  # the transaction's own span: sentry-go's Span.SetData lands there and
+  # nowhere else, and Python, Node and Rust do the same — it is the location
+  # Sentry standardised on when span attributes were aligned with OpenTelemetry.
+  # Rails is the outlier only because its integration predates that and rides
+  # ActiveSupport::Notifications instead.
+  #
+  # A few of those keys are the same facts Splat already has columns for, so
+  # they promote rather than being stored twice. Both spellings are listed
+  # because the OTel-aligned names (http.request.method) replaced the older
+  # flat ones (http.method) and SDKs in the wild still send either.
+  TRACE_DATA_HTTP_METHOD = %w[http.request.method http.method].freeze
+  TRACE_DATA_HTTP_STATUS = %w[http.response.status_code http.status_code].freeze
+  TRACE_DATA_HTTP_URL = %w[url.full http.url].freeze
+  TRACE_DATA_PROMOTED = (TRACE_DATA_HTTP_METHOD + TRACE_DATA_HTTP_STATUS + TRACE_DATA_HTTP_URL).freeze
+
+  # What's left rides in the measurements JSON, which is a plain uncompressed
+  # column — unlike span trees, logs and events, which go through
+  # Compression::Codec. Nothing in the protocol caps contexts.trace.data, and
+  # an SDK is free to attach a serialized request body to it, so it is bounded
+  # here the way SQL text (MAX_SQL_LENGTH) and spans (SPAN_CAP) already are.
+  # Real payloads carry a handful of short scalars; these ceilings only bite on
+  # something that was going to be unreadable in a detail panel anyway.
+  SPAN_DATA_MAX_KEYS = 50
+  SPAN_DATA_MAX_VALUE_LENGTH = 1000
+
   # project + releases live on the primary DB.
   belongs_to :project
 
@@ -47,6 +73,16 @@ class Transaction < TransactionsSpansRecord
 
     request_data = payload["request"] || {}
     response_data = payload.dig("contexts", "response") || {}
+    trace_data = payload.dig("contexts", "trace", "data") || {}
+
+    # The dedicated contexts win where the client sends them — they are where
+    # the protocol puts these facts, and a Rails client fills them in. The
+    # trace-data fallback is what lets a Go or Python client have an HTTP
+    # method and status at all without writing a middleware to copy them
+    # across by hand, one field at a time, per client.
+    http_method = request_data["method"] || first_trace_value(trace_data, TRACE_DATA_HTTP_METHOD)
+    http_status = response_data["status_code"] || first_trace_value(trace_data, TRACE_DATA_HTTP_STATUS)
+    http_url = request_data["url"] || first_trace_value(trace_data, TRACE_DATA_HTTP_URL)
 
     measurements = payload["measurements"] || {}
     db_time = measurements.dig("db", "value")
@@ -72,6 +108,15 @@ class Transaction < TransactionsSpansRecord
       enhanced_measurements["query_analysis"] = {"query_patterns" => query_analysis[:query_patterns]}
     end
 
+    # Span attributes ride in the measurements JSON under their own key rather
+    # than a new column (no migration, and this table is retention-capped) and
+    # rather than being merged in flat: measurements are numbers with units and
+    # #measurement digs for "value", so smearing arbitrary attributes across
+    # the same namespace would make both unreadable. Keys already promoted to
+    # columns above are dropped — the JSON never duplicates a column.
+    span_data = bounded_span_data(trace_data)
+    enhanced_measurements["span_data"] = span_data if span_data.any?
+
     query_count = query_analysis[:total_queries].to_i
     has_n_plus_one = query_analysis[:potential_n_plus_one].to_a.any?
 
@@ -90,9 +135,9 @@ class Transaction < TransactionsSpansRecord
       environment: payload["environment"],
       release: payload["release"],
       server_name: payload["server_name"],
-      http_method: request_data["method"],
-      http_status: response_data["status_code"],
-      http_url: request_data["url"],
+      http_method: http_method,
+      http_status: http_status,
+      http_url: http_url,
       tags: payload["tags"] || {},
       measurements: enhanced_measurements,
       query_count: query_count,
@@ -119,6 +164,29 @@ class Transaction < TransactionsSpansRecord
   # and exact-endpoint percentiles). Kept there so writer (rollup) and reader
   # share one bucket formula via Analytics::Histogram.bucket_index_sql.
 
+  # The span attributes worth storing: everything not already promoted to a
+  # column, capped in both directions. Structure is preserved for anything
+  # under the ceiling — only an oversized value collapses to truncated JSON,
+  # because a hash that has to be cut is no longer a hash worth parsing.
+  def self.bounded_span_data(trace_data)
+    data = trace_data.except(*TRACE_DATA_PROMOTED)
+    data = data.first(SPAN_DATA_MAX_KEYS).to_h if data.size > SPAN_DATA_MAX_KEYS
+    data.transform_values { |value| bounded_span_value(value) }
+  end
+
+  def self.bounded_span_value(value)
+    return value if value.nil? || value.is_a?(Numeric) || [true, false].include?(value)
+
+    text = value.is_a?(String) ? value : value.to_json
+    return value if text.length <= SPAN_DATA_MAX_VALUE_LENGTH
+    "#{text[0, SPAN_DATA_MAX_VALUE_LENGTH]}…"
+  end
+
+  # First present value among the accepted spellings of one trace-data key.
+  def self.first_trace_value(trace_data, keys)
+    keys.filter_map { |key| trace_data[key] }.first
+  end
+
   def self.parse_timestamp(timestamp)
     case timestamp
     when String then Time.parse(timestamp)
@@ -137,6 +205,11 @@ class Transaction < TransactionsSpansRecord
   def tag(key) = tags[key]
   def measurement(key) = measurements.dig(key, "value")
   def query_analysis = measurements["query_analysis"] || {}
+
+  # Attributes the client attached to the transaction's own span, minus the
+  # ones promoted to columns. Empty for a Rails client, which has no
+  # equivalent — see TRACE_DATA_PROMOTED.
+  def span_data = measurements["span_data"] || {}
 
   def slow? = duration.present? && duration > 1000
   def http_success? = http_status.present? && http_status.to_s.start_with?("2")

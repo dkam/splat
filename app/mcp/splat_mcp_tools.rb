@@ -1403,6 +1403,14 @@ class SplatMcpTools
       txn.tags.each { |k, v| result += "- **#{k}:** #{v}\n" }
     end
 
+    # contexts.trace.data — where a non-Rails SDK puts the attributes it
+    # attached to this request. Absent for Rails clients, which have no
+    # equivalent, so the section only appears when there is something in it.
+    if txn.span_data.any?
+      result += "\n### Span Data\n"
+      txn.span_data.each { |k, v| result += "- **#{k}:** #{v}\n" }
+    end
+
     result
   end
 
