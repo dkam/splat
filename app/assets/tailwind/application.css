@@ -8,3 +8,10 @@
 .sparkline-hover:hover {
   fill-opacity: 0.15;
 }
+
+/* Sparklines in a fluid container (the project cards on the index): the helper
+   stamps a fixed pixel width, so let the SVG stretch to whatever the card is.
+   preserveAspectRatio is already "none", so the bars simply get wider. */
+.sparkline-fill svg {
+  width: 100%;
+}

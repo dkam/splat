@@ -5,41 +5,106 @@
   </div>
 
   <% if @projects.any? %>
-    <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+    <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3"
+         data-controller="sortable"
+         data-sortable-url-value="<%= reorder_projects_path %>"
+         data-action="dragstart->sortable#start dragover->sortable#over drop->sortable#drop dragend->sortable#end">
       <% @projects.each do |project| %>
-        <%= link_to project_path(project.slug), class: "block" do %>
-          <div class="bg-white dark:bg-gray-900 rounded-lg shadow hover:shadow-lg transition-shadow p-6 border border-gray-200 dark:border-gray-800">
-            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2"><%= project.name %></h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">/<%= project.slug %></p>
+        <% perf = @project_perf[project.id] || {} %>
+        <% health = @monitor_health[project.id] %>
+        <% events = perf[:events_by_hour] || [] %>
+        <div class="relative" data-sortable-target="item" data-slug="<%= project.slug %>">
+          <%= link_to project_path(project.slug), class: "block h-full bg-white dark:bg-gray-900 rounded-lg shadow hover:shadow-lg transition-shadow p-6 border border-gray-200 dark:border-gray-800" do %>
+            <div class="flex items-start justify-between gap-2 mb-3 pr-6">
+              <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100"><%= project.name %></h2>
+              <% if health && health[:failing].positive? %>
+                <span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                      title="Cron monitors that are missed, erroring or overrunning">
+                  <%= pluralize(health[:failing], "monitor") %> failing
+                </span>
+              <% elsif health && health[:ok].positive? %>
+                <span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                      title="All cron monitors checked in on schedule">
+                  <%= pluralize(health[:ok], "monitor") %> OK
+                </span>
+              <% end %>
+            </div>
 
-            <div class="space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span class="text-gray-600 dark:text-gray-400">Open Issues:</span>
-                <span class="font-medium text-red-600 dark:text-red-400"><%= @open_issue_counts[project.id] || 0 %></span>
+            <% if events.any?(&:positive?) %>
+              <div class="text-red-500 dark:text-red-400 mb-4 sparkline-fill" data-controller="sparkline-tooltip">
+                <%= sparkline(events, width: 320, height: 28,
+                    title: "events / hour, last 24h",
+                    bar_titles: sparkline_bucket_titles(events, range: @sparkline_range, empty: "no events") { |v| pluralize(v, "event") }) %>
               </div>
-              <div class="flex justify-between">
-                <span class="text-gray-600 dark:text-gray-400">Last Error:</span>
-                <span class="font-medium text-gray-900 dark:text-gray-100">
+            <% else %>
+              <div class="h-7 mb-4 flex items-center text-xs text-gray-400 dark:text-gray-500">No events in the last 24h</div>
+            <% end %>
+
+            <div class="grid grid-cols-3 gap-2 text-sm">
+              <div>
+                <div class="text-xl font-bold <%= (@open_issue_counts[project.id] || 0).positive? ? "text-red-600 dark:text-red-400" : "text-gray-400 dark:text-gray-500" %>">
+                  <%= @open_issue_counts[project.id] || 0 %>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">open</div>
+              </div>
+              <div>
+                <div class="text-xl font-bold <%= (@new_issue_counts[project.id] || 0).positive? ? "text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500" %>">
+                  <%= @new_issue_counts[project.id] || 0 %>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">new (24h)</div>
+              </div>
+              <div>
+                <div class="text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
                   <% if (last_at = @last_error_at[project.id]) %>
-                    <%= time_ago_in_words(last_at) %> ago
+                    <%= time_ago_in_words(last_at) %>
                   <% else %>
-                    Never
+                    —
                   <% end %>
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-600 dark:text-gray-400">Last Transaction:</span>
-                <span class="font-medium text-gray-900 dark:text-gray-100">
-                  <% if (last_at = @last_transaction_at[project.id]) %>
-                    <%= time_ago_in_words(last_at) %> ago
-                  <% else %>
-                    Never
-                  <% end %>
-                </span>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">since last error</div>
               </div>
             </div>
-          </div>
-        <% end %>
+
+            <div class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-500 dark:text-gray-400">
+              <% if perf[:transaction_count].to_i.positive? %>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span title="Transactions recorded in the last 24h">
+                    <%= number_to_human(perf[:transaction_count], units: {thousand: "k", million: "M"}, format: "%n%u", precision: 3, strip_insignificant_zeros: true) %> req
+                  </span>
+                  <% if perf[:p95] %>
+                    <span aria-hidden="true">·</span>
+                    <span title="95th percentile response time over the last 24h">p95 <%= format_duration(perf[:p95]) %></span>
+                  <% end %>
+                  <% if perf[:error_rate] %>
+                    <span aria-hidden="true">·</span>
+                    <span class="<%= perf[:error_rate] >= 1 ? "text-red-600 dark:text-red-400 font-medium" : "" %>"
+                          title="Share of transactions returning 5xx over the last 24h">
+                      <%= perf[:error_rate] %>% errors
+                    </span>
+                  <% end %>
+                </div>
+              <% elsif (last_at = @last_transaction_at[project.id]) %>
+                Last transaction <%= time_ago_in_words(last_at) %> ago
+              <% else %>
+                No performance data
+              <% end %>
+            </div>
+          <% end %>
+
+          <%# Sibling of the link, not a child: a <button> can't live inside an
+              <a>, and this one has to sit above it to catch the drag. %>
+          <button type="button"
+                  data-sortable-target="handle"
+                  data-action="pointerdown->sortable#arm pointerup->sortable#disarm keydown->sortable#move"
+                  class="absolute top-3 right-3 p-1 rounded text-gray-300 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-300 cursor-grab active:cursor-grabbing touch-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-label="Reorder <%= project.name %> — drag, or use the arrow keys">
+            <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <circle cx="6" cy="3" r="1.4" /><circle cx="10" cy="3" r="1.4" />
+              <circle cx="6" cy="8" r="1.4" /><circle cx="10" cy="8" r="1.4" />
+              <circle cx="6" cy="13" r="1.4" /><circle cx="10" cy="13" r="1.4" />
+            </svg>
+          </button>
+        </div>
       <% end %>
     </div>
   <% else %>

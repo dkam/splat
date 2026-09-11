@@ -121,23 +121,63 @@ class Event < IssuesEventsRecord
     result
   end
 
-  # Volume across all events bucketed by time.
-  def self.volume_by_bucket(project_id:, time_range:, buckets:)
-    window = time_range.end - time_range.begin
-    bucket_seconds = (window / buckets).to_i.clamp(1, nil)
-    range_start = time_range.begin
+  # Events per hour for the last `hours` hours, oldest first — the projects
+  # index sparkline.
+  #
+  # There's no hourly rollup table for events the way there is for transactions
+  # (transaction_hourly_stats), and a 24h scan per project per page load is not
+  # cheap on an instance taking hundreds of thousands of events a day. So the
+  # buckets are cached individually, keyed by the hour they describe:
+  #
+  #   * settled hours (older than SETTLING_HOURS) never change, so they're
+  #     computed once and kept for a day. No invalidation to get wrong — the
+  #     key names the hour.
+  #   * the settling window and the in-progress hour are recomputed, because
+  #     an event's `timestamp` is when it happened, not when it landed: Splat's
+  #     own ingest queue can run behind, and a backfilled hour has to be able
+  #     to fill in after the fact.
+  #
+  # A warm load therefore scans SETTLING_HOURS + 1 hours of events instead of
+  # 24. A cold one costs what the old full scan did, once.
+  SETTLING_HOURS = 2
+  HOUR_VOLUME_TTL = 25.hours
 
-    rows = where(project_id: project_id)
-      .where(timestamp: time_range)
-      .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: range_start.to_i, bucket_seconds: bucket_seconds)))
-      .count
+  def self.hourly_volume(project_id:, hours: 24, ending_at: Time.current)
+    current_hour = Analytics::Histogram.hour_bucket(ending_at)
+    buckets = Array.new(hours) { |i| current_hour - (hours - 1 - i).hours }
+    live_from = current_hour - SETTLING_HOURS.hours
 
-    Array.new(buckets, 0).tap do |result|
-      rows.each do |idx, c|
-        i = idx.to_i
-        result[i] = c if i >= 0 && i < buckets
-      end
+    settled, live = buckets.partition { |hour| hour < live_from }
+
+    keys = settled.to_h { |hour| [hour, hour_volume_cache_key(project_id, hour)] }
+    cached = keys.any? ? Rails.cache.read_multi(*keys.values) : {}
+
+    misses = settled.reject { |hour| cached.key?(keys[hour]) }
+    if misses.any?
+      # One grouped query spanning the gap rather than a query per hour. On a
+      # warm cache there are no misses at all; on a cold one the gap is the
+      # whole window, which is what the uncached version cost anyway.
+      counted = count_by_hour(project_id: project_id, from: misses.first, to: misses.last + 1.hour)
+      filled = misses.to_h { |hour| [keys[hour], counted[hour] || 0] }
+      Rails.cache.write_multi(filled, expires_in: HOUR_VOLUME_TTL)
+      cached.merge!(filled)
     end
+
+    fresh = count_by_hour(project_id: project_id, from: live.first, to: current_hour + 1.hour)
+
+    buckets.map { |hour| (hour < live_from) ? cached[keys[hour]].to_i : fresh[hour].to_i }
+  end
+
+  # {Time (hour, UTC) => count} for [from, to). Hours with no events are absent.
+  def self.count_by_hour(project_id:, from:, to:)
+    where(project_id: project_id, timestamp: from...to)
+      .group(Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: from.to_i, bucket_seconds: 3600)))
+      .count
+      .transform_keys { |index| from + index.to_i.hours }
+  end
+
+  def self.hour_volume_cache_key(project_id, hour)
+    "event_hourly_volume/v1/#{project_id}/#{hour.to_i}"
   end
 
   # ---- Convenience readers backed by the decoded payload. ----

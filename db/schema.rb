@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_18_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_11_000001) do
   create_table "cron_monitors", force: :cascade do |t|
     t.integer "checkin_margin"
     t.json "config"
@@ -76,6 +76,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_100000) do
     t.json "forward_dsns", default: []
     t.string "name", null: false
     t.string "platform"
+    t.integer "position", default: 0, null: false
     t.string "public_key", null: false
     t.string "slug", null: false
     t.datetime "updated_at", null: false
@@ -116,10 +117,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_100000) do
     t.integer "transactions_data_retention_days", default: 90, null: false
     t.datetime "updated_at", null: false
   end
-
-# Could not dump table "sqlite_stat1" because of following StandardError
-#   Unknown type '' for column 'idx'
-
 
   add_foreign_key "cron_monitors", "projects"
   add_foreign_key "facets", "projects"

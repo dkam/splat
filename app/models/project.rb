@@ -16,11 +16,17 @@ class Project < ApplicationRecord
   scope :by_slug, ->(slug) { where(slug: slug) }
   scope :by_public_key, ->(key) { where(public_key: key) }
 
+  # Card order on the index, set by dragging. id is the tie-break so a project
+  # created while someone else was mid-drag (position still 0) lands somewhere
+  # deterministic rather than shuffling between page loads.
+  scope :ordered, -> { order(:position, :id) }
+
   # Slug is the stable identifier in the DSN URL — generate only when blank
   # (i.e. on create) so renaming the display name later doesn't silently
   # change the slug and break every client already pointing at the old DSN.
   before_validation :generate_slug, if: -> { name? && slug.blank? }
   before_validation :generate_public_key, if: -> { public_key.blank? }
+  before_create :append_to_card_order, if: -> { position.blank? || position.zero? }
 
   # Forwarding targets: zero or more downstream DSNs this project's envelopes
   # are relayed to (see EnvelopeForwarder). Each DSN names its own downstream
@@ -61,6 +67,19 @@ class Project < ApplicationRecord
 
     public_key = match[1]
     find_by(public_key: public_key)
+  end
+
+  # Apply a dragged card order. Slugs the client didn't send — a project
+  # created or renamed between page load and drop — keep their relative order
+  # and land after the ones it did, rather than being silently collapsed to 0.
+  def self.reorder_by_slugs!(slugs)
+    ranked = Array(slugs).map(&:to_s).uniq
+    transaction do
+      remaining = ordered.pluck(:slug) - ranked
+      (ranked & pluck(:slug)).concat(remaining).each_with_index do |slug, index|
+        where(slug: slug).update_all(position: index + 1)
+      end
+    end
   end
 
   def self.find_by_project_id(project_id)
@@ -158,6 +177,10 @@ class Project < ApplicationRecord
 
   def generate_slug
     self.slug = name&.parameterize&.downcase
+  end
+
+  def append_to_card_order
+    self.position = (self.class.maximum(:position) || 0) + 1
   end
 
   def generate_public_key

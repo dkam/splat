@@ -4,6 +4,10 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
   # Auth is a no-op unless OIDC is configured, so these hit the real controller.
   setup do
     @project = projects(:one)
+    # The index and show actions cache their aggregate bundles, and the test
+    # env uses a memory store that outlives a single test — without this, the
+    # first test to load a page decides what every later one sees.
+    Rails.cache.clear
   end
 
   test "show renders with the logs quick-link card" do
@@ -40,5 +44,65 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-clipboard-text-value=?]", "https://#{@project.public_key}@splat.example.com/#{@project.slug}"
   ensure
     ENV["SPLAT_HOST"] = original
+  end
+
+  test "index lists projects in their saved card order" do
+    projects(:one).update!(position: 2)
+    projects(:two).update!(position: 1)
+
+    get root_url
+
+    assert_response :success
+    assert_operator response.body.index("Project Two"), :<, response.body.index("Project One")
+  end
+
+  test "reorder persists the dragged card order" do
+    patch reorder_projects_url, params: {slugs: ["project-two", "project-one"]}, as: :json
+
+    assert_response :success
+    assert_equal ["project-two", "project-one"], Project.ordered.pluck(:slug)
+  end
+
+  test "reorder ignores slugs that no longer exist" do
+    patch reorder_projects_url, params: {slugs: ["project-two", "gone", "project-one"]}, as: :json
+
+    assert_response :success
+    assert_equal ["project-two", "project-one"], Project.ordered.pluck(:slug)
+  end
+
+  test "reorder appends projects missing from the submitted order" do
+    # A card added by someone else between page load and drop must not be
+    # dropped from the ordering just because this client never saw it.
+    third = Project.create!(name: "Project Three", public_key: "test-public-key-three")
+
+    patch reorder_projects_url, params: {slugs: ["project-two", "project-one"]}, as: :json
+
+    assert_response :success
+    assert_equal ["project-two", "project-one", third.slug], Project.ordered.pluck(:slug)
+  end
+
+  test "index cards carry the drag handle and no slug subtitle" do
+    get root_url
+
+    assert_response :success
+    assert_select "[data-sortable-target='item'][data-slug=?]", @project.slug
+    assert_select "[data-sortable-target='handle']"
+    assert_no_match "/#{@project.slug}<", response.body
+  end
+
+  test "index cards show monitor health, new issues and 24h performance" do
+    CronMonitor.create!(project: @project, slug: "nightly", state: "missed")
+    Issue.create!(project_id: @project.id, fingerprint: "fresh", title: "Fresh boom",
+      first_seen: 1.hour.ago, last_seen: 1.hour.ago, status: :open)
+    Transaction.create!(project_id: @project.id, transaction_id: SecureRandom.uuid_v7,
+      timestamp: 30.minutes.ago, transaction_name: "PagesController#show",
+      duration: 120, http_status: "200")
+
+    get root_url
+
+    assert_response :success
+    assert_match "1 monitor failing", response.body
+    assert_select "div", text: "new (24h)"
+    assert_match "req", response.body
   end
 end

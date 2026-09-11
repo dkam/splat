@@ -36,6 +36,10 @@ Rails.application.routes.draw do
 
   # Projects and nested resources
   resources :projects, param: :slug do
+    collection do
+      patch :reorder
+    end
+
     resources :issues, only: [:index, :show] do
       member do
         patch :resolve
