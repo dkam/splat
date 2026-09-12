@@ -5,6 +5,16 @@
 #
 # Schedules accept rufus syntax: "every Xs/m/h/d" or cron strings.
 #
+# A cron string may name a timezone as its last field, and every job pinned to
+# an hour of the night does. Without one the hour means UTC — the scheduler runs
+# on a UTC host and config.time_zone is left at its UTC default — so "0 2" ran
+# data_retention at midday Melbourne, spending 3+ hours of write locks on
+# transactions_spans across the middle of the working day. storage_stats_deep
+# was worse: see its note, an 8-hour run from 03:40 UTC is 13:40 to 21:34 there.
+# Melbourne rather than a fixed offset so the DST changeover is handled for us.
+# Interval and hourly jobs stay zone-free: they fire the same number of times
+# whichever zone you name them in.
+#
 # `con:` adds a tuber concurrency tag so the server caps simultaneous reserves
 # for jobs sharing that key. Maintenance jobs use con:1 — only one heavy
 # flush/retention/cleanup can run at a time across the pool, regardless of how
@@ -60,7 +70,7 @@ histogram_rollup:
 data_retention:
   class: Maintenance::RetentionJob
   tube: splat.maintenance
-  schedule: cron 0 2 * * *
+  schedule: cron 0 2 * * * Australia/Melbourne
   con: 1
 
 # Nightly FTS5 segment merge on the logs search index, plus vacuum. Retention
@@ -72,7 +82,7 @@ data_retention:
 logs_fts_optimize:
   class: Maintenance::LogsFtsOptimizeJob
   tube: splat.maintenance
-  schedule: cron 40 2 * * *
+  schedule: cron 40 2 * * * Australia/Melbourne
   con: 1
   idp: logs_fts_optimize
 
@@ -82,7 +92,7 @@ logs_fts_optimize:
 dictionary_drift:
   class: Compression::DictDriftJob
   tube: splat.maintenance
-  schedule: cron 10 4 * * *
+  schedule: cron 10 4 * * * Australia/Melbourne
   con: 1
   idp: dictionary_drift
 
@@ -121,6 +131,6 @@ storage_stats_deep:
   class: Maintenance::StorageStatsJob
   args: ["deep"]
   tube: splat.maintenance
-  schedule: cron 40 3 * * 0
+  schedule: cron 40 3 * * 0 Australia/Melbourne
   con: 1
   idp: storage_stats_deep
