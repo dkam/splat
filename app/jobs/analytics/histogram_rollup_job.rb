@@ -79,16 +79,71 @@ module Analytics
       end
     end
 
-    # Default: roll up the most recently completed hour.
+    # How many hours back a default (scheduler-driven) run re-counts.
+    #
+    # Not just the previous hour, because Maintenance::RetentionJob holds write
+    # locks on this DB for 3+ hours and this job fires hourly — so every run
+    # inside a retention pass loses the race. A one-hour run never looks back,
+    # which meant those hours kept the live-bump approximation and never got
+    # their authoritative recount. Re-counting a trailing window is free
+    # (every write is ON CONFLICT … DO UPDATE, i.e. idempotent) and self-heals
+    # without needing a retry, a delay, or a second idempotency key.
+    #
+    # Keep this comfortably above a retention run's duration or the self-heal
+    # can't work: every run in the window would fail and no later run would
+    # reach back far enough.
+    LOOKBACK_HOURS = 6
+
+    # SQLite reports lock contention through several AR wrappers
+    # (StatementTimeout and LockWaitTimeout are both StatementInvalid
+    # subclasses), so match the message rather than the class.
+    BUSY_MESSAGE = /database (?:table )?is locked|BusyException/i
+
+    # Default: re-count the last LOOKBACK_HOURS completed hours, newest first.
+    # Pass an explicit hour to roll up exactly that one.
     def perform(hour = nil)
-      hour = Analytics::Histogram.hour_bucket(hour || 1.hour.ago)
-      range_start = hour
-      range_end = hour + 1.hour
-      Rails.logger.info "[HistogramRollupJob] rolling up #{range_start.iso8601}..#{range_end.iso8601}"
+      hours =
+        if hour
+          [Analytics::Histogram.hour_bucket(hour)]
+        else
+          latest = Analytics::Histogram.hour_bucket(1.hour.ago)
+          Array.new(LOOKBACK_HOURS) { |i| latest - i.hours }
+        end
 
       conn = TransactionsSpansRecord.connection
-      conn.exec_query(self.class.insert_sql, "HistogramRollupJob histogram", [range_start, range_end])
-      conn.exec_query(self.class.hourly_stats_sql, "HistogramRollupJob hourly_stats", [range_start, range_end])
+      done = 0
+
+      # Newest first: the just-completed hour is the one this run exists for,
+      # and the older hours are backfill that a later run can pick up again.
+      hours.each do |h|
+        rollup_hour(conn, h)
+        done += 1
+      rescue ActiveRecord::StatementInvalid => e
+        # A raise here would propagate to DispatchConsumer, which releases the
+        # job 5 times (~25s against a lock held for hours) and then buries it.
+        # A buried job holds its tuber idempotency key, which silently
+        # suppresses every subsequent scheduler put — on 2026-09-09 that killed
+        # the rollup for three days. Swallow contention so the job is deleted
+        # normally; the next hourly run re-counts what this one skipped.
+        raise unless e.message.match?(BUSY_MESSAGE)
+
+        Rails.logger.warn(
+          "[HistogramRollupJob] database locked at #{h.iso8601} — " \
+          "rolled up #{done}/#{hours.size} hour(s), leaving the rest to the next run"
+        )
+        break
+      end
+
+      {hours_requested: hours.size, hours_rolled_up: done}
+    end
+
+    private
+
+    def rollup_hour(conn, hour)
+      range = [hour, hour + 1.hour]
+      Rails.logger.info "[HistogramRollupJob] rolling up #{range[0].iso8601}..#{range[1].iso8601}"
+      conn.exec_query(self.class.insert_sql, "HistogramRollupJob histogram", range)
+      conn.exec_query(self.class.hourly_stats_sql, "HistogramRollupJob hourly_stats", range)
     end
   end
 end

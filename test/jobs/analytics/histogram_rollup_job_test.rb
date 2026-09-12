@@ -86,4 +86,80 @@ class HistogramRollupJobTest < ActiveSupport::TestCase
     )
     assert_equal 3, row["count"], "rollup recount should reflect all raw rows for the hour"
   end
+
+  # --- Lock contention (Booko report, 2026-09-12) -----------------------------
+  #
+  # RetentionJob holds write locks on transactions_spans for 3+ hours; this job
+  # fires hourly at :05. busy_timeout is 5s and DispatchConsumer releases 5
+  # times before burying, so each collision gave up after ~25s against a lock
+  # held for hours. On 2026-09-09 that buried the job — and because tuber's
+  # idempotency key is held by a buried job, the scheduler's next ~70 hourly
+  # puts were all suppressed. The rollup was dead for three days.
+  #
+  # So: a busy error must not propagate (a raise means release → bury → the idp
+  # key is held and nothing runs again), and a default run must cover a trailing
+  # window, because an hour skipped under lock is otherwise never recounted —
+  # each run targets exactly one hour and never looks back.
+
+  test "a busy error is swallowed so the job is deleted rather than buried" do
+    insert_raw([{duration: 100}])
+    job = Analytics::HistogramRollupJob.new
+
+    busy = ActiveRecord::StatementTimeout.new("SQLite3::BusyException: database is locked")
+    raising_exec_query(busy) do
+      assert_nothing_raised { job.perform(@hour) }
+    end
+  end
+
+  test "a non-busy error still raises — only lock contention is tolerated" do
+    insert_raw([{duration: 100}])
+    job = Analytics::HistogramRollupJob.new
+
+    boom = ActiveRecord::StatementInvalid.new("no such column: nonsense")
+    raising_exec_query(boom) do
+      assert_raises(ActiveRecord::StatementInvalid) { job.perform(@hour) }
+    end
+  end
+
+  # Minitest 6 dropped #stub. with_stub (test_helper) re-installs the *original*
+  # Method afterwards — a bare define_method/remove_method pair would strip
+  # exec_query for the rest of this parallel worker and break the next test.
+  def raising_exec_query(error, &block)
+    with_stub(TransactionsSpansRecord.connection, :exec_query, ->(*) { raise error }, &block)
+  end
+
+  test "a default run recounts a trailing window, not just the previous hour" do
+    # The hour that would have been skipped while retention held the lock.
+    missed = (Time.current - 4.hours).beginning_of_hour
+    insert_raw([{duration: 100, timestamp: missed}, {duration: 300, timestamp: missed}])
+
+    Analytics::HistogramRollupJob.new.perform
+
+    row = Transaction.connection.select_one(
+      "SELECT * FROM transaction_hourly_stats WHERE project_id = #{@project.id} " \
+      "AND hour_bucket = '#{missed.strftime("%Y-%m-%d %H:00:00")}'"
+    )
+    assert row, "an hour missed under lock must be recounted by a later run"
+    assert_equal 2, row["count"]
+    assert_equal 400, row["sum_duration"]
+  end
+
+  test "the trailing window is wide enough to outlast a retention run" do
+    # Pointless as a self-heal if the window is shorter than the lock that
+    # causes the misses — every run inside the retention pass would still fail
+    # and no later run would reach back far enough.
+    assert_operator Analytics::HistogramRollupJob::LOOKBACK_HOURS, :>=, 4
+  end
+
+  test "an explicit hour still rolls up exactly that hour" do
+    other = (Time.current - 10.hours).beginning_of_hour
+    insert_raw([{duration: 100, timestamp: @hour}, {duration: 900, timestamp: other}])
+
+    Analytics::HistogramRollupJob.new.perform(@hour)
+
+    rolled = Transaction.connection.select_value(
+      "SELECT COUNT(*) FROM transaction_hourly_stats WHERE project_id = #{@project.id}"
+    )
+    assert_equal 1, rolled, "an explicit hour must not drag in the trailing window"
+  end
 end

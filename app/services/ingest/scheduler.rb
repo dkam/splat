@@ -42,10 +42,21 @@ module Ingest
     end
 
     # `idp:` makes the put idempotent — tuber suppresses the put if a job
-    # with the same key already exists in the tube (ready or reserved). For
-    # a cron-driven maintenance job that occasionally runs longer than its
-    # interval, this stops a queue pileup that would otherwise turn one
-    # slow run into a flood after the next worker restart.
+    # with the same key already exists in the tube. For a cron-driven
+    # maintenance job that occasionally runs longer than its interval, this
+    # stops a queue pileup that would otherwise turn one slow run into a flood
+    # after the next worker restart.
+    #
+    # IMPORTANT: "already exists" includes BURIED, not just ready/reserved (as
+    # this comment previously claimed). A buried job therefore holds its key and
+    # silently suppresses every subsequent put — the scheduler keeps logging
+    # "firing", the tube stays at ready:0, and nothing runs. On 2026-09-09
+    # Analytics::HistogramRollupJob buried on SQLite lock contention and the
+    # next ~70 hourly puts were dropped; it was dead for three days and the only
+    # visible symptom was a `buried:1` count. Jobs on this tube should swallow
+    # expected, transient failures rather than let them reach a bury (see that
+    # job's BUSY_MESSAGE handling), and a buried job here is an outage, not a
+    # backlog.
     #
     # `args:` is optional and defaults to none — it lets one job class be
     # scheduled at two cadences with different arguments (e.g. StorageStatsJob's
