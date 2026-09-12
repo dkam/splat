@@ -94,6 +94,26 @@ module ApplicationHelper
     end
   end
 
+  # "2h", not "about 2 hours" — for the stat tiles and card footers, where the
+  # column is a few characters wide and Rails' prose gets ellipsised into
+  # "about 2 h...". Truncates rather than rounds: 149 minutes is still "2h",
+  # the same way a clock reads.
+  def time_ago_compact(time)
+    return "\u2014" if time.blank?
+
+    seconds = (Time.current - time).to_i
+    return "now" if seconds < 60
+
+    case seconds
+    when 0...3600 then "#{seconds / 60}m"
+    when 3600...86_400 then "#{seconds / 3600}h"
+    when 86_400...604_800 then "#{seconds / 86_400}d"
+    when 604_800...2_592_000 then "#{seconds / 604_800}w"
+    when 2_592_000...31_536_000 then "#{seconds / 2_592_000}mo"
+    else "#{seconds / 31_536_000}y"
+    end
+  end
+
   # Format duration in milliseconds to human-readable string
   def format_duration(ms)
     return "N/A" if ms.nil?

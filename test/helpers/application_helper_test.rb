@@ -81,4 +81,23 @@ class ApplicationHelperTest < ActionView::TestCase
     assert_nil breadcrumbs(nil)
     assert_equal 1, breadcrumbs(["A", "/a"], nil).scan("<li").size
   end
+
+  test "time_ago_compact collapses each unit to a single token" do
+    now = Time.utc(2026, 9, 12, 12, 0, 0)
+
+    travel_to now do
+      assert_equal "now", time_ago_compact(now - 20.seconds)
+      assert_equal "5m", time_ago_compact(now - 5.minutes)
+      assert_equal "2h", time_ago_compact(now - 2.hours)
+      assert_equal "2h", time_ago_compact(now - 149.minutes)
+      assert_equal "3d", time_ago_compact(now - 3.days)
+      assert_equal "3w", time_ago_compact(now - 3.weeks)
+      assert_equal "5mo", time_ago_compact(now - 5.months)
+      assert_equal "3y", time_ago_compact(now - 3.years)
+    end
+  end
+
+  test "time_ago_compact returns a dash for nil" do
+    assert_equal "\u2014", time_ago_compact(nil)
+  end
 end

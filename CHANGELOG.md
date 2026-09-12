@@ -11,7 +11,20 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
-## Unreleased
+## 1.18.1 — 2026-09-12
+
+Housekeeping, plus one piece of front-page polish.
+
+### Changed
+
+- **Times on the project cards are single tokens** — `2h`, not `about 2 hours`.
+  The "since last error" tile is three columns wide, so Rails' prose was being
+  ellipsised into `about 2 h...`, which reads as neither the number nor the
+  unit. `time_ago_compact` truncates rather than rounds — 149 minutes is `2h`,
+  the way a clock reads it — and both card times carry the full ISO timestamp
+  as a `title`, so the precise moment stays one hover away.
+
+### Housekeeping
 
 - Swept nine stray files out of the repo root (scraped listings, log pastes, and
   five `test_*.rb` one-off scripts that were never run by `bin/rails test`).

@@ -53,13 +53,11 @@
                 </div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">new (24h)</div>
               </div>
+              <% last_error_at = @last_error_at[project.id] %>
               <div>
-                <div class="text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
-                  <% if (last_at = @last_error_at[project.id]) %>
-                    <%= time_ago_in_words(last_at) %>
-                  <% else %>
-                    —
-                  <% end %>
+                <div class="text-xl font-bold text-gray-900 dark:text-gray-100"
+                     <%= tag.attributes(title: last_error_at && "Last error #{last_error_at.iso8601}") %>>
+                  <%= time_ago_compact(last_error_at) %>
                 </div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">since last error</div>
               </div>
@@ -84,7 +82,7 @@
                   <% end %>
                 </div>
               <% elsif (last_at = @last_transaction_at[project.id]) %>
-                Last transaction <%= time_ago_in_words(last_at) %> ago
+                <span title="<%= last_at.iso8601 %>">Last transaction <%= time_ago_compact(last_at) %> ago</span>
               <% else %>
                 No performance data
               <% end %>
