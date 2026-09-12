@@ -19,7 +19,26 @@ module Maintenance
     VACUUM_PAGES = 1000
     # Per-database budget. The freelist survives across runs, so stopping early
     # costs nothing but time — the next run resumes where this one stopped.
-    VACUUM_MAX_SECONDS = 120
+    #
+    # Sized from production measurement (2026-09-12): ~1,300 steps/sec at one
+    # page each, ~1,000/sec once the periodic pause below is counted — about
+    # 4 MB/s. One night of log retention deletes ~776k rows and frees on the
+    # order of 1.8 GB, so anything under ~450s loses ground every single night
+    # while appearing to work. The 120s this first shipped with bought ~640 MB
+    # per database against a backlog that had reached 31.6 GB on the logs DB
+    # alone. 900s clears a night's deletes and still eats into the backlog;
+    # three databases bounds the job's time here at 45 minutes, overnight.
+    VACUUM_MAX_SECONDS = 900
+
+    # How many times a stalled loop may checkpoint and try again before
+    # accepting that nothing further is reclaimable this run.
+    #
+    # A stall is usually not the end of the work — it is the WAL holding
+    # references to pages that are already free (see #checkpoint). Capped
+    # rather than unlimited because a TRUNCATE checkpoint waits on readers and
+    # is not free; if three of them in a row buy no progress, the pages really
+    # are pinned and the next run can have them.
+    VACUUM_CHECKPOINT_RETRIES = 3
     # Breathe periodically so ingest and the hourly rollup can get the lock.
     # Every step would be far too often: a step costs ~0.1ms and reclaims one
     # page, so sleeping 50ms after each would cap a 120s budget at ~2400 pages
@@ -153,22 +172,15 @@ module Maintenance
     def vacuum(base, pages: VACUUM_PAGES, max_seconds: VACUUM_MAX_SECONDS, pause: VACUUM_STEP_PAUSE)
       conn = base.connection
 
-      # Checkpoint first, or there is close to nothing to reclaim. A free page
-      # the WAL still references can't be truncated out of the main DB file, and
-      # the deletes above have just written a large WAL — so vacuuming straight
-      # after them reclaims almost nothing and gives up on the no-progress
-      # break below. PASSIVE won't fight readers: it does what it can and
-      # returns, leaving the rest to Maintenance::WalCheckpointJob.
-      begin
-        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-      rescue ActiveRecord::StatementInvalid => e
-        # Not fatal — just means less is reclaimable this pass.
-        Rails.logger.warn "[Maintenance::RetentionJob] checkpoint before vacuum failed on #{base}: #{e.message}"
-      end
+      # Checkpoint first, or there is close to nothing to reclaim: the deletes
+      # above have just written a large WAL, and a free page the WAL still
+      # references can't be truncated out of the main DB file.
+      checkpoint(conn, base)
 
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + max_seconds
       before = freelist_count(conn)
       steps = 0
+      stalls = 0
 
       remaining = before
       while remaining > 0
@@ -177,14 +189,27 @@ module Maintenance
         conn.execute("PRAGMA incremental_vacuum(#{pages})")
         steps += 1
 
-        # Stop as soon as a step reclaims nothing. In WAL mode not every free
-        # page is reclaimable right now — pages the WAL still references can't
-        # be truncated until it checkpoints — and without this the loop spins
-        # at full tilt against the freelist until the budget expires, holding
-        # the connection for two minutes and reclaiming zero. Whatever is left
-        # is still on the freelist for the next run.
         progressed = freelist_count(conn)
-        break if progressed >= remaining
+
+        # A step that reclaims nothing is not the same as no work left. In WAL
+        # mode the freelist can stop falling purely because the WAL references
+        # those pages, and the fix for that is another checkpoint — not
+        # stopping. Production 2026-09-12: this loop halted after 1,696 steps
+        # with 7,849,972 pages (31.6 GB) still free, and LogsFtsOptimizeJob
+        # reclaimed 131,141 of them from the same file three minutes later,
+        # having done nothing but wait for WalCheckpointJob to TRUNCATE.
+        #
+        # Bail out without spinning the budget only once a bounded number of
+        # checkpoints in a row have bought nothing; the freelist persists, so
+        # whatever is left is the next run's.
+        if progressed >= remaining
+          break if stalls >= VACUUM_CHECKPOINT_RETRIES
+
+          stalls += 1
+          checkpoint(conn, base)
+          remaining = freelist_count(conn)
+          next
+        end
 
         remaining = progressed
         sleep pause if pause > 0 && (steps % VACUUM_PAUSE_EVERY).zero?
@@ -197,13 +222,13 @@ module Maintenance
       stopped =
         if after.zero? then "drained"
         elsif Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline then "hit #{max_seconds}s budget"
-        else "no further pages reclaimable (WAL still references them)"
+        else "no further pages reclaimable after #{stalls} checkpoint(s) — WAL still references them"
         end
       Rails.logger.info(
         "[Maintenance::RetentionJob] vacuum #{base}: freelist #{before} -> #{after} " \
         "in #{steps} step(s) — #{stopped}#{", resuming next run" unless after.zero?}"
       )
-      {freelist_before: before, freelist_after: after, steps: steps}
+      {freelist_before: before, freelist_after: after, steps: steps, stalls: stalls}
     rescue ActiveRecord::StatementInvalid => e
       # Contention is expected and fine — the freelist persists, so whatever is
       # left just gets picked up next run. Anything else (no such pragma, a
@@ -212,6 +237,24 @@ module Maintenance
       reason = e.message.match?(BUSY_MESSAGE) ? "database locked" : e.message
       Rails.logger.warn "[Maintenance::RetentionJob] incremental_vacuum stopped on #{base}: #{reason}"
       nil
+    end
+
+    # TRUNCATE, not PASSIVE. PASSIVE is exactly what SQLite already does by
+    # itself at COMMIT, and it is what already lost the race on this instance —
+    # Maintenance::WalCheckpointJob documents the 2026-08-17 runaway in detail.
+    # It copies frames only until it meets an active reader, then gives up; on
+    # a continuously-ingesting logs DB that means it frequently does nothing,
+    # and every free page whose frames are still in the WAL stays pinned.
+    #
+    # A busy result is a normal outcome, not a failure: a reader held on, the
+    # WAL is unchanged, and the vacuum proceeds anyway — there may well be
+    # reclaimable pages regardless. Whatever is left waits for the next run.
+    def checkpoint(conn, base)
+      conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+      true
+    rescue ActiveRecord::StatementInvalid => e
+      Rails.logger.warn "[Maintenance::RetentionJob] checkpoint failed on #{base}: #{e.message}"
+      false
     end
 
     def freelist_count(conn)
