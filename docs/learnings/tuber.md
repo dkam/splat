@@ -3,27 +3,65 @@
 Behaviours of the tuber queue that Splat depends on. Inspect a live server with
 `tuber-cli -a <host>:11330 stats-tube <tube>` (JSON by default).
 
-## `idp:` only suppresses puts while the job is *queued*, not while it runs
+## `idp:` suppresses a duplicate put while the job is in the tube — in *any* state
 
-The idempotency key stops a duplicate put when a job with the same key is
-already in the tube. Once a worker reserves the job, the key is free again — so
-a cron job that runs longer than its interval **will** stack up: each tick puts
-a fresh copy while the previous one is still executing.
+The idempotency key stops a duplicate put while a job carrying that key exists
+in the tube. Measured against production tuber, 2026-09-12, putting the same key
+four times and inspecting the state the server echoes back:
 
-`idp:` therefore protects against a *put* flood, not against a slow job. If a
-job can outlive its schedule, the fix is to make the job faster or the schedule
-slower. It is not a substitute for either.
+| Existing job's state | Duplicate put |
+|---|---|
+| `READY` | dropped |
+| `RESERVED` | **dropped** |
+| `BURIED` | **dropped** |
 
-Splat learned this from `Maintenance::StorageStatsJob` on a 15-minute cron: once
-a pass took ~80 minutes, three copies sat ready at all times, and the comment in
-`schedule.yml` claiming idp "guards against stacking" was wrong. See
-`docs/decisions/0001-storage-stats-cadence.md`.
+Four puts, one job in the tube at the end (`ready=0 reserved=0 buried=1`). The
+response echoes the existing job's id and state rather than inserting.
 
-Note this is *not* the only way a slow job stacks up — TTR auto-release (below)
-puts a running job back on the tube independently of anything the producer does.
-When you see copies piling up, check `total_timeouts` before concluding it's the
-producer's fault; the first diagnosis of the job above stopped at `idp` and
-missed the TTR half entirely.
+**This file previously claimed the key is released once a worker reserves the
+job.** That is not what tuber does today — `RESERVED` dedupes exactly like
+`READY`. The claim was written from `Maintenance::StorageStatsJob` stacking to
+three ready copies on a 15-minute cron (see
+`docs/decisions/0001-storage-stats-cadence.md`); given the measurement above,
+that stacking needs another explanation — TTR auto-release (below) is the
+obvious candidate, since it returns a still-running job to `ready` without any
+put being involved. Re-run the check before relying on either reading.
+
+**Check:** put a key into a scratch tube, reserve it on a second connection, put
+the same key again, bury it, put again. Compare `current_jobs_*` in `stats-tube`
+against the number of puts. Reserve and bury must share one connection — a
+reservation dies with the connection that holds it, so one-shot CLI calls will
+release the job between commands and silently test the wrong thing.
+
+## A buried job holds its `idp:` key forever, which stops the schedule silently
+
+Dedupe while `READY` or `RESERVED` is bounded — the job finishes and the key
+frees. Burying has no such bound: a buried job sits in the tube holding its key
+until a human kicks or deletes it, so every subsequent put with that key is
+dropped. For a recurring job the schedule stops dead — not delayed, not stacked,
+just gone, with no error after the one that caused the bury.
+
+**The tube reads as healthy while this happens.** `current_jobs_ready` and
+`current_jobs_reserved` are both 0 — which is exactly what an idle, working tube
+looks like. The only field that says otherwise is `current_jobs_buried`.
+
+Splat lost ~70 hourly rollups over three days this way, 2026-09-09 to 09-12:
+`Analytics::HistogramRollupJob` hit a `SQLite3::BusyException` behind a
+long-running retention pass, exhausted its retries, buried, and thereby
+suppressed every hourly put that followed. Nothing alerted, because queue depth
+was zero the entire time.
+
+Two consequences worth designing around:
+
+- **On an `idp:` tube, a bury is an outage, not a backlog.** A consumer should
+  tolerate expected transient failures (lock contention, a busy database) rather
+  than let them reach the retry ceiling. Burying is correct for a poison-pill
+  body and wrong for a busy database.
+- **Monitor `current_jobs_buried`, not just depth.** Depth cannot express this
+  failure; it reports the healthy value.
+
+**Check:** `stats-tube` → `current_jobs_buried` and `total_buries`. `peek-buried`
+shows the body, `kick-job <id>` returns one job to ready.
 
 ## TTR is a dead-worker timer, not a job-duration budget
 

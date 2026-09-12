@@ -106,6 +106,55 @@ at write time) and read that. See `docs/decisions/0003-facets-at-ingest.md`.
 every entry. There is no `SKIP-SCAN` node in SQLite's planner; if you're hoping
 for one, it isn't coming.
 
+## A bare index on a low-cardinality column beats a timestamp range — and costs you the `LIMIT`
+
+Given `WHERE timestamp BETWEEN ? AND ? AND level = ?` with an index on each
+column separately, SQLite picks the *equality* index. It then walks every row
+matching that equality across the whole table, fetches each one to test the
+timestamp, and sorts the survivors in a temp B-tree. The range contributes
+nothing and `LIMIT` cannot exit early, because the sort has to finish first.
+
+```
+SELECT * FROM logs
+ WHERE timestamp BETWEEN ? AND ? AND level = 4
+ ORDER BY timestamp DESC LIMIT 3
+
+→ SEARCH logs USING INDEX index_logs_on_level (level=?)
+  USE TEMP B-TREE FOR ORDER BY
+```
+
+**`USE TEMP B-TREE FOR ORDER BY` next to an equality-only index is the tell.**
+Not the `SEARCH` — that looks healthy. The temp B-tree is what says every match
+is being materialised before the limit applies, so the cost scales with how
+common the value is, not with how many rows you asked for.
+
+Measured on the production `logs` table (14.4M rows, 109GB), 2026-09-12, asking
+for **three** rows from a 30-minute window:
+
+| Index available | Time |
+|---|---|
+| `(level)` | **34,521ms** |
+| `(level, timestamp)` | **11ms** |
+
+The composite carries the equality *and* the ordering column, so the range and
+the sort share one traversal. Two corollaries:
+
+- **A single-column index that is a strict prefix of a composite earns nothing
+  and actively costs you**, by leaving the planner a worse option to choose.
+  Drop it when you add the composite.
+- **Another equality column can rescue it by accident.** The same query with
+  `project_id = ?` added planned against `(project_id, timestamp)` — free sort,
+  no temp B-tree, fast — which made the bug look intermittent: the narrow query
+  was fine, the broad one hung.
+
+Selectivity here is a guess, not a measurement, because `ANALYZE` has never run
+(below). `level = 'error'` *looks* selective and spans the entire retention
+window.
+
+**Check:** `EXPLAIN QUERY PLAN` the real query, with the real filters. Look for
+`USE TEMP B-TREE FOR ORDER BY`, and for an index whose parenthesised terms omit
+the range you thought was doing the work.
+
 ## `dbstat` costs a full read of the database file
 
 `SELECT SUM(pgsize) FROM dbstat` is the only way to get true per-table byte
@@ -160,6 +209,72 @@ escape hatch for an existing database.
 
 **Check:** `PRAGMA freelist_count` (pages on the freelist), and compare
 `page_count * page_size` against `SUM(pgsize) FROM dbstat`.
+
+## `PRAGMA incremental_vacuum(N)` reclaims one page per call, whatever N is
+
+Through the Ruby `sqlite3` driver, `incremental_vacuum(1)`, `(10)` and `(50)`
+all return exactly one page to the OS — the driver steps the pragma's statement
+once rather than to completion. N is close to inert; the number of **calls** is
+what reclaims space.
+
+This makes the obvious implementation silently useless. A nightly
+`PRAGMA incremental_vacuum(1000)` issued once per database returns 4KB per day,
+against deletes freeing several GB. Splat ran exactly that for months while the
+logs file grew to 109GB around 67GB of live data.
+
+Measured, 2026-09-12: ~1,300 calls/sec against the production logs DB, so a loop
+reclaims on the order of 5MB/s. Drive the loop off `freelist_count`, not off N.
+
+**Check:** `PRAGMA freelist_count`, one `PRAGMA incremental_vacuum(1000)`,
+`PRAGMA freelist_count` again. The difference is 1.
+
+## The WAL pins free pages — a stalled freelist does not mean the work is done
+
+A free page whose frames are still in the WAL cannot be truncated out of the
+main file. So `freelist_count` can stop falling with millions of pages still
+free, and a vacuum loop that reads that as "nothing left to reclaim" stops far
+too early.
+
+`PRAGMA wal_checkpoint(PASSIVE)` is not a reliable fix: it copies frames only
+until it meets an active reader, then gives up. On a continuously-read database
+it frequently does nothing at all — and it is also exactly what SQLite already
+does by itself at COMMIT, so calling it explicitly rarely changes the outcome.
+`TRUNCATE` waits for readers (bounded by `busy_timeout`), copies every frame and
+resets the WAL to zero.
+
+Measured on the production logs DB, 2026-09-12: a vacuum loop stopped after
+1,696 steps reporting nothing further reclaimable, with **7,849,972 pages
+(31.6GB) still free**. Three minutes later a different job reclaimed **131,141
+pages** from the same file, having done nothing but wait for a scheduled
+`TRUNCATE` checkpoint. The pages were reclaimable the whole time.
+
+**A stall is a reason to checkpoint, not a reason to stop** — but bound the
+retries, because `TRUNCATE` waits on readers and is not free.
+
+**Check:** `PRAGMA freelist_count`, then `PRAGMA wal_checkpoint(TRUNCATE)`, then
+`PRAGMA freelist_count` again. A drop means the WAL was the constraint.
+
+## `CREATE INDEX` builds out of the freelist, and its sort phase writes nothing to the WAL
+
+Two consequences, both of which look alarming and aren't.
+
+**The file does not grow** if the freelist can cover the new index. Building two
+indexes totalling ~977MB on a 14.4M-row table left `page_count` unchanged at
+26,643,126 and the file byte-identical at 109,130,244,096 — the accumulated
+bloat paid for the index. Corollary: the freelist shrinking is not always the
+vacuum working.
+
+**A motionless WAL means sorting, not stalling.** `CREATE INDEX` runs an
+external merge sort first, spilling to temp files that are unlinked immediately
+(so `/tmp` looks empty), and only writes the finished b-tree into the WAL in one
+burst at the end. On a large table that is many minutes of a completely static
+WAL, with the process parked in uninterruptible disk sleep — which is easily
+mistaken for a deadlock. Measured: ~9–13 minutes per index at ~44MB/s of
+sustained reads over a 33GB table.
+
+**Check:** `/proc/<pid>/io`. Climbing `read_bytes` with state `D` means it is
+working; flat `read_bytes` with state `S` and no CPU accumulating means it is
+genuinely blocked on a lock.
 
 ## Production has never had `ANALYZE` run
 
