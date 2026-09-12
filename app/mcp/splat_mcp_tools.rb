@@ -536,9 +536,13 @@ class SplatMcpTools
 
     logs = Log.where(timestamp: time_range).recent
     logs = logs.where(project_id: project_id) if project_id
-    logs = logs.search_text(args["query"]) if args["query"].present?
+    # within: is what keeps a common term over a wide window from enumerating
+    # every match in the table — see Log.search_text.
+    logs = logs.search_text(args["query"], within: time_range) if args["query"].present?
     logs = logs.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
     logs = logs.by_logger(args["logger"]) if args["logger"].present?
+    logs = logs.by_service(args["service"]) if args["service"].present?
+    logs = logs.by_server_name(args["server_name"]) if args["server_name"].present?
     logs = logs.for_trace(args["trace_id"]).reorder(timestamp: :desc) if args["trace_id"].present?
     logs = logs.by_environment(args["environment"]) if args["environment"].present?
     logs = logs.by_release(args["release"]) if args["release"].present?

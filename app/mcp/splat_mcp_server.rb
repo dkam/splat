@@ -740,6 +740,14 @@ class SplatMcpServer
               type: "string",
               description: "Filter by logger name"
             },
+            service: {
+              type: "string",
+              description: "Filter by emitting service (e.g. 'postgresql', 'rails'). Indexed. Non-Rails sources arriving over OTLP set this — pg01's Postgres logs land as service='postgresql'. Prefer this over putting the service name in `query`: it is an index lookup rather than a full-text match, and it won't also hit lines that merely mention the word."
+            },
+            server_name: {
+              type: "string",
+              description: "Filter by originating host (e.g. 'pg01', 'web02'). Applied as a filter over the time window rather than an index lookup, so pair it with a narrow window or another filter."
+            },
             trace_id: {
               type: "string",
               description: "Filter to a single trace"

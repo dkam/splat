@@ -123,4 +123,83 @@ class LogFtsTest < ActiveSupport::TestCase
     assert_nil Log.fts_query("()*:")
     assert_nothing_raised { Log.search_text("()*:").to_a }
   end
+
+  # --- Windowed search (rowid-bounded FTS) -----------------------------------
+  #
+  # Reported from the Booko side 2026-09-12: `search_logs` over a 30-minute
+  # window with a common term (`duration`) never returned, and took the rest of
+  # the MCP tool surface down with it for ~20 minutes. The timestamp window
+  # contributed nothing to the plan — SQLite materialised every rowid matching
+  # the term across the whole table, did one random row fetch per match, then
+  # sorted the lot in a temp B-tree before LIMIT could apply. No early exit.
+  #
+  # The fix bounds the FTS subquery by rowid. Bounds come from MIN(id)/MAX(id)
+  # over the timestamp window itself, so they are exact by construction rather
+  # than assuming id order tracks timestamp order.
+
+  test "a windowed search bounds the FTS subquery by rowid" do
+    create_log(body: "duration exceeded", timestamp: 30.minutes.ago)
+    window = 2.hours.ago..Time.current
+    sql = Log.where(timestamp: window).search_text("duration", within: window).to_sql
+
+    assert_match(/logs_fts MATCH/, sql)
+    assert_match(/rowid BETWEEN/, sql,
+      "the FTS subquery must carry a rowid bound, or the timestamp window does nothing")
+  end
+
+  test "SQLite pushes the rowid bound into the FTS scan" do
+    create_log(body: "duration exceeded", timestamp: 30.minutes.ago)
+    window = 2.hours.ago..Time.current
+    sql = Log.where(timestamp: window).search_text("duration", within: window).to_sql
+    plan = LogsRecord.connection.select_all("EXPLAIN QUERY PLAN #{sql}").rows.flatten.join("\n")
+
+    fts_line = plan.lines.find { |l| l.include?("logs_fts") }
+    assert fts_line, "expected an FTS scan in the plan, got:\n#{plan}"
+    # FTS5 reports accepted rowid constraints by appending < and/or > to its
+    # index string (e.g. "VIRTUAL TABLE INDEX 0:M2><"). Without them the bound
+    # is being applied after the fact and every match is still enumerated.
+    assert_match(/VIRTUAL TABLE INDEX \S*[<>]/, fts_line,
+      "FTS5 did not accept the rowid bound; plan was:\n#{plan}")
+  end
+
+  test "a windowed search loses no row whose id is out of step with its timestamp" do
+    # Ids are assigned in ingest order, not timestamp order: a delayed OTLP
+    # batch lands with an id far above rows that are newer by timestamp. The
+    # bound must still cover it, or windowed search silently drops late data.
+    inside_early = create_log(id: 1000, body: "duration exceeded early", timestamp: 30.minutes.ago)
+    create_log(id: 1001, body: "duration exceeded ancient", timestamp: 5.hours.ago)
+    inside_late = create_log(id: 5000, body: "duration exceeded late arrival", timestamp: 20.minutes.ago)
+
+    window = 2.hours.ago..Time.current
+    found = Log.where(timestamp: window).search_text("duration", within: window).pluck(:id)
+
+    assert_equal [inside_early.id, inside_late.id].sort, found.sort
+  end
+
+  test "a windowed search agrees with the unwindowed one over the same rows" do
+    create_log(body: "duration exceeded now", timestamp: 10.minutes.ago)
+    create_log(body: "duration exceeded older", timestamp: 90.minutes.ago)
+    create_log(body: "duration exceeded ancient", timestamp: 5.hours.ago)
+    create_log(body: "unrelated line", timestamp: 10.minutes.ago)
+
+    window = 2.hours.ago..Time.current
+    bounded = Log.where(timestamp: window).search_text("duration", within: window).pluck(:id).sort
+    unbounded = Log.where(timestamp: window).search_text("duration").pluck(:id).sort
+
+    assert_equal unbounded, bounded
+    assert_equal 2, bounded.size
+  end
+
+  test "a window containing no rows at all matches nothing" do
+    create_log(body: "duration exceeded", timestamp: Time.current)
+    empty = (10.days.ago..9.days.ago)
+
+    assert_empty Log.where(timestamp: empty).search_text("duration", within: empty).to_a
+  end
+
+  test "within: is optional — an unwindowed search still works" do
+    hit = create_log(body: "duration exceeded")
+
+    assert_equal [hit.id], Log.search_text("duration").pluck(:id)
+  end
 end

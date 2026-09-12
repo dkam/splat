@@ -521,6 +521,48 @@ module Mcp
       assert_match "release=1.12.0", tool_text
     end
 
+    # Reported from the Booko side 2026-09-12: chasing a Postgres incident, the
+    # query that actually worked was `service = 'postgresql' AND server_name =
+    # 'pg01'` run by hand against the SQLite file, because search_logs could not
+    # express it. pg01's Postgres logs arrive via OTLP and are the signal you
+    # want in that situation; both columns are already promoted and populated.
+    test "search_logs filters by service" do
+      project = projects(:one)
+      seed_log_with(project, body: "pg slow query", service: "postgresql")
+      seed_log_with(project, body: "rails request done", service: "rails")
+
+      call_tool("search_logs", {"service" => "postgresql"})
+      assert_response :success
+      assert_match "pg slow query", tool_text
+      assert_no_match(/rails request done/, tool_text)
+    end
+
+    test "search_logs filters by server_name" do
+      project = projects(:one)
+      seed_log_with(project, body: "from the db box", server_name: "pg01")
+      seed_log_with(project, body: "from the web box", server_name: "web02")
+
+      call_tool("search_logs", {"server_name" => "pg01"})
+      assert_response :success
+      assert_match "from the db box", tool_text
+      assert_no_match(/from the web box/, tool_text)
+    end
+
+    test "search_logs combines service and server_name with a full-text query" do
+      project = projects(:one)
+      want = "checkpoint complete sync"
+      seed_log_with(project, body: want, service: "postgresql", server_name: "pg01")
+      seed_log_with(project, body: "checkpoint complete sync", service: "postgresql", server_name: "pg02")
+      seed_log_with(project, body: "checkpoint complete sync", service: "rails", server_name: "pg01")
+      seed_log_with(project, body: "unrelated line", service: "postgresql", server_name: "pg01")
+
+      call_tool("search_logs", {"query" => "checkpoint", "service" => "postgresql", "server_name" => "pg01"})
+      assert_response :success
+      assert_equal 1, tool_text.scan("checkpoint complete sync").size,
+        "expected exactly the one line matching all three filters"
+      assert_no_match(/unrelated line/, tool_text)
+    end
+
     test "search_logs scopes to a single release" do
       project = projects(:one)
       %w[1.11.1 1.12.0].each do |release|
@@ -910,6 +952,11 @@ module Mcp
                    clientInfo: {name: "test", version: "1.0"}}
         }.to_json,
         headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@token}"}
+    end
+
+    def seed_log_with(project, body:, **attrs)
+      Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+        level: :info, source: "otlp", body: body, payload: {}, **attrs)
     end
 
     def seed_log_in(project, body)
