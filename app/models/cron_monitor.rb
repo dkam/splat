@@ -51,20 +51,50 @@ class CronMonitor < ApplicationRecord
     monitor.apply_config(payload["monitor_config"]) if payload["monitor_config"].is_a?(Hash)
 
     now = Time.current
-    monitor.last_status = status
+    check_in_id = payload["check_in_id"].to_s.presence
+
+    # A run's two check-ins arrive as two envelopes and can overtake each
+    # other in flight (sentry-ruby posts them through a discard-policy thread
+    # pool; our own ingest is threaded too). Both carry the same check_in_id,
+    # which is the only thing that can tell "this run started" from "this run
+    # already finished" once arrival order is untrustworthy.
+    stale_start = status == "in_progress" &&
+      check_in_id.present? &&
+      check_in_id == monitor.last_terminal_check_in_id
+
+    if stale_start
+      Rails.logger.info(
+        "[CronMonitor] ignoring out-of-order in_progress for #{slug} " \
+        "check_in_id=#{check_in_id} (run already terminal)"
+      )
+    else
+      monitor.last_status = status
+    end
+
     monitor.last_checkin_at = now
     monitor.environment = payload["environment"] if payload["environment"].present?
 
     case status
     when "in_progress"
-      # Each in_progress marks the start of a new run (overrun clock).
-      monitor.in_progress_since = now
-    when "ok"
-      monitor.last_ok_at = now
-      monitor.in_progress_since = nil
-      monitor.last_duration = payload["duration"] if payload["duration"].is_a?(Numeric)
-    when "error"
-      monitor.in_progress_since = nil
+      unless stale_start
+        # Each in_progress marks the start of a new run (overrun clock).
+        monitor.in_progress_since = now
+        monitor.in_progress_check_in_id = check_in_id
+      end
+    when "ok", "error"
+      monitor.last_terminal_check_in_id = check_in_id if check_in_id
+      # Only the run that's actually in progress may stop its clock. A late
+      # terminal for an earlier run must not clear a newer run's overrun
+      # window — that would trade a false alarm for a missed one. Check-ins
+      # without a check_in_id (curl heartbeats) keep the old unconditional
+      # behaviour, since there's nothing to pair them by.
+      if check_in_id.nil? ||
+          monitor.in_progress_check_in_id.nil? ||
+          check_in_id == monitor.in_progress_check_in_id
+        monitor.in_progress_since = nil
+        monitor.in_progress_check_in_id = nil
+      end
+      monitor.last_ok_at = now if status == "ok"
       monitor.last_duration = payload["duration"] if payload["duration"].is_a?(Numeric)
     end
 

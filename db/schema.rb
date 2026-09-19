@@ -10,17 +10,19 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_11_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_000001) do
   create_table "cron_monitors", force: :cascade do |t|
     t.integer "checkin_margin"
     t.json "config"
     t.datetime "created_at", null: false
     t.string "environment"
+    t.string "in_progress_check_in_id"
     t.datetime "in_progress_since"
     t.datetime "last_checkin_at"
     t.float "last_duration"
     t.datetime "last_ok_at"
     t.string "last_status"
+    t.string "last_terminal_check_in_id"
     t.integer "max_runtime"
     t.integer "project_id", null: false
     t.string "schedule_type"
@@ -117,7 +119,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_000001) do
     t.integer "transactions_data_retention_days", default: 90, null: false
     t.datetime "updated_at", null: false
   end
-
   add_foreign_key "cron_monitors", "projects"
   add_foreign_key "facets", "projects"
   add_foreign_key "releases", "projects"

@@ -74,6 +74,52 @@ class CronMonitorTest < ActiveSupport::TestCase
     refute monitor.overrun?(1.day.from_now)
   end
 
+  test "an in_progress that arrives after its own ok is ignored" do
+    # The two envelopes of one run raced and landed in the wrong order. The
+    # run is over; the overrun clock must not start.
+    CronMonitor.record_check_in!(heartbeat_payload("status" => "ok"), @project)
+    monitor = CronMonitor.record_check_in!(heartbeat_payload("status" => "in_progress"), @project)
+
+    assert_nil monitor.in_progress_since
+    assert_equal "ok", monitor.last_status
+    refute monitor.overrun?(1.day.from_now)
+  end
+
+  test "an in_progress that arrives after a different run's ok still counts" do
+    CronMonitor.record_check_in!(heartbeat_payload("status" => "ok"), @project)
+    monitor = CronMonitor.record_check_in!(
+      heartbeat_payload("status" => "in_progress", "check_in_id" => "next-run"), @project
+    )
+
+    assert monitor.in_progress_since.present?
+    assert monitor.overrun?(monitor.in_progress_since + 31.minutes)
+  end
+
+  test "a late ok for an earlier run does not clear a newer run's clock" do
+    CronMonitor.record_check_in!(heartbeat_payload("status" => "in_progress"), @project)
+    CronMonitor.record_check_in!(heartbeat_payload("status" => "ok"), @project)
+    started = CronMonitor.record_check_in!(
+      heartbeat_payload("status" => "in_progress", "check_in_id" => "run-two"), @project
+    ).in_progress_since
+
+    monitor = CronMonitor.record_check_in!(heartbeat_payload("status" => "ok"), @project)
+
+    assert_equal started.to_i, monitor.in_progress_since.to_i
+    assert monitor.overrun?(started + 31.minutes)
+  end
+
+  test "check-ins without a check_in_id keep the unconditional behaviour" do
+    payload = heartbeat_payload
+    payload.delete("check_in_id")
+
+    CronMonitor.record_check_in!(payload.merge("status" => "ok"), @project)
+    monitor = CronMonitor.record_check_in!(payload.merge("status" => "in_progress"), @project)
+    assert monitor.in_progress_since.present?
+
+    monitor = CronMonitor.record_check_in!(payload.merge("status" => "ok"), @project)
+    assert_nil monitor.in_progress_since
+  end
+
   test "missed? honours interval plus margin" do
     monitor = CronMonitor.record_check_in!(heartbeat_payload, @project)
 
