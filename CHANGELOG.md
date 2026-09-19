@@ -11,6 +11,31 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.18.2 — 2026-09-20
+
+One false alarm, fixed at the root.
+
+### Fixed
+
+- **A run's two check-ins are paired by `check_in_id`.** A cron run reports
+  itself twice — `in_progress`, then `ok`/`error` — as two envelopes sharing one
+  id, and sentry-ruby posts both through a multi-threaded, discard-policy
+  executor. Ten milliseconds apart, they can arrive in either order. Because
+  `record_check_in!` was latest-writer-wins and never read `check_in_id`, an
+  `ok` landing first cleared `in_progress_since`, the late `in_progress` set it
+  back to now, and nothing was ever going to clear it again: two minutes later
+  the sweep called it an overrun. That is the whole of Covers' recurring
+  "Monitor overrun: queue-watchdog (in progress > 2 min)" alert, for a job whose
+  last recorded duration is 0.0022 seconds. One reordered pair, one alert — and
+  no all-clear, because recovery resolves silently by design. Splat now drops an
+  `in_progress` whose id matches the last terminal check-in (logging it, so
+  production can confirm the diagnosis), and lets a terminal check-in stop only
+  the clock of the run it belongs to, so a late `ok` for an earlier run cannot
+  silence a newer run's genuine overrun. Heartbeats carrying no `check_in_id`
+  keep the old behaviour. An `ok` that is genuinely *discarded* rather than
+  reordered still alerts, correctly — a lone `in_progress` is indistinguishable
+  from a real stall.
+
 ## 1.18.1 — 2026-09-12
 
 Housekeeping, plus one piece of front-page polish.
