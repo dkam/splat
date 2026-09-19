@@ -7,5 +7,5 @@
 # (`ruby -e "require './config/version'; puts Splat::VERSION"`) without booting
 # Rails.
 module Splat
-  VERSION = "1.18.2"
+  VERSION = "1.18.3-dev"
 end
