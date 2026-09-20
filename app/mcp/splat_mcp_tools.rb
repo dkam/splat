@@ -259,12 +259,12 @@ class SplatMcpTools
     end
 
     result += "- **Storage total:** #{human_size(snapshot[:total])}\n"
-    result += "- **Stats collected:** #{snapshot[:collected_at]&.utc&.iso8601 || "unknown"} (refreshes every ~15 min)\n"
-    # Table/index bytes and row counts come from the daily dbstat walk, not
-    # the 15-min pass that carries them forward — so they get their own
+    result += "- **Stats collected:** #{snapshot[:collected_at]&.utc&.iso8601 || "unknown"} (refreshes hourly)\n"
+    # Table/index bytes and row counts come from the weekly dbstat walk, not
+    # the hourly pass that carries them forward — so they get their own
     # timestamp rather than inheriting collected_at's freshness claim.
     if (deep = snapshot[:deep_collected_at])
-      result += "- **Table sizes from:** #{deep.utc.iso8601} (deep dbstat pass, daily)\n"
+      result += "- **Table sizes from:** #{deep.utc.iso8601} (deep dbstat pass, weekly)\n"
     end
     result += "\n"
 
