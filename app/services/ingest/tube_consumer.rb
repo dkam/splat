@@ -44,6 +44,10 @@ module Ingest
     # promptly for a clean shutdown.
     CONNECT_RETRY_INTERVAL = 2
 
+    # Body keys worth naming in a bury report (see #job_identity). Ids and
+    # slugs only — never a payload, which is the thing that's too big to log.
+    IDENTITY_KEYS = %w[class project_id event_id transaction_id check_in_id monitor_slug].freeze
+
     attr_reader :tube, :batch_size
 
     def initialize(tube:, batch_size: DEFAULT_BATCH_SIZE)
@@ -210,11 +214,52 @@ module Ingest
         0
       end
       if releases >= MAX_RETRIES
-        Rails.logger.error "[#{self.class.name}] burying job after #{releases} retries"
         job.bury
+        report_bury(job, releases)
       else
         job.release(delay: RETRY_DELAY)
       end
+    end
+
+    # A bury is data loss with a receipt nobody reads: the sender already got
+    # its 200, nothing will redeliver, the body sits on the tube until someone
+    # kicks it — and on the maintenance tube it keeps holding its idempotency
+    # key, so the *next* run of that job is suppressed too (see
+    # Ingest::Scheduler). The old one-line log said only that it happened, with
+    # nothing to find the body by, so report it the way the ingest path already
+    # reports an undeliverable payload: one fingerprint-stable Issue per tube,
+    # plus the ids that let you go and peek at what was dropped.
+    #
+    # Reported after the bury, and rescued, so a reporting failure can never
+    # cost us the bury itself or take down the consumer loop.
+    def report_bury(job, releases)
+      ident = job_identity(job)
+      Rails.logger.error(
+        "[#{self.class.name}] buried job after #{releases} retries " \
+        "tube=#{@tube} job_id=#{job.id} bytes=#{job.body.bytesize}" +
+        ident.map { |k, v| " #{k}=#{v}" }.join
+      )
+
+      Sentry.capture_message(
+        "Ingest job buried after #{releases} retries on #{@tube}",
+        level: :error,
+        fingerprint: ["ingest", "job_buried", @tube],
+        extra: {tube: @tube, consumer: self.class.name, releases: releases,
+                job_id: job.id, job_bytes: job.body.bytesize}.merge(ident)
+      )
+    rescue => e
+      Rails.logger.error "[#{self.class.name}] failed to report buried job: #{e.class}: #{e.message}"
+    end
+
+    # What the buried body can be found by. Every producer puts a JSON object,
+    # and between them these keys cover every tube, so one generic probe beats
+    # threading an identity down through seven consumers.
+    def job_identity(job)
+      body = JSON.parse(job.body)
+      body.is_a?(Hash) ? body.slice(*IDENTITY_KEYS).compact.symbolize_keys : {}
+    rescue
+      # Unparsable is itself worth knowing — that's a poison pill, not a lock.
+      {body: "unparsable"}
     end
 
     def log_exception(prefix, e)
