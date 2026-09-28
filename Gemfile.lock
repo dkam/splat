@@ -236,7 +236,7 @@ GEM
       tzinfo
       validate_url
       webfinger (~> 2.0)
-    pagy (43.6.2)
+    pagy (43.6.3)
       json
       uri
       yaml
@@ -464,7 +464,7 @@ DEPENDENCIES
   letter_opener
   mcp (~> 1.1)
   openid_connect
-  pagy (~> 43.0)
+  pagy (~> 43.6)
   propshaft
   puma (>= 5.0)
   rails (~> 8.1.3)
