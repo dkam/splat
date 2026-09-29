@@ -31,10 +31,16 @@ Rails.application.configure do
 
         # The envelope-ingest API is Splat's highest-volume endpoint, so treat it
         # as part of the processing pipeline (low rate) rather than the web UI —
-        # otherwise the busiest path would dominate splat-splat. Same for the MCP
-        # API and health-check polling. Anything not http.server is a job.
+        # otherwise the busiest path would dominate splat-splat. Same for
+        # health-check polling. Anything not http.server is a job.
+        #
+        # MCP is deliberately *not* here. It's low-volume, and one slow tool call
+        # can freeze the whole process (sqlite3 holds the GVL for a statement):
+        # on 2026-09-29 a 179s get_event did exactly that, and at 10% sampling
+        # splat-splat had no record of it. McpController names each
+        # transaction after its tool.
         ingest_or_job = !op.start_with?("http.server") ||
-          name.start_with?("/api", "Api::", "/mcp", "Mcp::", "/_health", "/up")
+          name.start_with?("/api", "Api::", "/_health", "/up")
 
         if !parent_sampled.nil?
           # Honour an upstream distributed-trace decision when present.
@@ -81,13 +87,13 @@ Rails.application.configure do
       end
 
       # Keep splat-splat low-traffic: drop request logs from Splat's high-volume
-      # server paths (envelope ingest, MCP, health/up) — the same paths the
-      # traces sampler treats as pipeline — leaving just the admin web UI.
+      # server paths (envelope ingest, health/up) — the same paths the traces
+      # sampler treats as pipeline — leaving the admin web UI and MCP.
       config.before_send_log = lambda do |log|
         path = log.attributes[:path].to_s
         controller = log.attributes[:controller].to_s
-        high_volume = path.start_with?("/api", "/mcp", "/_health", "/up") ||
-          controller.start_with?("Api::", "Mcp::")
+        high_volume = path.start_with?("/api", "/_health", "/up") ||
+          controller.start_with?("Api::")
         high_volume ? nil : log
       end
 

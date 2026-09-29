@@ -52,6 +52,7 @@ module Mcp
       end
 
       @rpc_id = rpc_request["id"]
+      name_sentry_transaction(rpc_request)
 
       response_hash = SplatMcpServer.build.handle(rpc_request.deep_symbolize_keys)
 
@@ -65,6 +66,25 @@ module Mcp
     end
 
     private
+
+    # To Sentry every call is Mcp::McpController#handle_mcp_request, which says
+    # nothing about which tool was slow. Name the transaction after the tool
+    # (or the JSON-RPC method, for initialize, tools/list, …) and tag the
+    # arguments, so splat-splat can rank tools by time spent and show what the
+    # slow call was asked. Tag values are capped at 200 characters by Sentry.
+    def name_sentry_transaction(rpc_request)
+      return unless Sentry.initialized?
+
+      method = rpc_request["method"].to_s
+      rpc_params = rpc_request["params"].is_a?(Hash) ? rpc_request["params"] : {}
+      tool = rpc_params["name"].to_s if method == "tools/call"
+      scope = Sentry.get_current_scope
+      scope.set_transaction_name("MCP #{tool.presence || method}", source: :custom)
+      return if tool.blank?
+
+      scope.set_tags("mcp.tool" => tool,
+        "mcp.arguments" => rpc_params["arguments"].to_json.truncate(200))
+    end
 
     def authenticate_mcp_token
       token = request.headers["Authorization"]&.remove(/^Bearer\s+/i)
