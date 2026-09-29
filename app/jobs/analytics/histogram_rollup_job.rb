@@ -13,9 +13,8 @@ module Analytics
   # Analytics::Histogram.bucket_index_sql so writer and reader can't drift.
   class HistogramRollupJob
     class << self
-      def insert_sql
-        @insert_sql ||= <<~SQL
-          INSERT INTO transaction_histograms (project_id, transaction_name, environment, hour_bucket, bucket_index, count)
+      def histogram_select_sql
+        @histogram_select_sql ||= <<~SQL
           SELECT project_id,
                  transaction_name,
                  COALESCE(environment, '') AS environment,
@@ -25,21 +24,14 @@ module Analytics
             FROM transactions
            WHERE timestamp >= ? AND timestamp < ?
            GROUP BY 1, 2, 3, 4, 5
-          ON CONFLICT(project_id, transaction_name, environment, hour_bucket, bucket_index)
-          DO UPDATE SET count = excluded.count
         SQL
       end
 
       # Scalar companion. NULL db_time/view_time are summed as 0 but excluded
       # from their *_count, so AVG = sum/count matches raw AVG(col) (skips NULLs).
       # 5xx detection mirrors total_and_error_count_in_range (CAST status >= 500).
-      def hourly_stats_sql
-        @hourly_stats_sql ||= <<~SQL
-          INSERT INTO transaction_hourly_stats
-            (project_id, transaction_name, environment, hour_bucket,
-             count, sum_duration, min_duration, max_duration,
-             sum_db_time, db_time_count, sum_view_time, view_time_count,
-             sum_query_count, max_query_count, n_plus_one_count, sum_n_plus_one_time, error_count)
+      def hourly_stats_select_sql
+        @hourly_stats_select_sql ||= <<~SQL
           SELECT project_id,
                  transaction_name,
                  COALESCE(environment, '') AS environment,
@@ -60,21 +52,6 @@ module Analytics
             FROM transactions
            WHERE timestamp >= ? AND timestamp < ?
            GROUP BY 1, 2, 3, 4
-          ON CONFLICT(project_id, transaction_name, environment, hour_bucket)
-          DO UPDATE SET
-            count = excluded.count,
-            sum_duration = excluded.sum_duration,
-            min_duration = excluded.min_duration,
-            max_duration = excluded.max_duration,
-            sum_db_time = excluded.sum_db_time,
-            db_time_count = excluded.db_time_count,
-            sum_view_time = excluded.sum_view_time,
-            view_time_count = excluded.view_time_count,
-            sum_query_count = excluded.sum_query_count,
-            max_query_count = excluded.max_query_count,
-            n_plus_one_count = excluded.n_plus_one_count,
-            sum_n_plus_one_time = excluded.sum_n_plus_one_time,
-            error_count = excluded.error_count
         SQL
       end
     end
@@ -139,11 +116,54 @@ module Analytics
 
     private
 
+    # Read, then write. These used to be INSERT … SELECT, which takes the write
+    # lock at the start of the statement and so held it for the whole
+    # aggregation — an hour of the transactions table, 15s+ on splat-booko. Every
+    # :05 that ran out TransactionConsumer's 5s busy timeout and bounced ingest
+    # into retries. As a plain SELECT the scan runs beside the writers (WAL), and
+    # the lock is held only for the upsert of the few hundred aggregate rows.
+    #
+    # The cost: a live bump committed between the SELECT and the upsert is
+    # overwritten by the recount. Every hour is recounted by LOOKBACK_HOURS
+    # consecutive runs, so the next run puts it back.
     def rollup_hour(conn, hour)
       range = [hour, hour + 1.hour]
       Rails.logger.info "[HistogramRollupJob] rolling up #{range[0].iso8601}..#{range[1].iso8601}"
-      conn.exec_query(self.class.insert_sql, "HistogramRollupJob histogram", range)
-      conn.exec_query(self.class.hourly_stats_sql, "HistogramRollupJob hourly_stats", range)
+      histogram = conn.exec_query(self.class.histogram_select_sql, "HistogramRollupJob histogram", range).rows
+      hourly_stats = conn.exec_query(self.class.hourly_stats_select_sql, "HistogramRollupJob hourly_stats", range).rows
+
+      conn.transaction do
+        upsert(conn, "transaction_histograms", HISTOGRAM_COLUMNS, HISTOGRAM_KEY, histogram)
+        upsert(conn, "transaction_hourly_stats", HOURLY_STATS_COLUMNS, HOURLY_STATS_KEY, hourly_stats)
+      end
+    end
+
+    # Rows are positional, in the order of the matching SELECT's columns.
+    HISTOGRAM_COLUMNS = %w[project_id transaction_name environment hour_bucket bucket_index count].freeze
+    HISTOGRAM_KEY = HISTOGRAM_COLUMNS.first(5).freeze
+
+    HOURLY_STATS_COLUMNS = %w[
+      project_id transaction_name environment hour_bucket
+      count sum_duration min_duration max_duration
+      sum_db_time db_time_count sum_view_time view_time_count
+      sum_query_count max_query_count n_plus_one_count sum_n_plus_one_time error_count
+    ].freeze
+    HOURLY_STATS_KEY = HOURLY_STATS_COLUMNS.first(4).freeze
+
+    # Well under SQLite's 32766 bound-parameter limit at 17 columns a row.
+    UPSERT_SLICE = 500
+
+    def upsert(conn, table, columns, key, rows)
+      updates = (columns - key).map { |c| "#{c} = excluded.#{c}" }.join(", ")
+      tuple = "(#{Array.new(columns.size, "?").join(", ")})"
+
+      rows.each_slice(UPSERT_SLICE) do |slice|
+        conn.exec_query(<<~SQL, "HistogramRollupJob #{table}", slice.flatten)
+          INSERT INTO #{table} (#{columns.join(", ")})
+          VALUES #{Array.new(slice.size, tuple).join(", ")}
+          ON CONFLICT(#{key.join(", ")}) DO UPDATE SET #{updates}
+        SQL
+      end
     end
   end
 end

@@ -73,6 +73,22 @@ class HistogramRollupJobTest < ActiveSupport::TestCase
     assert_equal 2, hist
   end
 
+  test "rollup writes every row when the upsert spans several slices" do
+    endpoints = Analytics::HistogramRollupJob::UPSERT_SLICE + 7
+    insert_raw(Array.new(endpoints) { |i| {transaction_name: "GET /e#{i}", duration: 100 + i} })
+    Analytics::HistogramRollupJob.new.perform(@hour)
+
+    stats = Transaction.connection.select_one(
+      "SELECT COUNT(*) AS n, SUM(sum_duration) AS total FROM transaction_hourly_stats WHERE project_id = #{@project.id}"
+    )
+    assert_equal endpoints, stats["n"]
+    assert_equal (0...endpoints).sum { |i| 100 + i }, stats["total"]
+
+    assert_equal endpoints, Transaction.connection.select_value(
+      "SELECT SUM(count) FROM transaction_histograms WHERE project_id = #{@project.id}"
+    )
+  end
+
   test "rollup corrects drift from the live bump for the same hour" do
     # Live-bumped row (via after_create) then a late raw insert the bump missed.
     Transaction.create!(project: @project, transaction_id: SecureRandom.uuid,
