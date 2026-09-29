@@ -11,6 +11,48 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.18.3 — 2026-09-30
+
+One MCP call froze the whole instance for three minutes. This fixes the
+lookup that did it, makes the next one visible, and stops an hourly lock
+fight in ingest.
+
+### Fixed
+
+- **MCP id lookups use the index instead of scanning the table.**
+  `get_event` looked events up by `event_id` alone, but the only index is
+  `[project_id, event_id]`, so every call read all 25 GB of events. On
+  splat-booko one call took 179s. The sqlite3 gem holds Ruby's GVL for the
+  length of a statement, so for those three minutes nothing else in the
+  process ran: no web UI, no envelope ingest, no other MCP call.
+  `get_transaction` had the same flaw by UUID (a scan of 132 GB of
+  transactions) and by `trace_id` (a walk of the timestamp index, with or
+  without a `project`). All three now pin `project_id` to every project and
+  do one index probe per project. A test runs `EXPLAIN QUERY PLAN` on each
+  and fails on any table scan.
+- **The hourly rollup no longer blocks transaction ingest.** At :05 every
+  hour, `HistogramRollupJob` held the transactions database's write lock
+  for its whole aggregation. `TransactionConsumer` ran out its 5s busy
+  timeout and retried for about 20s. Nothing has been lost yet, but each
+  failure stalled the consumer. The aggregation is now a plain read, and
+  the lock is held only for the short upsert of the results.
+- **Failed ingest jobs get noticed.** A job buried after its last retry now
+  raises a Sentry issue on splat-splat, named by tube and carrying the ids
+  of what was dropped, instead of a log line nobody reads.
+- **`get_status` quotes the real storage-stats schedule**: hourly snapshots
+  and a weekly deep pass, not "~15 min" and "daily".
+
+### Changed
+
+- **Every MCP call is traced, named after its tool.** `/mcp` was sampled at
+  10%, like envelope ingest, and every call was named
+  `Mcp::McpController#handle_mcp_request`, so the 179s call left no record
+  on splat-splat. Calls are now traced at the web UI rate, named
+  `MCP <tool>`, and tagged with their arguments, and their request logs are
+  kept.
+- **sentry-ruby and sentry-rails 7.0.0**, plus routine minor and patch gem
+  updates (including `mcp` 1.3.0 → 1.5.1).
+
 ## 1.18.2 — 2026-09-20
 
 One false alarm, fixed at the root.
