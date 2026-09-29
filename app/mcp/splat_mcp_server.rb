@@ -571,7 +571,7 @@ class SplatMcpServer
             },
             trace_id: {
               type: "string",
-              description: "Look the transaction up by trace_id instead — the value carried on log records and accepted by get_trace_logs. Supply this or transaction_id. Passing `project` alongside it makes the lookup an index hit."
+              description: "Look the transaction up by trace_id instead — the value carried on log records and accepted by get_trace_logs. Supply this or transaction_id. Pass `project` to restrict the match to one project."
             },
             project: PROJECT_ARG
           }

@@ -521,7 +521,8 @@ class SplatMcpTools
   end
 
   def get_event(args)
-    event = Event.includes(:issue, :project).find_by!(event_id: args["event_id"])
+    event = Event.includes(:issue, :project)
+      .find_by!(project_id: every_project_id, event_id: args["event_id"])
 
     text = format_event_detail(event)
 
@@ -697,17 +698,21 @@ class SplatMcpTools
   # from a log to its request — a trace_id. trace_id can't be sniffed from the
   # string (it's hex like transaction_id), so it's a separate argument rather
   # than a third branch on format. It's promoted onto the transaction row and
-  # indexed as [project_id, trace_id]; without project_id that index can't be
-  # used for a prefix lookup, so scope the scan by timestamp ordering and take
-  # the most recent match. A trace holds at most one server transaction per
-  # service, so this is a lookup rather than a genuine ambiguity.
+  # indexed as [project_id, trace_id], which is only usable with project_id
+  # pinned — see every_project_id.
+  #
+  # The newest match is picked in Ruby, not with ORDER BY timestamp: given
+  # the ORDER BY, SQLite prefers [project_id, timestamp] to skip the sort and
+  # walks the project's transactions newest-first until one matches, which
+  # for an old or unknown trace is the whole project. A trace holds at most one
+  # server transaction per service, so there are only ever a few rows to sort.
   def find_transaction(id, trace_id: nil, project_id: nil)
     if trace_id.present?
-      scope = Transaction.includes(:project).where(trace_id: trace_id.to_s)
-      scope = scope.where(project_id: project_id) if project_id
-      found = scope.order(timestamp: :desc).first
-      raise ActiveRecord::RecordNotFound, "No transaction found for trace_id #{trace_id}" unless found
-      return found
+      newest_id = Transaction
+        .where(project_id: project_id || every_project_id, trace_id: trace_id.to_s)
+        .pluck(:id, :timestamp).max_by(&:last)&.first
+      raise ActiveRecord::RecordNotFound, "No transaction found for trace_id #{trace_id}" unless newest_id
+      return Transaction.includes(:project).find(newest_id)
     end
 
     id_str = id.to_s
@@ -716,8 +721,21 @@ class SplatMcpTools
     elsif id_str.match?(/\A\d+\z/)
       Transaction.includes(:project).find(id_str)
     else
-      Transaction.includes(:project).find_by!(transaction_id: id_str)
+      Transaction.includes(:project).find_by!(project_id: every_project_id, transaction_id: id_str)
     end
+  end
+
+  # Events and transactions index their external ids only behind project_id —
+  # [project_id, event_id], [project_id, transaction_id], [project_id, trace_id]
+  # — so a lookup by the bare id can't use the index and scans the table. On
+  # splat-booko that was a 179s get_event over 25 GB of events, and the sqlite3
+  # gem holds the GVL for the length of a statement, so it froze every Puma
+  # thread (web UI and ingest included), not just the one serving the call.
+  #
+  # Pinning project_id to every project turns the scan into one index probe per
+  # project. Projects live on the primary DB, so this can't be a join.
+  def every_project_id
+    Project.ids
   end
 
   def get_endpoint_summary(args)

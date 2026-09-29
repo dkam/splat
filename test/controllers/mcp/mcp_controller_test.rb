@@ -808,6 +808,37 @@ module Mcp
       refute_match(/OldController#show/, tool_text)
     end
 
+    # External ids are only indexed behind project_id, so a lookup that leaves
+    # it out scans the whole table — on splat-booko a 179s get_event that held
+    # the GVL and froze every Puma thread. Asserted on the query plan, since
+    # that's the property that matters and the SQL shape is free to change.
+    test "id and trace lookups are index searches, never table scans" do
+      project = projects(:one)
+      event = Event.create!(project: project, event_id: SecureRandom.uuid,
+        timestamp: Time.current, payload: nil)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,
+        timestamp: Time.current, transaction_name: "PlanController#show", duration: 5,
+        trace_id: "plan-trace")
+
+      {
+        ["get_event", {"event_id" => event.event_id}] => "events",
+        ["get_transaction", {"transaction_id" => txn.transaction_id}] => "transactions",
+        ["get_transaction", {"trace_id" => "plan-trace"}] => "transactions",
+        ["get_transaction", {"trace_id" => "plan-trace", "project" => project.id}] => "transactions"
+      }.each do |(tool, args), table|
+        plans = query_plans_on(table) { call_tool(tool, args) }
+
+        assert_response :success
+        refute JSON.parse(response.body).dig("result", "isError"), "#{tool} #{args} failed: #{tool_text}"
+        assert plans.any?, "#{tool} #{args} never queried #{table}"
+        plans.each do |plan|
+          refute_match(/\bSCAN #{table}\b/, plan, "#{tool} #{args} scans #{table}")
+          refute_match(/index_#{table}_on_(project_id_and_)?timestamp/, plan,
+            "#{tool} #{args} walks #{table} by timestamp")
+        end
+      end
+    end
+
     test "get_transaction with neither id nor trace_id explains what is needed" do
       # Surfaces as a tool error, same as any other failed lookup — what matters
       # is that the message names both arguments rather than reporting a blank
@@ -927,6 +958,23 @@ module Mcp
 
     def tool_text
       JSON.parse(response.body).dig("result", "content", 0, "text").to_s
+    end
+
+    # EXPLAIN QUERY PLAN detail for every SELECT … FROM table WHERE … run in the block.
+    def query_plans_on(table)
+      statements = []
+      collect = lambda do |*, payload|
+        next unless payload[:sql].match?(/\ASELECT .* FROM "#{table}" WHERE /m)
+
+        binds = payload[:type_casted_binds]
+        binds = binds.call if binds.respond_to?(:call)
+        statements << [payload[:connection], payload[:sql], binds]
+      end
+      ActiveSupport::Notifications.subscribed(collect, "sql.active_record") { yield }
+
+      statements.map do |conn, sql, binds|
+        conn.select_rows("EXPLAIN QUERY PLAN #{sql}", "EXPLAIN", binds).map(&:last).join(" / ")
+      end
     end
 
     def tool_structured
