@@ -147,6 +147,27 @@ class StorageStatsTest < ActiveSupport::TestCase
     assert_nil usage[:transactions_data_retention_days], "no span for transactions"
   end
 
+  # Deleting a log fires the trigger that deletes its search-index entries, so
+  # a day of logs costs its share of the logs_fts shadow tables too — on Booko
+  # (Oct 2026), 35.8 GB of index against 28.7 GB of logs.
+  test "daily_usage counts the logs search index in a day of logs, but not its rows" do
+    snap = {
+      groups: [{name: "Logs", tables: [
+        {name: "logs", row_estimate: 1000, total_bytes: 10_000},
+        {name: "logs_fts_data", row_estimate: 1300, total_bytes: 12_000},
+        {name: "logs_fts_idx", row_estimate: 200, total_bytes: 500},
+        {name: "logs_fts_docsize", row_estimate: 1000, total_bytes: 1_500},
+        {name: "logs_fts", row_estimate: 1000, total_bytes: 0}
+      ]}],
+      data_span: [{table: "logs", days: 10.0}]
+    }
+
+    usage = StorageStats.daily_usage(snap)[:logs_data_retention_days]
+
+    assert_equal 2_400, usage[:bytes_per_day], "logs + their FTS shadow tables over 10 days"
+    assert_equal 100, usage[:rows_per_day], "rows are log lines, not index entries"
+  end
+
   test "daily_usage is empty before the first deep pass" do
     assert_equal({}, StorageStats.daily_usage(nil))
     assert_equal({}, StorageStats.daily_usage({groups: [], data_span: []}))

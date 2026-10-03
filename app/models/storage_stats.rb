@@ -203,15 +203,20 @@ class StorageStats
       end
     end
 
-    # Retention setting => [tables whose bytes it governs, DATA_SPAN table whose
-    # oldest..newest window those bytes cover]. Legacy `spans` is left out: it's
-    # frozen (new spans go into span_trees) and only ages out, so counting it
-    # would inflate the daily cost of a retention day that no longer buys it.
+    # Retention setting => [tables whose bytes and rows it governs, DATA_SPAN
+    # table whose oldest..newest window those bytes cover, tables whose bytes go
+    # with those rows but aren't rows of their own]. Legacy `spans` is left out:
+    # it's frozen (new spans go into span_trees) and only ages out, so counting
+    # it would inflate the daily cost of a retention day that no longer buys it.
+    #
+    # The logs_fts shadow tables are the search index; a trigger deletes a log's
+    # entries with the log, so they are part of what a day of logs costs — on
+    # Booko (Oct 2026), 35.8 GB of index against 28.7 GB of logs.
     DAILY_USAGE = {
       events_data_retention_days: [%w[events], "events"],
       transactions_data_retention_days: [%w[transactions], "transactions"],
       spans_data_retention_days: [%w[span_trees], "span_trees"],
-      logs_data_retention_days: [%w[logs], "logs"],
+      logs_data_retention_days: [%w[logs], "logs", %w[logs_fts_data logs_fts_idx logs_fts_docsize]],
       histograms_retention_days: [%w[transaction_histograms transaction_hourly_stats], "transaction_histograms"]
     }.freeze
 
@@ -221,9 +226,10 @@ class StorageStats
     # extra query and no SNAPSHOT_SCHEMA bump.
     #
     # An average, not a rate: it smooths over traffic growth, and the bytes (deep
-    # pass, daily) and the span (hourly pass) can be up to a day apart. Under a
-    # day of history gives nil — hours of data extrapolate a diurnal peak or
-    # trough into a daily figure.
+    # pass, weekly) and the span (hourly pass) can be up to a week apart — close
+    # enough once a table holds its full retention, low while it's still filling.
+    # Under a day of history gives nil — hours of data extrapolate a diurnal peak
+    # or trough into a daily figure.
     def daily_usage(snap)
       return {} if snap.nil? || snap[:groups].blank?
 
@@ -231,7 +237,7 @@ class StorageStats
       snap[:groups].each { |g| g[:tables].each { |t| tables[t[:name]] = t } }
       spans = (snap[:data_span] || []).index_by { |s| s[:table] }
 
-      DAILY_USAGE.each_with_object({}) do |(setting, (names, span_table)), out|
+      DAILY_USAGE.each_with_object({}) do |(setting, (names, span_table, index_names)), out|
         days = spans.dig(span_table, :days).to_f
         next if days < 1
         present = names.filter_map { |n| tables[n] }
@@ -244,8 +250,9 @@ class StorageStats
           rows = snap[:counts][:spans].to_i - tables.dig("spans", :row_estimate).to_i
         end
 
+        bytes = (present + Array(index_names).filter_map { |n| tables[n] }).sum { |t| t[:total_bytes].to_i }
         out[setting] = {
-          bytes_per_day: (present.sum { |t| t[:total_bytes].to_i } / days).round,
+          bytes_per_day: (bytes / days).round,
           rows_per_day: (rows / days).round,
           days: days
         }
