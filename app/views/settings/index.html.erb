@@ -232,65 +232,83 @@
   <% end %>
 
   <%= form_with(model: @setting, url: settings_path, method: :put, class: "space-y-6") do |form| %>
-    <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
-      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Raw row retention</h2>
-      <p class="text-gray-600 dark:text-gray-400 mb-4">
-        How long to keep the raw events / transactions / spans before the daily retention job deletes them.
-        Aggregate performance history (latency distribution in <code>transaction_histograms</code> plus
-        per-hour counts/averages/N+1/errors in <code>transaction_hourly_stats</code>) is retained separately
-        below, so endpoint stats and the latency/volume charts keep working long after the raw rows age out.
-      </p>
+    <%# One row per retention setting. Bytes per day come from the storage %>
+    <%# snapshot (StorageStats.daily_usage); a row has none until a deep pass %>
+    <%# has run and its table holds at least a day of data. %>
+    <% retention = [
+         [:events_data_retention_days, "Events", "events", nil],
+         [:transactions_data_retention_days, "Transactions", "transactions", nil],
+         [:spans_data_retention_days, "Spans", "spans", nil],
+         [:logs_data_retention_days, "Logs", "logs", "with search index"],
+         [:histograms_retention_days, "Aggregates", "rows", "histograms + hourly stats"]
+       ] %>
+    <% priced = retention.all? { |setting, *| @daily_usage[setting] } %>
+    <div class="bg-white dark:bg-gray-900 shadow rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden"
+         data-controller="retention-cost">
+      <div class="p-6">
+        <h2 class="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Retention</h2>
+        <p class="text-gray-600 dark:text-gray-400">
+          How long to keep each kind of data before the daily retention job deletes it. Aggregates
+          outlive the raw rows, so endpoint stats and the latency/volume charts keep working after those age out.
+        </p>
+      </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <%= form.label :events_data_retention_days, "Keep events", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :events_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days</p>
-          <%= render "daily_usage", daily_usage: @daily_usage, setting: :events_data_retention_days, retention_days: @setting.events_data_retention_days, rows_label: "events" %>
-        </div>
-
-        <div>
-          <%= form.label :transactions_data_retention_days, "Keep transactions", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :transactions_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 90 days</p>
-          <%= render "daily_usage", daily_usage: @daily_usage, setting: :transactions_data_retention_days, retention_days: @setting.transactions_data_retention_days, rows_label: "transactions" %>
-        </div>
-
-        <div>
-          <%= form.label :spans_data_retention_days, "Keep spans", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :spans_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days (waterfall is high-volume)</p>
-          <%= render "daily_usage", daily_usage: @daily_usage, setting: :spans_data_retention_days, retention_days: @setting.spans_data_retention_days, rows_label: "spans" %>
-        </div>
-
-        <div>
-          <%= form.label :logs_data_retention_days, "Keep logs", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :logs_data_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 14 days (logs are high-volume)</p>
-          <%= render "daily_usage", daily_usage: @daily_usage, setting: :logs_data_retention_days, retention_days: @setting.logs_data_retention_days, rows_label: "logs" %>
-        </div>
-
-        <div>
-          <%= form.label :histograms_retention_days, "Keep aggregates", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :histograms_retention_days, min: 1, max: 3650, class: "block w-24 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Histograms + hourly stats. Default: 540 days — they're tiny.</p>
-          <%= render "daily_usage", daily_usage: @daily_usage, setting: :histograms_retention_days, retention_days: @setting.histograms_retention_days, rows_label: "rows" %>
-        </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 border-t border-gray-200 dark:border-gray-800">
+          <thead class="bg-gray-50 dark:bg-gray-800/50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Data</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Keep (days)</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Per day</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Projected</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+            <% retention.each do |setting, name, rows_label, note| %>
+              <% u = @daily_usage[setting] %>
+              <tr <%= tag.attributes(u ? {data: {retention_cost_target: "row", bytes_per_day: u[:bytes_per_day]}} : {}) %>>
+                <td class="px-4 py-3">
+                  <%= form.label setting, name, class: "text-sm font-medium text-gray-900 dark:text-gray-100" %>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">
+                    <%= [note, "default #{Setting.default_settings[setting]}"].compact.join(" · ") %>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <%= form.number_field setting, min: 1, max: 3650, data: {action: "retention-cost#update"},
+                        class: "block w-20 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500" %>
+                </td>
+                <% if u %>
+                  <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap"
+                      title="Table + index bytes ÷ <%= u[:days].round(1) %> days of data held. An average over that window, not a live rate.">
+                    <div class="text-sm text-gray-700 dark:text-gray-300"><%= number_to_human_size(u[:bytes_per_day]) %></div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400"><%= number_with_delimiter(u[:rows_per_day]) %> <%= rows_label %></div>
+                  </td>
+                  <td class="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-gray-100 tabular-nums whitespace-nowrap" data-projected>
+                    ~<%= number_to_human_size(u[:bytes_per_day] * @setting.public_send(setting).to_i) %>
+                  </td>
+                <% else %>
+                  <td colspan="2" class="px-4 py-3 text-right text-xs text-gray-400 dark:text-gray-500">
+                    Not enough history yet
+                  </td>
+                <% end %>
+              </tr>
+            <% end %>
+          </tbody>
+          <% if priced %>
+            <tfoot class="bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-800">
+              <tr title="These tables only — issues, queues and caches aren't counted.">
+                <td colspan="2" class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">Total</td>
+                <td class="px-4 py-3 text-right text-sm text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap">
+                  <%= number_to_human_size(retention.sum { |setting, *| @daily_usage[setting][:bytes_per_day] }) %>
+                </td>
+                <td class="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums whitespace-nowrap"
+                    data-retention-cost-target="total">
+                  ~<%= number_to_human_size(retention.sum { |setting, *| @daily_usage[setting][:bytes_per_day] * @setting.public_send(setting).to_i }) %>
+                </td>
+              </tr>
+            </tfoot>
+          <% end %>
+        </table>
       </div>
     </div>
 

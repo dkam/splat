@@ -32,7 +32,7 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     Rails.cache.delete(StorageStats::CACHE_KEY)
   end
 
-  test "index shows the per-day cost under a retention setting" do
+  test "index prices a retention setting from the storage snapshot" do
     snapshot = {
       groups: [{name: "Logs", base: "LogsRecord",
                 tables: [{name: "logs", row_estimate: 7000, table_bytes: 600_000, index_bytes: 100_000, total_bytes: 700_000}]}],
@@ -45,9 +45,35 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     Rails.cache.write(StorageStats::CACHE_KEY, snapshot)
     get settings_url
     assert_response :success
-    assert_match "97.7 KB/day", response.body
-    assert_match "1,000 logs", response.body
-    assert_match "~1.34 MB at 14 days", response.body
+    assert_select "tr[data-bytes-per-day='100000']" do
+      assert_select "td", text: /97.7 KB/
+      assert_select "td", text: /1,000 logs/
+      assert_select "td[data-projected]", text: "~1.34 MB"
+    end
+    assert_select "td", text: "Not enough history yet", count: 4
+    assert_select "tfoot", false, "no total while some settings have no figure"
+  ensure
+    Rails.cache.delete(StorageStats::CACHE_KEY)
+  end
+
+  test "index totals the retention table once every setting is priced" do
+    ten_mb = 10.megabytes
+    tables = %w[events transactions span_trees logs transaction_histograms]
+    snapshot = {
+      groups: [{name: "All", base: "ApplicationRecord",
+                tables: tables.map { |t| {name: t, row_estimate: 100, total_bytes: ten_mb} }}],
+      total: ten_mb * tables.size,
+      data_span: tables.map { |t| {table: t, days: 10.0} },
+      collected_at: Time.current
+    }
+    Setting.instance.update!(events_data_retention_days: 30, transactions_data_retention_days: 90,
+      spans_data_retention_days: 30, logs_data_retention_days: 14, histograms_retention_days: 540)
+
+    Rails.cache.write(StorageStats::CACHE_KEY, snapshot)
+    get settings_url
+    assert_response :success
+    assert_select "tfoot td", text: /5 MB/
+    assert_select "tfoot td[data-retention-cost-target='total']", text: "~704 MB" # 1 MB/day × (30+90+30+14+540)
   ensure
     Rails.cache.delete(StorageStats::CACHE_KEY)
   end
