@@ -203,6 +203,55 @@ class StorageStats
       end
     end
 
+    # Retention setting => [tables whose bytes it governs, DATA_SPAN table whose
+    # oldest..newest window those bytes cover]. Legacy `spans` is left out: it's
+    # frozen (new spans go into span_trees) and only ages out, so counting it
+    # would inflate the daily cost of a retention day that no longer buys it.
+    DAILY_USAGE = {
+      events_data_retention_days: [%w[events], "events"],
+      transactions_data_retention_days: [%w[transactions], "transactions"],
+      spans_data_retention_days: [%w[span_trees], "span_trees"],
+      logs_data_retention_days: [%w[logs], "logs"],
+      histograms_retention_days: [%w[transaction_histograms transaction_hourly_stats], "transaction_histograms"]
+    }.freeze
+
+    # What one day of retention costs, per retention setting: the table + index
+    # bytes and rows from the last deep pass, divided by the days of data they
+    # hold. Derived from a snapshot rather than stored in one, so it needs no
+    # extra query and no SNAPSHOT_SCHEMA bump.
+    #
+    # An average, not a rate: it smooths over traffic growth, and the bytes (deep
+    # pass, daily) and the span (hourly pass) can be up to a day apart. Under a
+    # day of history gives nil — hours of data extrapolate a diurnal peak or
+    # trough into a daily figure.
+    def daily_usage(snap)
+      return {} if snap.nil? || snap[:groups].blank?
+
+      tables = {}
+      snap[:groups].each { |g| g[:tables].each { |t| tables[t[:name]] = t } }
+      spans = (snap[:data_span] || []).index_by { |s| s[:table] }
+
+      DAILY_USAGE.each_with_object({}) do |(setting, (names, span_table)), out|
+        days = spans.dig(span_table, :days).to_f
+        next if days < 1
+        present = names.filter_map { |n| tables[n] }
+        next if present.empty?
+
+        rows = present.sum { |t| t[:row_estimate].to_i }
+        # A span_trees row is a whole transaction's tree; the span total is what
+        # `counts` already worked out (legacy rows + packed span_count).
+        if setting == :spans_data_retention_days && snap.dig(:counts, :spans)
+          rows = snap[:counts][:spans].to_i - tables.dig("spans", :row_estimate).to_i
+        end
+
+        out[setting] = {
+          bytes_per_day: (present.sum { |t| t[:total_bytes].to_i } / days).round,
+          rows_per_day: (rows / days).round,
+          days: days
+        }
+      end
+    end
+
     # Estimate storage saved by zstd payload compression, per compressed table.
     # We don't store original sizes, so sample blobs, decode them, and compare
     # decompressed vs stored bytes to get a ratio, then scale by the table's

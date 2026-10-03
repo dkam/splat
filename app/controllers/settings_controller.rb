@@ -11,6 +11,7 @@ class SettingsController < ApplicationController
     # fresh thereafter.
     @storage = StorageStats.snapshot
     StorageStats.enqueue_refresh if @storage.nil?
+    @daily_usage = StorageStats.daily_usage(@storage)
 
     # Queue depths are live (tuber stats are in-memory and cheap) — unlike the
     # dbstat snapshot, no point caching them. Degrades to {} if tuber is down.

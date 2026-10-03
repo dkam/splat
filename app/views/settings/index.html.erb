@@ -249,6 +249,7 @@
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days</p>
+          <%= render "daily_usage", daily_usage: @daily_usage, setting: :events_data_retention_days, retention_days: @setting.events_data_retention_days, rows_label: "events" %>
         </div>
 
         <div>
@@ -258,6 +259,7 @@
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 90 days</p>
+          <%= render "daily_usage", daily_usage: @daily_usage, setting: :transactions_data_retention_days, retention_days: @setting.transactions_data_retention_days, rows_label: "transactions" %>
         </div>
 
         <div>
@@ -267,6 +269,7 @@
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 30 days (waterfall is high-volume)</p>
+          <%= render "daily_usage", daily_usage: @daily_usage, setting: :spans_data_retention_days, retention_days: @setting.spans_data_retention_days, rows_label: "spans" %>
         </div>
 
         <div>
@@ -276,6 +279,7 @@
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: 14 days (logs are high-volume)</p>
+          <%= render "daily_usage", daily_usage: @daily_usage, setting: :logs_data_retention_days, retention_days: @setting.logs_data_retention_days, rows_label: "logs" %>
         </div>
 
         <div>
@@ -285,6 +289,7 @@
             <span class="text-gray-600 dark:text-gray-400">days</span>
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Histograms + hourly stats. Default: 540 days — they're tiny.</p>
+          <%= render "daily_usage", daily_usage: @daily_usage, setting: :histograms_retention_days, retention_days: @setting.histograms_retention_days, rows_label: "rows" %>
         </div>
       </div>
     </div>

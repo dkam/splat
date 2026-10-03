@@ -32,6 +32,26 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     Rails.cache.delete(StorageStats::CACHE_KEY)
   end
 
+  test "index shows the per-day cost under a retention setting" do
+    snapshot = {
+      groups: [{name: "Logs", base: "LogsRecord",
+                tables: [{name: "logs", row_estimate: 7000, table_bytes: 600_000, index_bytes: 100_000, total_bytes: 700_000}]}],
+      total: 700_000,
+      data_span: [{name: "Logs", table: "logs", days: 7.0}],
+      collected_at: Time.current
+    }
+    Setting.instance.update!(logs_data_retention_days: 14)
+
+    Rails.cache.write(StorageStats::CACHE_KEY, snapshot)
+    get settings_url
+    assert_response :success
+    assert_match "97.7 KB/day", response.body
+    assert_match "1,000 logs", response.body
+    assert_match "~1.34 MB at 14 days", response.body
+  ensure
+    Rails.cache.delete(StorageStats::CACHE_KEY)
+  end
+
   test "update with valid params redirects and persists" do
     put settings_url, params: {setting: {burst_threshold: 2500}}
     assert_redirected_to settings_path

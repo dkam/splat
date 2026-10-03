@@ -114,4 +114,41 @@ class StorageStatsTest < ActiveSupport::TestCase
   test "file_bytes_total reports on-disk bytes across every DB" do
     assert StorageStats.file_bytes_total.positive?
   end
+
+  test "daily_usage divides each retention setting's table bytes and rows by its days of data" do
+    snap = {
+      groups: [
+        {name: "Issues + Events", tables: [{name: "events", row_estimate: 3000, total_bytes: 30_000_000}]},
+        {name: "Transactions + Spans", tables: [
+          {name: "span_trees", row_estimate: 50, total_bytes: 8_000_000},
+          {name: "spans", row_estimate: 400, total_bytes: 99_000_000},
+          {name: "transaction_histograms", row_estimate: 100, total_bytes: 1_000_000},
+          {name: "transaction_hourly_stats", row_estimate: 20, total_bytes: 200_000}
+        ]},
+        {name: "Logs", tables: [{name: "logs", row_estimate: 10, total_bytes: 5_000}]}
+      ],
+      counts: {spans: 400 + 1000},
+      data_span: [
+        {table: "events", days: 30.0},
+        {table: "span_trees", days: 10.0},
+        {table: "transaction_histograms", days: 4.0},
+        {table: "logs", days: 0.5}
+      ]
+    }
+
+    usage = StorageStats.daily_usage(snap)
+
+    assert_equal({bytes_per_day: 1_000_000, rows_per_day: 100, days: 30.0}, usage[:events_data_retention_days])
+    # Frozen legacy spans bytes/rows are excluded; the row count is the packed span_count.
+    assert_equal({bytes_per_day: 800_000, rows_per_day: 100, days: 10.0}, usage[:spans_data_retention_days])
+    # Aggregates are the histogram and hourly-stats tables together.
+    assert_equal({bytes_per_day: 300_000, rows_per_day: 30, days: 4.0}, usage[:histograms_retention_days])
+    assert_nil usage[:logs_data_retention_days], "under a day of data is too short to call a daily figure"
+    assert_nil usage[:transactions_data_retention_days], "no span for transactions"
+  end
+
+  test "daily_usage is empty before the first deep pass" do
+    assert_equal({}, StorageStats.daily_usage(nil))
+    assert_equal({}, StorageStats.daily_usage({groups: [], data_span: []}))
+  end
 end
