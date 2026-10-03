@@ -15,7 +15,7 @@ If you're looking for other Sentry clones, take a look at Glitchtip, Bugsink & T
 Want your own Splat to point your apps at — on your laptop or a box on your network? This gets one running in a couple of minutes. (Hacking on Splat itself is the same steps.)
 
 **Prerequisites**
-- Ruby — see [`.ruby-version`](.ruby-version) (currently 4.0.6)
+- Ruby — see [`.ruby-version`](.ruby-version) (currently 4.0.7)
 - SQLite3
 - Docker — `bin/dev` runs [Tuber](https://github.com/tuberq/tuber) (the ingestion work queue) in a container, so there's nothing else to install. Prefer a native binary? The `tuber:` line in `Procfile.dev` shows how.
 
