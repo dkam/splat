@@ -8,16 +8,32 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
   # Build n events whose decoded payloads share enough structure for zstd to
   # learn a dictionary. `value_bytes` pads each payload so we can drive the
   # byte-budget / truncation paths without needing production-sized data.
-  def seed_events(n, value_bytes: 200)
+  # `type` picks the issue (events group by exception type + top frame), and
+  # `at` the event timestamp.
+  def seed_events(n, value_bytes: 200, type: "RuntimeError", at: Time.current)
     n.times do |i|
       payload = {
         "message" => "boom #{i}",
         "platform" => "ruby",
-        "timestamp" => Time.current.iso8601,
-        "exception" => {"values" => [{"type" => "RuntimeError", "value" => "x" * value_bytes,
+        "timestamp" => at.iso8601,
+        "exception" => {"values" => [{"type" => type, "value" => "x" * value_bytes,
                                       "stacktrace" => {"frames" => Array.new(15) { |j| {"filename" => "app/models/thing_#{j}.rb", "lineno" => j, "function" => "call"} }}}]}
       }
-      Event.create_from_sentry_payload!("evt-#{i}", payload, @project)
+      Event.create_from_sentry_payload!("evt-#{SecureRandom.hex(8)}", payload, @project)
+    end
+  end
+
+  # Run only the sampler (no zstd) and tally the exception type of every
+  # sampled payload, train and eval together.
+  def sampled_types
+    Dir.mktmpdir do |dir|
+      train_dir = File.join(dir, "train")
+      eval_dir = File.join(dir, "eval")
+      Dir.mkdir(train_dir)
+      Dir.mkdir(eval_dir)
+      Compression::DictTrainingJob.new.send(:stream_samples, db: :issues_events, table: "events",
+        segment: "events", train_dir: train_dir, eval_dir: eval_dir)
+      Dir[File.join(dir, "*", "*")].map { |f| JSON.parse(File.read(f)).dig("exception", "values", 0, "type") }.tally
     end
   end
 
@@ -87,8 +103,9 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
     # The wobble fix: the training set is memory-bounded (small), but eval keeps
     # filling past where training stopped — up to EVAL_TARGET — so the score is
     # measured on many more samples. stream_samples is exercised directly (no
-    # zstd) to assert the split sizes precisely.
-    seed_events(350)
+    # zstd) to assert the split sizes precisely. Spread over several issues so
+    # ISSUE_DAY_CAP doesn't thin the pool below EVAL_TARGET.
+    7.times { |k| seed_events(50, type: "Spread#{k}Error") }
     job = Compression::DictTrainingJob.new
 
     Dir.mktmpdir do |dir|
@@ -111,5 +128,26 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
       assert_equal counts[:train], Dir.children(train_dir).size
       assert_equal counts[:eval], Dir.children(eval_dir).size
     end
+  end
+
+  test "an issue that floods the window is capped in the sample" do
+    # A bug firing thousands of times in an afternoon must not become the whole
+    # training and eval set — the dict it produces is tuned for traffic that has
+    # usually stopped by the time the nightly run promotes it.
+    seed_events(60, type: "FloodError")
+    5.times { |k| seed_events(10, type: "Steady#{k}Error") }
+
+    types = with_const(Compression::DictTrainingJob, :ISSUE_DAY_CAP, 20) { sampled_types }
+
+    assert_equal 20, types["FloodError"]
+    5.times { |k| assert_equal 10, types["Steady#{k}Error"] }  # under the cap: all kept
+  end
+
+  test "the issue cap is per day, so an issue loud every day keeps its weight" do
+    3.times { |d| seed_events(30, type: "DailyError", at: d.days.ago) }
+
+    types = with_const(Compression::DictTrainingJob, :ISSUE_DAY_CAP, 20) { sampled_types }
+
+    assert_equal 60, types["DailyError"]
   end
 end

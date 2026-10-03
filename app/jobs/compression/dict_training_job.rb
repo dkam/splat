@@ -47,14 +47,24 @@ module Compression
     # Eval samples are left whole: they measure real end-to-end compression.
     ZSTD_SAMPLE_WINDOW = 131_072
     LOOKBACK_DAYS = 7
+    # Most rows one issue may put in the sample per day. Sampling is otherwise
+    # proportional to rows, so a bug that fires thousands of times in an
+    # afternoon fills both the training and eval sets and gets a dictionary
+    # promoted for traffic that has already stopped (Booko, 29 Sept 2026: 5,062
+    # Shop::FORBIDDEN events in two hours → events v21 at +26%). The cap is per
+    # *day*, not per issue, so an issue that is loud every day keeps its weight
+    # — on an instance where one issue is most of the traffic, it should be.
+    ISSUE_DAY_CAP = 200
     DICT_MAX_BYTES = 112_640      # zstd default
     GAIN_THRESHOLD = 0.10          # 10% — bottom of the user-stated range
 
-    # table => { db:, record:, dict:, platform_column: }. platform_column is the
-    # SQL column a "table:platform:X" qualifier filters on (events segment by
-    # SDK platform; logs segment by source).
+    # table => { db:, record:, dict:, platform_column:, issue_column: }.
+    # platform_column is the SQL column a "table:platform:X" qualifier filters
+    # on (events segment by SDK platform; logs segment by source). issue_column,
+    # where the table has one, is what ISSUE_DAY_CAP counts rows by — logs have
+    # no issue, so their sample stays proportional.
     REGISTRY = {
-      "events" => {db: :issues_events, record: "IssuesEventsRecord", dict: "Compression::IssuesEventsDict", platform_column: "platform"},
+      "events" => {db: :issues_events, record: "IssuesEventsRecord", dict: "Compression::IssuesEventsDict", platform_column: "platform", issue_column: "issue_id"},
       "logs" => {db: :logs, record: "LogsRecord", dict: "Compression::LogsDict", platform_column: "source"}
     }.freeze
 
@@ -159,15 +169,7 @@ module Compression
       binds = [since]
       binds << qualifier_bind if qualifier_bind
 
-      rows = conn.exec_query(<<~SQL.squish, "DictTrainingJob sample", binds)
-        SELECT payload_blob, dict_id
-          FROM #{table}
-         WHERE timestamp >= ?
-           AND payload_blob IS NOT NULL
-           #{qualifier_sql}
-         ORDER BY RANDOM()
-         LIMIT #{SAMPLES.to_i}
-      SQL
+      rows = conn.exec_query(sample_sql(table, qualifier_sql), "DictTrainingJob sample", binds)
 
       train_n = 0
       eval_n = 0
@@ -191,6 +193,35 @@ module Compression
         break if train_full && eval_n >= EVAL_TARGET
       end
       {train: train_n, eval: eval_n}
+    end
+
+    # Up to SAMPLES random rows from the lookback window, in random order. Where
+    # the table has an issue_column, each (issue, day) first keeps at most
+    # ISSUE_DAY_CAP rows. That window function numbers ids, not payloads, so
+    # the partition sort stays small however many rows a flood left behind.
+    def sample_sql(table, qualifier_sql)
+      issue_column = REGISTRY.fetch(table)[:issue_column]
+      candidates = "FROM #{table} WHERE timestamp >= ? AND payload_blob IS NOT NULL #{qualifier_sql}"
+
+      unless issue_column
+        return "SELECT payload_blob, dict_id #{candidates} ORDER BY RANDOM() LIMIT #{SAMPLES.to_i}"
+      end
+
+      <<~SQL.squish
+        SELECT payload_blob, dict_id
+          FROM #{table}
+         WHERE id IN (
+           SELECT id FROM (
+             SELECT id, ROW_NUMBER() OVER (
+                      PARTITION BY #{issue_column}, date(timestamp) ORDER BY RANDOM()) AS n
+               #{candidates}
+           )
+            WHERE n <= #{ISSUE_DAY_CAP.to_i}
+            ORDER BY RANDOM()
+            LIMIT #{SAMPLES.to_i}
+         )
+         ORDER BY RANDOM()
+      SQL
     end
 
     # Translate a segment qualifier into a SQL fragment + bind. The "platform"
