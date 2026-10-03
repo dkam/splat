@@ -1,7 +1,7 @@
 source "https://rubygems.org"
 
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
-gem "rails", "~> 8.1.3"
+gem "rails", "~> 8.1.4"
 # The modern asset pipeline for Rails [https://github.com/rails/propshaft]
 gem "propshaft"
 # Use sqlite3 as the database for Active Record
@@ -41,7 +41,7 @@ gem "rufus-scheduler", "~> 3.9"
 gem "dotenv-rails", groups: [:development, :test]
 
 # Pagination
-gem "pagy", "~> 43.0"
+gem "pagy", "~> 43.6"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false
@@ -55,7 +55,7 @@ gem "jwt"
 # Official MCP SDK — owns the JSON-RPC layer, protocol-version negotiation and
 # tool/prompt/resource plumbing behind /mcp. Replaced a hand-rolled server that
 # was pinned to the 2024-11-05 spec. See app/mcp/splat_mcp_server.rb.
-gem "mcp", "~> 1.1"
+gem "mcp", "~> 1.6"
 
 # Brotli compression support for Sentry envelopes
 gem "brotli"
