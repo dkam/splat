@@ -451,23 +451,6 @@
       </div>
     </div>
 
-    <% if SplatAuthorization.oidc_configured? %>
-      <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800 mb-6">
-        <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">MCP tokens</h2>
-        <div>
-          <%= form.label :mcp_token_ttl_days, "Expire after last sign-in", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <div class="flex items-center space-x-2">
-            <%= form.number_field :mcp_token_ttl_days, min: 0, max: 3650, class: "block w-32 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
-            <span class="text-gray-600 dark:text-gray-400">days</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            A user's MCP token stops working this many days after they last used the Splat web UI; any visit renews it.
-            Default: 7. Set to 0 to never expire (allowlist only). A backchannel logout revokes immediately regardless.
-          </p>
-        </div>
-      </div>
-    <% end %>
-
     <div class="flex justify-end">
       <%= form.submit "Update Settings", class: "bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white font-bold py-2 px-6 rounded focus:outline-none focus:shadow-outline" %>
     </div>
@@ -508,6 +491,24 @@
       <p class="text-sm text-gray-500 dark:text-gray-400">
         Sign in to see your personal <code class="font-mono">/mcp</code> token.
       </p>
+    <% end %>
+
+    <%# Its own form: this panel holds Regenerate's button_to form, so it can't
+        sit inside the settings form above. %>
+    <% if SplatAuthorization.oidc_configured? %>
+      <%= form_with(model: @setting, url: settings_path, method: :put, id: "mcp_token_expiry",
+            class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-800") do |form| %>
+        <%= form.label :mcp_token_ttl_days, "Expire after last sign-in", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+        <div class="flex items-center gap-2">
+          <%= form.number_field :mcp_token_ttl_days, min: 0, max: 3650, class: "block w-32 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+          <span class="text-gray-600 dark:text-gray-400">days</span>
+          <%= form.submit "Save", class: "ml-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-semibold py-2 px-3 rounded-lg cursor-pointer" %>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          A user's MCP token stops working this many days after they last used the Splat web UI; any visit renews it.
+          Default: 7. Set to 0 to never expire (allowlist only). A backchannel logout revokes immediately regardless.
+        </p>
+      <% end %>
     <% end %>
 
     <p class="text-xs text-gray-400 dark:text-gray-500 mt-4">

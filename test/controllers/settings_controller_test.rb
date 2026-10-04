@@ -168,6 +168,27 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # The expiry only governs per-user tokens, so it lives in the MCP panel with
+  # them. That panel holds Regenerate's button_to form, so it can't sit inside
+  # the main settings form; it gets a form of its own.
+  test "the token expiry is set from the MCP panel, in a form of its own" do
+    with_oidc do
+      with_allowlist("dev@example.com") do
+        signed_in_as("dev@example.com") do
+          get settings_url
+          assert_response :success
+          assert_select "input[name='setting[mcp_token_ttl_days]']", count: 1
+          assert_select "form#mcp_token_expiry input[name='setting[mcp_token_ttl_days]']"
+
+          put settings_url, params: {setting: {mcp_token_ttl_days: 30}}
+        end
+      end
+    end
+
+    assert_redirected_to settings_path
+    assert_equal 30, Setting.instance.reload.mcp_token_ttl_days
+  end
+
   test "index withholds the token from a signed-in user who has left the allowlist" do
     with_oidc do
       with_allowlist("someone-else@example.com") do
