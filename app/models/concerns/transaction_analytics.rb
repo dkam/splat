@@ -64,10 +64,11 @@ module TransactionAnalytics
       row = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
       pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
       cnt = row[:count]
+      # nil, not 0, for an empty window: a 0ms average reads as a fast one.
       {
-        avg: cnt.zero? ? 0.0 : (row[:sum_duration].to_f / cnt).round(1),
-        max: row[:max_duration],
-        min: row[:min_duration].to_i,
+        avg: cnt.zero? ? nil : (row[:sum_duration].to_f / cnt).round(1),
+        max: cnt.zero? ? nil : row[:max_duration],
+        min: cnt.zero? ? nil : row[:min_duration].to_i,
         count: cnt,
         p50: pcts[:p50],
         p95: pcts[:p95],
@@ -85,39 +86,43 @@ module TransactionAnalytics
       cnt = row[:count]
       {
         "transaction_name" => name,
-        "avg_duration" => cnt.zero? ? 0.0 : (row[:sum_duration].to_f / cnt).round(1),
+        "avg_duration" => cnt.zero? ? nil : (row[:sum_duration].to_f / cnt).round(1),
         "avg_db_time" => row[:db_time_count].zero? ? nil : (row[:sum_db_time].to_f / row[:db_time_count]).round(1),
         "avg_view_time" => row[:view_time_count].zero? ? nil : (row[:sum_view_time].to_f / row[:view_time_count]).round(1),
         "count" => cnt,
-        "max_duration" => row[:max_duration],
-        "min_duration" => row[:min_duration].to_i,
+        "max_duration" => cnt.zero? ? nil : row[:max_duration],
+        "min_duration" => cnt.zero? ? nil : row[:min_duration].to_i,
         "p50_duration" => pcts[:p50],
         "p95_duration" => pcts[:p95],
         "p99_duration" => pcts[:p99]
       }
     end
 
-    # Requests per project for one endpoint name in a window, { project_id =>
-    # count }. Same-named endpoints in different projects are different code,
-    # so a caller about to pool them asks this first. Neither release nor
-    # server_name is on the rollups, so either filter counts the raw rows it
-    # would select — the same bounded scan the caller is about to make.
+    # Requests per project in a window, { project_id => count }, for one
+    # endpoint name or (without one) all of them. Same-named endpoints in
+    # different projects are different code, and different projects'
+    # traffic is different apps', so a caller about to pool them asks this
+    # first. Neither release nor server_name is on the rollups, so either
+    # filter counts the raw rows it would select — the same bounded scan the
+    # caller is about to make.
     #
     # project_ids pins the leading column of index_transaction_hourly_stats_unique
     # (one probe per project, not a table scan); the projects themselves live
     # on the primary DB, so the caller supplies them rather than a join.
-    def endpoint_counts_by_project(name, time_range, project_ids:, environment: nil, release: nil, server_name: nil)
+    def request_counts_by_project(time_range, project_ids:, transaction_name: nil, environment: nil, release: nil, server_name: nil)
       return {} if project_ids.empty?
 
       if release.present? || server_name.present?
-        scope = where(transaction_name: name, timestamp: time_range)
+        scope = where(timestamp: time_range)
+        scope = scope.where(transaction_name: transaction_name) if transaction_name
         scope = scope.where(environment: environment) if environment.present?
         scope = scope.where(release: release) if release.present?
         scope = scope.where(server_name: server_name) if server_name.present?
         return scope.group(:project_id).count
       end
 
-      where_sql, binds = hourly_filters(time_range: time_range, project_id: nil, environment: environment, transaction_name: name)
+      where_sql, binds = hourly_filters(time_range: time_range, project_id: nil, environment: environment,
+        transaction_name: transaction_name)
       sql = "SELECT project_id, SUM(count) FROM transaction_hourly_stats " \
             "WHERE project_id IN (?) AND #{where_sql} GROUP BY project_id HAVING SUM(count) > 0"
       connection.select_rows(sanitize_sql_array([sql, project_ids, *binds])).to_h { |id, c| [id.to_i, c.to_i] }
@@ -247,9 +252,9 @@ module TransactionAnalytics
       counts = raw_index_counts(scope)
       cnt = cnt.to_i
       {
-        avg: cnt.zero? ? 0.0 : (sum.to_f / cnt).round(1),
-        max: mx.to_i,
-        min: mn.to_i,
+        avg: cnt.zero? ? nil : (sum.to_f / cnt).round(1),
+        max: mx&.to_i,
+        min: mn&.to_i,
         count: cnt,
         p50: Analytics::Histogram.percentile_from_counts(counts, 0.50),
         p95: Analytics::Histogram.percentile_from_counts(counts, 0.95),
@@ -284,15 +289,18 @@ module TransactionAnalytics
     end
 
     # Request count, average and max duration per host per time bucket, across
-    # every endpoint unless one is named: [[bucket_index, server_name, count,
-    # avg, max], ...], buckets counted from time_range.begin. Empty
-    # (bucket, host) pairs are absent — the caller zero-fills them.
+    # every endpoint unless one is named: [[bucket_index, project_id,
+    # server_name, count, avg, max], ...], buckets counted from
+    # time_range.begin. Empty (bucket, project, host) triples are absent —
+    # the caller zero-fills them.
     def host_breakdown(time_range, bucket_seconds:, project_id: nil, environment: nil, server_name: nil, transaction_name: nil)
       scope = raw_window_scope(time_range, project_id: project_id, environment: environment,
         server_name: server_name, transaction_name: transaction_name)
       tb = Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: time_range.begin.to_i, bucket_seconds: bucket_seconds))
-      scope.group(tb, :server_name)
-        .pluck(tb, :server_name, Arel.sql("COUNT(*)"), Arel.sql("AVG(duration)"), Arel.sql("MAX(duration)"))
+      # Per project too: two apps can share a host, and a cell averaging both
+      # describes neither.
+      scope.group(tb, :project_id, :server_name)
+        .pluck(tb, :project_id, :server_name, Arel.sql("COUNT(*)"), Arel.sql("AVG(duration)"), Arel.sql("MAX(duration)"))
     end
 
     # ---- Bucketed time series (for sparklines + charts). ----
@@ -494,12 +502,12 @@ module TransactionAnalytics
       counts = raw_index_counts(scope)
       {
         "transaction_name" => name,
-        "avg_duration" => avg_d.to_f.round(1),
+        "avg_duration" => avg_d&.to_f&.round(1),
         "avg_db_time" => avg_db&.to_f&.round(1),
         "avg_view_time" => avg_view&.to_f&.round(1),
         "count" => cnt.to_i,
-        "max_duration" => mx.to_i,
-        "min_duration" => mn.to_i,
+        "max_duration" => mx&.to_i,
+        "min_duration" => mn&.to_i,
         "p50_duration" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.50)),
         "p95_duration" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.95)),
         "p99_duration" => round_or_nil(Analytics::Histogram.percentile_from_counts(counts, 0.99))

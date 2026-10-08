@@ -823,6 +823,9 @@ The tools that summarise one endpoint's timings (`get_endpoint_summary`,
 endpoint name has requests in more than one project. Two apps'
 `ProductsController#index` are different code, so they won't be pooled.
 Called without one, the tool replies with the projects to choose from.
+For the same reason, `get_transaction_stats` called with neither gives each
+project its own overall figures rather than one blend, and
+`get_host_breakdown` gives two projects on one host a column each.
 
 `search_slow_transactions`, `get_transactions_by_endpoint` and
 `get_transaction_stats` take a `server_name` to narrow to one host. It isn't

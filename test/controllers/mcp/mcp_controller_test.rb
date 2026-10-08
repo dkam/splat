@@ -280,6 +280,53 @@ module Mcp
       refute_match(/P95 (DB|View) Time:\*\* 0ms/, tool_text)
     end
 
+    # A window with no requests has no percentiles. They were filled with 0, so
+    # a misspelt endpoint name read as the fastest endpoint in the app.
+    test "get_transaction_stats gives no figures, not 0ms, for an endpoint with no requests" do
+      seed_txn(projects(:one), "BooksController#show", 200)
+
+      call_tool("get_transaction_stats", {"endpoint" => "BookController#show"})
+
+      assert_equal false, JSON.parse(response.body).dig("result", "isError"), tool_text
+      assert_equal 0, tool_structured["total_count"]
+      assert_equal({}, tool_structured["percentiles"].compact)
+      assert_match(/No transactions/, tool_text)
+      refute_match(/\b0ms\b/, tool_text)
+    end
+
+    test "get_transaction_stats gives no average, min or max for an empty window" do
+      call_tool("get_transaction_stats", {})
+
+      assert_equal({}, tool_structured["percentiles"].compact)
+      refute_match(/\b0ms\b/, tool_text)
+    end
+
+    # The overall figures are one number each, so pooling projects gives one
+    # that describes neither: the splat-booko shape again, without an endpoint.
+    test "get_transaction_stats with no project gives each project its own overall figures" do
+      seed_shared_endpoint
+
+      call_tool("get_transaction_stats", {})
+
+      assert_equal 13, tool_structured["total_count"]
+      assert_equal({}, tool_structured["percentiles"].compact, "a pooled p50 describes neither project")
+      by_project = tool_structured["by_project"].index_by { |r| r["project"] }
+      assert_equal [3, 10], by_project.values_at("Project One", "Project Two").map { |r| r["count"] }
+      assert_operator by_project["Project One"]["p50"], :>, 100
+      assert_operator by_project["Project Two"]["p50"], :<, 10
+      assert_match(/\| Project One \| 3 \|/, tool_text)
+      assert_match(/\| Project Two \| 10 \|/, tool_text)
+    end
+
+    test "get_transaction_stats with no project still gives overall figures when one project has traffic" do
+      3.times { seed_txn(projects(:one), "BooksController#show", 150) }
+
+      call_tool("get_transaction_stats", {})
+
+      assert_operator tool_structured.dig("percentiles", "p50"), :>, 100
+      assert_equal [["Project One", 3]], tool_structured["by_project"].map { |r| [r["project"], r["count"]] }
+    end
+
     # ---- Per-host views. ----
     #
     # web01 stalled on splat-booko on 2026-10-08 (one worker OOM-killed) and no
@@ -371,6 +418,21 @@ module Mcp
 
       call_tool("get_host_breakdown", {"hours" => 48})
       assert_match(/reduced to 6h/, tool_text)
+    end
+
+    # Two apps can run on one host, and can share an endpoint name; a cell
+    # averaging both describes neither.
+    test "get_host_breakdown keeps each project's requests on a shared host apart" do
+      3.times { seed_txn(projects(:one), "ProductsController#index", 150, server_name: "web01") }
+      10.times { seed_txn(projects(:two), "ProductsController#index", 4, server_name: "web01") }
+
+      call_tool("get_host_breakdown", {"endpoint" => "ProductsController#index", "hours" => 3})
+
+      assert_equal false, JSON.parse(response.body).dig("result", "isError"), tool_text
+      served = tool_structured["rows"].select { |r| r["count"].positive? }
+      assert_equal [["Project One", 3, 150.0], ["Project Two", 10, 4.0]],
+        served.map { |r| r.values_at("project", "count", "avg_duration") }.sort
+      assert_match(/\| web01 \(Project One\) \| web01 \(Project Two\) \|/, tool_text)
     end
 
     test "get_status reports version, storage, and compression from the snapshot" do

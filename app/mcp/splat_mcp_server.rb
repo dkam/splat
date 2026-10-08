@@ -279,7 +279,20 @@ class SplatMcpServer
             total_count: {type: "integer"},
             percentiles: {
               type: "object",
+              description: "Null throughout when the window holds no requests, or when a call naming neither project nor endpoint finds more than one project's (see by_project)",
               properties: {avg: MS, p50: MS, p95: MS, p99: MS, min: MS, max: MS}
+            },
+            by_project: {
+              type: ["array", "null"],
+              description: "Set when neither project nor endpoint was given: each project with requests in the window, busiest first, with its own overall figures",
+              items: {
+                type: "object",
+                properties: {
+                  project: {type: ["string", "null"]},
+                  count: {type: "integer"},
+                  avg: MS, p50: MS, p95: MS, p99: MS, min: MS, max: MS
+                }
+              }
             },
             top_endpoints: {
               type: "array",
@@ -335,11 +348,12 @@ class SplatMcpServer
             servers: {type: "array", items: {type: ["string", "null"]}},
             rows: {
               type: "array",
-              description: "Zero-filled: every host seen in the window has a row in every bucket, count 0 where it served nothing",
+              description: "Zero-filled: every project and host pair seen in the window has a row in every bucket, count 0 where it served nothing. Two projects on one host get a row each.",
               items: {
                 type: "object",
                 properties: {
                   bucket_start: TIMESTAMP,
+                  project: {type: ["string", "null"]},
                   server_name: {type: ["string", "null"]},
                   count: {type: "integer"},
                   avg_duration: MS,
@@ -491,7 +505,7 @@ class SplatMcpServer
       },
       {
         name: "get_transaction_stats",
-        description: "Get overall performance percentiles plus the top endpoints ranked by total time spent (avg duration × request count). Use this to find where the app is actually spending its time, not just where individual outliers are slow. Each endpoint includes time_spent, avg, p95, and request count.",
+        description: "Get overall performance percentiles plus the top endpoints ranked by total time spent (avg duration × request count). Use this to find where the app is actually spending its time, not just where individual outliers are slow. Each endpoint includes time_spent, avg, p95, and request count. Without project or endpoint, each project with traffic gets its own overall figures instead of one blended set.",
         inputSchema: {
           type: "object",
           properties: {
@@ -650,7 +664,7 @@ class SplatMcpServer
       },
       {
         name: "get_host_breakdown",
-        description: "Request count, average and max duration per host (server_name) per time bucket, across every endpoint unless one is named. For spotting one server stalling or dropping out while the others pick up its load: hosts are columns, and a host with no requests in a bucket reads 0. Reads raw transactions (the hourly rollups don't record the host), so the window is capped at #{SplatMcpTools::HOST_SCAN_MAX_HOURS}h — put it around an incident with start_time/end_time.",
+        description: "Request count, average and max duration per host (server_name) per time bucket, across every endpoint unless one is named. For spotting one server stalling or dropping out while the others pick up its load: hosts are columns (one per project when two projects share a host), and a host with no requests in a bucket reads 0. Reads raw transactions (the hourly rollups don't record the host), so the window is capped at #{SplatMcpTools::HOST_SCAN_MAX_HOURS}h — put it around an incident with start_time/end_time.",
         inputSchema: {
           type: "object",
           properties: {

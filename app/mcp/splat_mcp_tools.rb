@@ -625,19 +625,30 @@ class SplatMcpTools
     # p95 describing different populations once the shorter window elapsed.
     # A host filter can't use the rollups at all, so both figures come from
     # the same raw rows instead.
-    if server_name
+    #
+    # The overall figures are one number each, so an unscoped call gives every
+    # project with traffic its own; pooled, a busy fast app's requests swamp a
+    # slow one's (see require_single_project!). One project's are the overall
+    # figures; two or more leave those empty rather than blended.
+    if project_id.nil? && endpoint.blank?
+      by_project = overall_by_project(time_range, environment: environment, server_name: server_name)
+      total_count = by_project.sum { |r| r[:count] }
+      percentiles = (by_project.size == 1) ? by_project.first : NO_PERCENTILES
+    elsif server_name
       percentiles = Transaction.percentiles_raw(time_range, project_id: project_id, environment: environment,
         server_name: server_name, transaction_name: endpoint.presence)
       total_count = percentiles[:count]
     elsif endpoint.present?
+      # No `|| 0`: a window with no requests has no figures, and 0ms read as a
+      # very fast endpoint whenever its name was misspelt.
       ep_stats = Transaction.percentiles_for_endpoint(endpoint, time_range, project_id: project_id, environment: environment)
       percentiles = {
-        avg: ep_stats["avg_duration"]&.to_f || 0,
-        p50: ep_stats["p50_duration"]&.to_f || 0,
-        p95: ep_stats["p95_duration"]&.to_f || 0,
-        p99: ep_stats["p99_duration"]&.to_f || 0,
-        min: ep_stats["min_duration"]&.to_f || 0,
-        max: ep_stats["max_duration"]&.to_f || 0
+        avg: ep_stats["avg_duration"]&.to_f,
+        p50: ep_stats["p50_duration"]&.to_f,
+        p95: ep_stats["p95_duration"]&.to_f,
+        p99: ep_stats["p99_duration"]&.to_f,
+        min: ep_stats["min_duration"]&.to_f,
+        max: ep_stats["max_duration"]&.to_f
       }
       total_count = ep_stats["count"].to_i
     else
@@ -655,7 +666,7 @@ class SplatMcpTools
     project_names = project_names_for(top_endpoints)
 
     text = format_transaction_stats(percentiles, top_endpoints, total_count, window_label(time_range), endpoint,
-      project_names: (project_names unless project_id), server_name: server_name)
+      project_names: (project_names unless project_id), server_name: server_name, by_project: by_project)
 
     structured = {
       window: window_out(time_range),
@@ -663,7 +674,10 @@ class SplatMcpTools
       environment: environment,
       server_name: server_name,
       total_count: total_count,
-      percentiles: percentiles.slice(:avg, :p50, :p95, :p99, :min, :max).transform_values { |v| v&.to_f },
+      percentiles: percentiles.slice(*PERCENTILE_KEYS).transform_values { |v| v&.to_f },
+      by_project: by_project&.map do |row|
+        {project: row[:project], count: row[:count], **row.slice(*PERCENTILE_KEYS).transform_values { |v| v&.to_f }}
+      end,
       top_endpoints: top_endpoints.map do |row|
         {
           project: project_names[row["project_id"]],
@@ -797,6 +811,26 @@ class SplatMcpTools
     Project.ids
   end
 
+  PERCENTILE_KEYS = %i[avg p50 p95 p99 min max].freeze
+  NO_PERCENTILES = PERCENTILE_KEYS.index_with(nil).freeze
+
+  # Each project's overall figures for the window, busiest first, with the
+  # project's name under :project. Only projects with requests in the window.
+  def overall_by_project(time_range, environment:, server_name:)
+    counts = Transaction.request_counts_by_project(time_range, project_ids: every_project_id,
+      environment: environment, server_name: server_name)
+    names = Project.where(id: counts.keys).pluck(:id, :name).to_h
+    counts.sort_by { |pid, count| [-count, names[pid].to_s] }.map do |pid, _|
+      figures =
+        if server_name
+          Transaction.percentiles_raw(time_range, project_id: pid, environment: environment, server_name: server_name)
+        else
+          Transaction.percentiles(time_range, project_id: pid, environment: environment)
+        end
+      figures.merge(project: names[pid])
+    end
+  end
+
   # Same-named endpoints in different projects are different code — two Rails
   # apps' ProductsController#index share nothing but the convention — so
   # pooling their timings answers about neither. On splat-booko the unscoped
@@ -812,9 +846,9 @@ class SplatMcpTools
 
     ids = every_project_id
     counts = arms.map { |range, release|
-      Transaction.endpoint_counts_by_project(
-        endpoint, range, project_ids: ids, environment: environment.presence, release: release.presence,
-        server_name: server_name.presence
+      Transaction.request_counts_by_project(
+        range, project_ids: ids, transaction_name: endpoint, environment: environment.presence,
+        release: release.presence, server_name: server_name.presence
       )
     }.reduce { |a, b| a.merge(b) { |_, x, y| x + y } }
     return if counts.size < 2
@@ -989,22 +1023,26 @@ class SplatMcpTools
     cells = Transaction.host_breakdown(
       time_range, bucket_seconds: bucket_seconds, project_id: project_id, environment: environment,
       server_name: server_name, transaction_name: endpoint
-    ).each_with_object({}) do |(b, host, count, avg, max), acc|
+    ).each_with_object({}) do |(b, pid, host, count, avg, max), acc|
       next if b.to_i.negative? || b.to_i >= buckets
-      acc[[b.to_i, host]] = {count: count.to_i, avg: avg.to_f.round(1), max: max.to_f}
+      acc[[b.to_i, pid, host]] = {count: count.to_i, avg: avg.to_f.round(1), max: max.to_f}
     end
-    hosts = cells.keys.map(&:last).uniq.sort_by(&:to_s)
+    # A column per project and host: two apps can share a host, and a cell
+    # averaging both describes neither.
+    project_names = Project.where(id: cells.keys.map { |k| k[1] }.uniq).pluck(:id, :name).to_h
+    series = cells.keys.map { |_, pid, host| [pid, host] }.uniq.sort_by { |pid, host| [host.to_s, project_names[pid].to_s] }
+    hosts = series.map(&:last).uniq
 
     rows = (0...buckets).flat_map do |b|
       bucket_start = (time_range.begin + (b * bucket_seconds)).utc.iso8601
-      hosts.map do |host|
-        cell = cells[[b, host]]
-        {bucket_start: bucket_start, server_name: host, count: cell ? cell[:count] : 0,
+      series.map do |pid, host|
+        cell = cells[[b, pid, host]]
+        {bucket_start: bucket_start, project: project_names[pid], server_name: host, count: cell ? cell[:count] : 0,
          avg_duration: cell&.dig(:avg), max_duration: cell&.dig(:max)}
       end
     end
 
-    text = format_host_breakdown(cells, hosts, buckets, bucket_seconds, time_range,
+    text = format_host_breakdown(cells, series, project_names, buckets, bucket_seconds, time_range,
       environment: environment, server_name: server_name, endpoint: endpoint)
     structured = {window: window_out(time_range), bucket_seconds: bucket_seconds, servers: hosts, rows: rows}
 
@@ -1451,26 +1489,34 @@ class SplatMcpTools
 
   # project_names is passed only for an unscoped call, where rows from
   # different projects can share an endpoint name and need telling apart.
-  def format_transaction_stats(percentiles, top_endpoints, total_count, window, endpoint = nil, project_names: nil, server_name: nil)
+  def format_transaction_stats(percentiles, top_endpoints, total_count, window, endpoint = nil, project_names: nil,
+    server_name: nil, by_project: nil)
     result = "## Transaction Performance Statistics\n\n"
+    result += "**Project:** #{by_project.first[:project]}\n" if by_project&.size == 1
     result += "**Endpoint:** #{endpoint}\n" if endpoint.present?
     result += "**Server:** #{server_name}\n" if server_name.present?
     result += "**Time Range:** #{window}\n"
     result += "**Total Transactions:** #{total_count}\n\n"
 
-    if percentiles.empty?
-      result += "No transaction data available.\n"
-      return result
+    if total_count.zero?
+      result += endpoint.present? ? "No transactions found for endpoint '#{endpoint}' in this window.\n\n" : "No transactions in this window.\n\n"
+    elsif by_project && by_project.size > 1
+      result += "### Response Time by Project\n\n"
+      result += "Each project's own figures. Pooled, the busiest app's requests would set the numbers for all of them.\n\n"
+      result += "| Project | Requests | Avg | P50 | P95 | P99 |\n"
+      result += "|---|---:|---:|---:|---:|---:|\n"
+      by_project.each do |row|
+        result += "| #{row[:project]} | #{row[:count]} | #{format_ms(row[:avg])} | #{format_ms(row[:p50])} " \
+                  "| #{format_ms(row[:p95])} | #{format_ms(row[:p99])} |\n"
+      end
+      result += "\n"
+    else
+      result += "### Response Time Percentiles\n\n"
+      result += "- **Average:** #{format_ms(percentiles[:avg])}\n"
+      result += "- **Median (P50):** #{format_ms(percentiles[:p50])}\n"
+      result += "- **P95:** #{format_ms(percentiles[:p95])}\n"
+      result += "- **P99:** #{format_ms(percentiles[:p99])}\n\n"
     end
-
-    # percentiles is never `empty?` — it always carries the full key set — but
-    # p50/p95/p99 come back nil for a window with no transactions, so these
-    # have to go through format_ms rather than bare .round.
-    result += "### Response Time Percentiles\n\n"
-    result += "- **Average:** #{format_ms(percentiles[:avg])}\n"
-    result += "- **Median (P50):** #{format_ms(percentiles[:p50])}\n"
-    result += "- **P95:** #{format_ms(percentiles[:p95])}\n"
-    result += "- **P99:** #{format_ms(percentiles[:p99])}\n\n"
 
     if top_endpoints.any?
       result += "### Top Endpoints by Impact (avg × count)\n\n"
@@ -1802,7 +1848,7 @@ class SplatMcpTools
     header
   end
 
-  def format_host_breakdown(cells, hosts, buckets, bucket_seconds, time_range, environment:, server_name:, endpoint:)
+  def format_host_breakdown(cells, series, project_names, buckets, bucket_seconds, time_range, environment:, server_name:, endpoint:)
     header = "## Requests per Host\n\n"
     header += "**Time Range:** #{window_label(time_range)}\n"
     header += "**Buckets:** #{buckets} × #{bucket_seconds / 60}m\n"
@@ -1810,14 +1856,17 @@ class SplatMcpTools
     header += "**Environment:** #{environment}\n" if environment
     header += "**Server:** #{server_name}\n" if server_name
     header += "\n"
-    return header + "No requests in this window.\n" if hosts.empty?
+    return header + "No requests in this window.\n" if series.empty?
 
+    # Name the project only when there's more than one to tell apart.
+    several = series.map(&:first).uniq.size > 1
+    labels = series.map { |pid, host| several ? "#{host || "(none)"} (#{project_names[pid]})" : host || "(none)" }
     header += "Each cell is requests / avg / max. A 0 is a host that served nothing in that bucket.\n\n"
-    header += "| Bucket start | #{hosts.map { |h| h || "(none)" }.join(" | ")} |\n"
-    header += "|---|#{"---:|" * hosts.size}\n"
+    header += "| Bucket start | #{labels.join(" | ")} |\n"
+    header += "|---|#{"---:|" * series.size}\n"
     buckets.times do |b|
-      row = hosts.map do |host|
-        cell = cells[[b, host]]
+      row = series.map do |pid, host|
+        cell = cells[[b, pid, host]]
         cell ? "#{cell[:count]} / #{format_ms(cell[:avg])} / #{format_ms(cell[:max])}" : "0"
       end
       header += "| #{(time_range.begin + (b * bucket_seconds)).utc.strftime("%Y-%m-%d %H:%M")} | #{row.join(" | ")} |\n"
