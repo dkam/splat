@@ -839,6 +839,28 @@ module Mcp
       end
     end
 
+    # get_transaction(transaction_id: "62475681") timed out on splat-booko.
+    # Finding the transaction is a primary-key lookup; the stall was the
+    # "errors in this request" lookup after it, which SQLite planned along
+    # [project_id, timestamp] to satisfy its ORDER BY — walking every event
+    # the project has, newest first, for a request that threw nothing.
+    test "get_transaction looks up the request's errors by trace, not along the project's timeline" do
+      project = projects(:one)
+      txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid, timestamp: Time.current,
+        transaction_name: "PlanController#show", duration: 5, trace_id: "trace-without-errors")
+
+      plans = query_plans_on("events") do
+        call_tool("get_transaction", {"transaction_id" => txn.id.to_s, "project" => project.name})
+      end
+
+      refute JSON.parse(response.body).dig("result", "isError"), tool_text
+      assert plans.any?, "get_transaction never looked for the request's errors"
+      plans.each do |plan|
+        refute_match(/\bSCAN events\b/, plan, "scans events")
+        refute_match(/index_events_on_(project_id_and_)?timestamp/, plan, "walks events by timestamp")
+      end
+    end
+
     test "get_transaction with neither id nor trace_id explains what is needed" do
       # Surfaces as a tool error, same as any other failed lookup — what matters
       # is that the message names both arguments rather than reporting a blank

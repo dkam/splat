@@ -238,9 +238,21 @@ class Transaction < TransactionsSpansRecord
   # project-scoped query rather than an association; it rides the events
   # (project_id, trace_id) index. trace_id is not globally unique, hence the
   # project scope. Empty is the norm — most transactions raise nothing.
-  def related_events
-    return Event.none if trace_id.blank?
-    Event.where(project_id: project_id, trace_id: trace_id).order(timestamp: :desc)
+  #
+  # Newest first, but sorted here rather than with ORDER BY timestamp: given
+  # the ORDER BY, SQLite prefers [project_id, timestamp] to skip the sort and
+  # walks the project's events newest-first until it has enough matches — for
+  # a request that threw nothing, every event the project has. On splat-booko
+  # that timed out get_transaction outright. A trace holds the handful of
+  # errors one request raised, so sorting them in Ruby is free.
+  def related_events(limit: 25)
+    return [] if trace_id.blank?
+
+    ids = Event.where(project_id: project_id, trace_id: trace_id).pluck(:id, :timestamp)
+      .sort_by { |_, ts| ts }.reverse.first(limit).map(&:first)
+    return [] if ids.empty?
+
+    Event.where(id: ids).index_by(&:id).values_at(*ids).compact
   end
 
   # Column wins over JSON; the JSON fallback handles legacy rows that

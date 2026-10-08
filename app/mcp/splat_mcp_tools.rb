@@ -1361,7 +1361,7 @@ class SplatMcpTools
       result += "_Call `get_trace_logs` with this trace_id for the correlated log lines._\n"
       # The reverse of the event detail's transaction hint: any errors thrown
       # during this request, so the correlation is discoverable from either end.
-      errors = txn.related_events.limit(10).to_a
+      errors = txn.related_events(limit: 10)
       if errors.any?
         result += "\n### Errors in this request (#{errors.size})\n"
         errors.each do |event|

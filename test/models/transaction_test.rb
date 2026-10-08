@@ -397,6 +397,24 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal [event], txn.related_events.to_a
   end
 
+  test "related_events lists a trace's errors newest first, up to the limit" do
+    trace = "0011223344556677889900aabbccddee"
+    txn = @project.transactions.create!(
+      transaction_id: "txn-many-errors", transaction_name: "BooksController#show",
+      timestamp: Time.current, duration: 240, trace_id: trace
+    )
+    events = %w[08:00:00 08:00:02 08:00:01].map do |at|
+      Event.create_from_sentry_payload!(
+        SecureRandom.uuid,
+        {"message" => "boom at #{at}", "timestamp" => "2026-07-17T#{at}Z",
+         "contexts" => {"trace" => {"trace_id" => trace}}},
+        @project
+      )
+    end
+
+    assert_equal [events[1], events[2]], txn.related_events(limit: 2).to_a
+  end
+
   test "related_events is empty when the transaction has no trace_id" do
     txn = @project.transactions.create!(
       transaction_id: "txn-no-trace", transaction_name: "Test",

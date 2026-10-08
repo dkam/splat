@@ -23,7 +23,7 @@ class TransactionsController < ApplicationController
 
     # Errors thrown during this transaction (reverse of Event#related_transaction).
     # Usually none; capped because a pathological trace could carry many.
-    @related_events = @transaction.related_events.limit(25).to_a
+    @related_events = @transaction.related_events(limit: 25)
 
     respond_to do |format|
       format.html
