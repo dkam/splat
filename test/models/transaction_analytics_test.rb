@@ -206,7 +206,7 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     names.each do |name|
       single = Transaction.send(:merged_percentiles,
         time_range: @range, project_id: @project.id, transaction_name: name)
-      assert_equal single, batched[name], "#{name} batched percentiles must equal the per-endpoint query"
+      assert_equal single, batched[[@project.id, name]], "#{name} batched percentiles must equal the per-endpoint query"
     end
   end
 
@@ -220,5 +220,24 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
       assert_equal single["p95_duration"], r["p95_duration"], "#{r["transaction_name"]} p95 mismatch"
       assert_equal single["p50_duration"], r["p50_duration"], "#{r["transaction_name"]} p50 mismatch"
     end
+  end
+
+  test "unscoped endpoint rankings keep a name two projects share apart" do
+    other = Project.create!(name: "Other", slug: "other", public_key: "other-key")
+    20.times { create_txn(duration: 800, query_count: 40, has_n_plus_one: true) }
+    50.times do
+      Transaction.create!(project: other, transaction_id: SecureRandom.uuid, transaction_name: "GET /x",
+        timestamp: @hour, duration: 5, query_count: 30, has_n_plus_one: true)
+    end
+
+    ranked = Transaction.stats_by_endpoint_with_impact(@range).select { |r| r["transaction_name"] == "GET /x" }
+    assert_equal [[@project.id, 20], [other.id, 50]], ranked.map { |r| [r["project_id"], r["count"]] }.sort
+    ranked.each do |r|
+      single = Transaction.percentiles_for_endpoint("GET /x", @range, project_id: r["project_id"])
+      assert_equal single["p95_duration"], r["p95_duration"], "project #{r["project_id"]} p95 must be its own"
+    end
+
+    npo = Transaction.endpoints_by_n_plus_one(@range).select { |r| r["transaction_name"] == "GET /x" }
+    assert_equal [[@project.id, 20], [other.id, 50]], npo.map { |r| [r["project_id"], r["n_plus_one_count"]] }.sort
   end
 end

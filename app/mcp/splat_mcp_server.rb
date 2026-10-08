@@ -25,6 +25,22 @@ class SplatMcpServer
     description: "Restrict results to one project, given as its slug, its display name, or its numeric id. Omit to cover every project on this instance."
   }.freeze
 
+  # For the tools that pool one endpoint's timings. Two projects' same-named
+  # endpoints are different code, so those tools refuse to pool them
+  # (SplatMcpTools#require_single_project!) — say so up front.
+  ENDPOINT_PROJECT_ARG = PROJECT_ARG.merge(
+    description: "Restrict results to one project, given as its slug, its display name, or its numeric id. " \
+      "Required when the endpoint name has requests in more than one project in the window — the call is refused " \
+      "with the list of projects otherwise. Omit when only one project has it."
+  ).freeze
+
+  # For the transaction tools that list raw rows. Not indexed — see
+  # SplatMcpTools::HOST_SCAN_MAX_HOURS for the tools whose scan it can't ride.
+  SERVER_NAME_ARG = {
+    type: "string",
+    description: "Filter by originating host (e.g. 'web01'), exact match. Not indexed, so it narrows the rows the window and other filters already select rather than finding them — keep the window tight."
+  }.freeze
+
   # Absolute window bounds, spliced into every tool that takes an hours
   # argument. Without these the hours argument is a look-back from now, and a
   # past incident can only be reached if a deploy happens to bracket it.
@@ -259,6 +275,7 @@ class SplatMcpServer
             window: WINDOW_OUT,
             endpoint: {type: ["string", "null"], description: "Set only when the percentiles were narrowed to one endpoint"},
             environment: {type: ["string", "null"]},
+            server_name: {type: ["string", "null"], description: "Set when every figure was narrowed to one host, and so read from raw transactions"},
             total_count: {type: "integer"},
             percentiles: {
               type: "object",
@@ -266,10 +283,11 @@ class SplatMcpServer
             },
             top_endpoints: {
               type: "array",
-              description: "Ranked by time_spent (avg × count), never narrowed by the endpoint filter",
+              description: "Ranked by time_spent (avg × count), never narrowed by the endpoint filter. One row per project and endpoint, so an unscoped call lists a name two projects share twice.",
               items: {
                 type: "object",
                 properties: {
+                  project: {type: ["string", "null"]},
                   transaction_name: {type: ["string", "null"]},
                   time_spent: MS,
                   avg_duration: MS,
@@ -288,9 +306,11 @@ class SplatMcpServer
             environment: {type: ["string", "null"]},
             endpoints: {
               type: "array",
+              description: "One row per project and endpoint, so an unscoped call lists a name two projects share twice.",
               items: {
                 type: "object",
                 properties: {
+                  project: {type: ["string", "null"]},
                   transaction_name: {type: ["string", "null"]},
                   n_plus_one_count: {type: "integer"},
                   total_count: {type: "integer"},
@@ -301,6 +321,29 @@ class SplatMcpServer
                   p95_duration: MS,
                   n_plus_one_time_ms: {type: "integer", description: "Total db ms spent inside the flagged patterns across the window; 0 when no span timing was recorded"},
                   avg_n_plus_one_time_ms: {type: ["number", "null"], description: "n_plus_one_time_ms / affected transactions"}
+                }
+              }
+            }
+          }
+        },
+
+        "get_host_breakdown" => {
+          type: "object",
+          properties: {
+            window: WINDOW_OUT,
+            bucket_seconds: {type: "integer"},
+            servers: {type: "array", items: {type: ["string", "null"]}},
+            rows: {
+              type: "array",
+              description: "Zero-filled: every host seen in the window has a row in every bucket, count 0 where it served nothing",
+              items: {
+                type: "object",
+                properties: {
+                  bucket_start: TIMESTAMP,
+                  server_name: {type: ["string", "null"]},
+                  count: {type: "integer"},
+                  avg_duration: MS,
+                  max_duration: MS
                 }
               }
             }
@@ -463,7 +506,11 @@ class SplatMcpServer
               type: "string",
               description: "Restrict every figure — percentiles, count and the top-endpoints list — to one environment (e.g. 'staging')."
             },
-            project: PROJECT_ARG
+            server_name: {
+              type: "string",
+              description: "Only requests served by this host (e.g. 'web01'). The hourly rollups don't record the host, so with this set every figure comes from raw transactions and the window defaults to, and is capped at, #{SplatMcpTools::HOST_SCAN_MAX_HOURS}h."
+            },
+            project: ENDPOINT_PROJECT_ARG
           }
         }
       },
@@ -505,7 +552,7 @@ class SplatMcpServer
               type: "string",
               description: "Filter by application version/release (optional)"
             },
-            project: PROJECT_ARG
+            project: ENDPOINT_PROJECT_ARG
           },
           required: ["endpoint"]
         }
@@ -555,6 +602,7 @@ class SplatMcpServer
               # the tool, which can explain itself better than a schema can.
               additionalProperties: {type: ["string", "integer", "number", "boolean"]}
             },
+            server_name: SERVER_NAME_ARG,
             project: PROJECT_ARG
           }
         }
@@ -601,6 +649,31 @@ class SplatMcpServer
         }
       },
       {
+        name: "get_host_breakdown",
+        description: "Request count, average and max duration per host (server_name) per time bucket, across every endpoint unless one is named. For spotting one server stalling or dropping out while the others pick up its load: hosts are columns, and a host with no requests in a bucket reads 0. Reads raw transactions (the hourly rollups don't record the host), so the window is capped at #{SplatMcpTools::HOST_SCAN_MAX_HOURS}h — put it around an incident with start_time/end_time.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            hours: integer_arg("Window duration in hours (default: 1, max: #{SplatMcpTools::HOST_SCAN_MAX_HOURS}). On its own it means the last N hours; with start_time or end_time it positions the window.", default: 1),
+            **WINDOW_ARGS,
+            bucket_minutes: integer_arg("Bucket width in minutes (default: about #{SplatMcpTools::HOST_BREAKDOWN_BUCKETS} buckets across the window; min: 1, max: 60). Widened if the window would need more than #{SplatMcpTools::HOST_BREAKDOWN_MAX_BUCKETS} buckets."),
+            server_name: {
+              type: "string",
+              description: "Only this host (e.g. 'web01')"
+            },
+            endpoint: {
+              type: "string",
+              description: "Only this endpoint, by exact name (e.g. 'ProductsController#index')"
+            },
+            environment: {
+              type: "string",
+              description: "Filter by environment (optional)"
+            },
+            project: PROJECT_ARG
+          }
+        }
+      },
+      {
         name: "get_endpoint_summary",
         description: "Get comprehensive statistics for a specific endpoint",
         inputSchema: {
@@ -620,7 +693,7 @@ class SplatMcpServer
               type: "string",
               description: "Filter by application version/release (optional)"
             },
-            project: PROJECT_ARG
+            project: ENDPOINT_PROJECT_ARG
           },
           required: ["endpoint"]
         }
@@ -646,6 +719,7 @@ class SplatMcpServer
               type: "string",
               description: "Filter by application version/release (optional)"
             },
+            server_name: SERVER_NAME_ARG,
             project: PROJECT_ARG
           },
           required: ["endpoint"]
@@ -683,7 +757,7 @@ class SplatMcpServer
               type: "string",
               description: "Filter by environment (optional)"
             },
-            project: PROJECT_ARG
+            project: ENDPOINT_PROJECT_ARG
           },
           required: ["endpoint"]
         }

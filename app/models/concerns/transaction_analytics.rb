@@ -97,14 +97,43 @@ module TransactionAnalytics
       }
     end
 
+    # Requests per project for one endpoint name in a window, { project_id =>
+    # count }. Same-named endpoints in different projects are different code,
+    # so a caller about to pool them asks this first. Neither release nor
+    # server_name is on the rollups, so either filter counts the raw rows it
+    # would select — the same bounded scan the caller is about to make.
+    #
+    # project_ids pins the leading column of index_transaction_hourly_stats_unique
+    # (one probe per project, not a table scan); the projects themselves live
+    # on the primary DB, so the caller supplies them rather than a join.
+    def endpoint_counts_by_project(name, time_range, project_ids:, environment: nil, release: nil, server_name: nil)
+      return {} if project_ids.empty?
+
+      if release.present? || server_name.present?
+        scope = where(transaction_name: name, timestamp: time_range)
+        scope = scope.where(environment: environment) if environment.present?
+        scope = scope.where(release: release) if release.present?
+        scope = scope.where(server_name: server_name) if server_name.present?
+        return scope.group(:project_id).count
+      end
+
+      where_sql, binds = hourly_filters(time_range: time_range, project_id: nil, environment: environment, transaction_name: name)
+      sql = "SELECT project_id, SUM(count) FROM transaction_hourly_stats " \
+            "WHERE project_id IN (?) AND #{where_sql} GROUP BY project_id HAVING SUM(count) > 0"
+      connection.select_rows(sanitize_sql_array([sql, project_ids, *binds])).to_h { |id, c| [id.to_i, c.to_i] }
+    end
+
     # Top endpoints in a window ranked by impact (avg_duration * count). All
     # scalar stats come from one grouped scan of transaction_hourly_stats; the
     # histogram-backed p50/p95/p99 are computed only for the returned top-N.
+    # Rows are per project and endpoint: unscoped, two projects' same-named
+    # endpoints rank (and get percentiles) separately rather than as one blend.
     def stats_by_endpoint_with_impact(time_range, project_id: nil, environment: nil, name_query: nil, limit: 20)
       ranked = hourly_stats_grouped(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query).map do |r|
         cnt = r["count"].to_i
         avg = cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt)
         {
+          "project_id" => r["project_id"].to_i,
           "transaction_name" => r["transaction_name"],
           "avg_duration" => avg.round(1),
           "count" => cnt,
@@ -118,9 +147,9 @@ module TransactionAnalytics
       ranked = ranked.first(limit) if limit
 
       pcts = endpoint_percentiles_by_name(
-        ranked.map { |r| r["transaction_name"] }, time_range, project_id: project_id, environment: environment
+        ranked.map { |r| r["transaction_name"] }.uniq, time_range, project_id: project_id, environment: environment
       )
-      ranked.each { |r| r.merge!(pcts[r["transaction_name"]] || {}) }
+      ranked.each { |r| r.merge!(pcts[[r["project_id"], r["transaction_name"]]] || {}) }
       ranked
     end
 
@@ -142,6 +171,7 @@ module TransactionAnalytics
         npo = r["n_plus_one_count"].to_i
         wasted = r["sum_n_plus_one_time"].to_i
         {
+          "project_id" => r["project_id"].to_i,
           "transaction_name" => r["transaction_name"],
           "n_plus_one_count" => npo,
           # count on the hourly row is total requests for the endpoint, so the
@@ -163,9 +193,9 @@ module TransactionAnalytics
       # from before the n_plus_one_time column (always 0) in a sane order.
 
       pcts = endpoint_percentiles_by_name(
-        ranked.map { |r| r["transaction_name"] }, time_range, project_id: project_id, environment: environment
+        ranked.map { |r| r["transaction_name"] }.uniq, time_range, project_id: project_id, environment: environment
       )
-      ranked.each { |r| r.merge!(pcts[r["transaction_name"]] || {}) }
+      ranked.each { |r| r.merge!(pcts[[r["project_id"], r["transaction_name"]]] || {}) }
       ranked
     end
 
@@ -175,7 +205,7 @@ module TransactionAnalytics
     # (say 12-19s) can never reach the page — which is exactly the shape of an
     # overload incident.
     def slow(time_range:, project_id: nil, threshold_ms: 1000, max_duration_ms: nil, environment: nil,
-      http_status: nil, http_method: nil, transaction_name: nil, release: nil, tags: nil, limit: 100)
+      http_status: nil, http_method: nil, transaction_name: nil, release: nil, server_name: nil, tags: nil, limit: 100)
       scope = where(timestamp: time_range).where("duration > ?", threshold_ms)
       scope = scope.where("duration <= ?", max_duration_ms) if max_duration_ms
       scope = scope.where(project_id: project_id) if project_id
@@ -183,6 +213,8 @@ module TransactionAnalytics
       scope = scope.where(release: release) if release.present?
       scope = scope.where(http_status: http_status) if http_status.present?
       scope = scope.where(http_method: http_method) if http_method.present?
+      # Unindexed, like http_method: it narrows the window's rows, never finds them.
+      scope = scope.where(server_name: server_name) if server_name.present?
       # endpoint is advertised as a case-insensitive substring match (LIKE is
       # case-insensitive for ASCII in SQLite), not exact equality.
       scope = scope.where("transaction_name LIKE ?", "%#{transaction_name}%") if transaction_name.present?
@@ -195,6 +227,72 @@ module TransactionAnalytics
         end
       end
       scope.order(duration: :desc).limit(limit).to_a
+    end
+
+    # ---- Raw-scan readers for a host filter. ----
+    #
+    # server_name isn't on either aggregate table (a row per host would
+    # multiply them by the fleet size), and it has no index on transactions,
+    # so these read every row in the window. Callers keep the window short
+    # (SplatMcpTools::HOST_SCAN_MAX_HOURS). Same shapes as their rollup-backed
+    # counterparts, and percentiles go through the same DDSketch reducer.
+
+    # Same keys as #percentiles.
+    def percentiles_raw(time_range, project_id: nil, environment: nil, server_name: nil, transaction_name: nil)
+      scope = raw_window_scope(time_range, project_id: project_id, environment: environment,
+        server_name: server_name, transaction_name: transaction_name)
+      cnt, sum, mx, mn = scope.pick(
+        Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"), Arel.sql("MIN(duration)")
+      )
+      counts = raw_index_counts(scope)
+      cnt = cnt.to_i
+      {
+        avg: cnt.zero? ? 0.0 : (sum.to_f / cnt).round(1),
+        max: mx.to_i,
+        min: mn.to_i,
+        count: cnt,
+        p50: Analytics::Histogram.percentile_from_counts(counts, 0.50),
+        p95: Analytics::Histogram.percentile_from_counts(counts, 0.95),
+        p99: Analytics::Histogram.percentile_from_counts(counts, 0.99)
+      }
+    end
+
+    # The fields of #stats_by_endpoint_with_impact the MCP reads, per project
+    # and endpoint, ranked by time spent.
+    def stats_by_endpoint_raw(time_range, project_id: nil, environment: nil, server_name: nil, limit: 20)
+      scope = raw_window_scope(time_range, project_id: project_id, environment: environment, server_name: server_name)
+      ranked = scope.group(:project_id, :transaction_name)
+        .pluck(:project_id, :transaction_name, Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"))
+        .map do |pid, name, cnt, sum, mx|
+          avg = sum.to_f / cnt
+          {"project_id" => pid, "transaction_name" => name, "count" => cnt, "avg_duration" => avg.round(1),
+           "max_duration" => mx.to_i, "time_spent" => (avg * cnt).round}
+        end
+        .sort_by { |r| -r["time_spent"] }.first(limit)
+      return ranked if ranked.empty?
+
+      dists = Hash.new { |h, k| h[k] = {} }
+      scope.where(transaction_name: ranked.map { |r| r["transaction_name"] }.uniq)
+        .group(:project_id, :transaction_name, Arel.sql(Analytics::Histogram.bucket_index_sql)).count
+        .each { |(pid, name, bi), c| dists[[pid, name]][bi.to_i] = c }
+      ranked.each do |r|
+        counts = dists[[r["project_id"], r["transaction_name"]]]
+        r["p50_duration"] = Analytics::Histogram.percentile_from_counts(counts, 0.50)
+        r["p95_duration"] = Analytics::Histogram.percentile_from_counts(counts, 0.95)
+        r["p99_duration"] = Analytics::Histogram.percentile_from_counts(counts, 0.99)
+      end
+    end
+
+    # Request count, average and max duration per host per time bucket, across
+    # every endpoint unless one is named: [[bucket_index, server_name, count,
+    # avg, max], ...], buckets counted from time_range.begin. Empty
+    # (bucket, host) pairs are absent — the caller zero-fills them.
+    def host_breakdown(time_range, bucket_seconds:, project_id: nil, environment: nil, server_name: nil, transaction_name: nil)
+      scope = raw_window_scope(time_range, project_id: project_id, environment: environment,
+        server_name: server_name, transaction_name: transaction_name)
+      tb = Arel.sql(Analytics::Histogram.time_bucket_sql(origin_epoch: time_range.begin.to_i, bucket_seconds: bucket_seconds))
+      scope.group(tb, :server_name)
+        .pluck(tb, :server_name, Arel.sql("COUNT(*)"), Arel.sql("AVG(duration)"), Arel.sql("MAX(duration)"))
     end
 
     # ---- Bucketed time series (for sparklines + charts). ----
@@ -291,18 +389,17 @@ module TransactionAnalytics
 
     private
 
-    # Histogram-backed p50/p95/p99 for many endpoints at once, keyed by name and
-    # shaped to match the dashboard/MCP consumers (p50_duration/p95_duration/
-    # p99_duration). Batches what used to be one merged_percentiles call per row
-    # (the EndpointsController#index N+1) into a single grouped query.
-    # Returns { name => { "p50_duration" =>, "p95_duration" =>, "p99_duration" => } }.
+    # Histogram-backed p50/p95/p99 for many endpoints at once, keyed by
+    # [project_id, name] and shaped to match the dashboard/MCP consumers
+    # (p50_duration/p95_duration/p99_duration). Batches what used to be one
+    # merged_percentiles call per row (the EndpointsController#index N+1) into a
+    # single grouped query.
+    # Returns { [project_id, name] => { "p50_duration" =>, "p95_duration" =>, "p99_duration" => } }.
     def endpoint_percentiles_by_name(names, time_range, project_id:, environment:)
-      by_name = merged_percentiles_by_name(
+      merged_percentiles_by_name(
         transaction_names: names, time_range: time_range, project_id: project_id, environment: environment
-      )
-      names.each_with_object({}) do |name, out|
-        pcts = by_name[name] || {}
-        out[name] = {
+      ).transform_values do |pcts|
+        {
           "p50_duration" => pcts[:p50],
           "p95_duration" => pcts[:p95],
           "p99_duration" => pcts[:p99]
@@ -327,7 +424,8 @@ module TransactionAnalytics
     def hourly_stats_grouped(time_range:, project_id: nil, environment: nil, name_query: nil)
       where_sql, binds = hourly_filters(time_range: time_range, project_id: project_id, environment: environment,
         name_query: name_query)
-      sql = "SELECT transaction_name, #{HOURLY_AGG} FROM transaction_hourly_stats WHERE #{where_sql} GROUP BY transaction_name"
+      sql = "SELECT project_id, transaction_name, #{HOURLY_AGG} FROM transaction_hourly_stats " \
+            "WHERE #{where_sql} GROUP BY project_id, transaction_name"
       connection.select_all(sanitize_sql_array([sql, *binds])).to_a
     end
 
@@ -370,6 +468,15 @@ module TransactionAnalytics
         binds << environment
       end
       [clauses.join(" AND "), binds]
+    end
+
+    def raw_window_scope(time_range, project_id:, environment:, server_name:, transaction_name: nil)
+      scope = where(timestamp: time_range)
+      scope = scope.where(project_id: project_id) if project_id
+      scope = scope.where(environment: environment) if environment.present?
+      scope = scope.where(server_name: server_name) if server_name.present?
+      scope = scope.where(transaction_name: transaction_name) if transaction_name.present?
+      scope
     end
 
     # Bounded raw fallback for a release-filtered endpoint summary (aggregates
@@ -605,13 +712,15 @@ module TransactionAnalytics
     end
 
     # Batched merged_percentiles: p50/p95/p99 for many endpoints in ONE query,
-    # grouped by transaction_name, instead of one CTE per endpoint. Same
-    # histogram + in-progress-hour (raw) union and same DDSketch bucket→ms
+    # grouped by project and transaction_name, instead of one CTE per endpoint.
+    # Same histogram + in-progress-hour (raw) union and same DDSketch bucket→ms
     # reconstruction as merged_percentiles; only the grouping and the per-name
     # percentile pick differ. Because the cumulative count is monotonic in
     # bucket_index within a name, MIN(bucket_index WHERE cum >= q*total) per name
     # is exactly the single-endpoint query's `... ORDER BY bucket_index LIMIT 1`.
-    # Returns { name => { p50:, p95:, p99: } } in ms (key absent when no data).
+    # Grouped by project too so an unscoped call never merges two projects'
+    # same-named endpoints into one distribution.
+    # Returns { [project_id, name] => { p50:, p95:, p99: } } in ms (key absent when no data).
     def merged_percentiles_by_name(transaction_names:, time_range:, project_id: nil, environment: nil)
       return {} if transaction_names.blank?
 
@@ -624,35 +733,35 @@ module TransactionAnalytics
 
       sql = <<~SQL
         WITH merged AS (
-          SELECT transaction_name AS name, bucket_index, SUM(count) AS c
+          SELECT project_id, transaction_name AS name, bucket_index, SUM(count) AS c
             FROM transaction_histograms
            WHERE hour_bucket >= ? AND hour_bucket < ?
              #{proj_filter}
              #{names_filter}
              #{env_filter}
-           GROUP BY 1, 2
+           GROUP BY 1, 2, 3
           UNION ALL
-          SELECT transaction_name AS name, #{bucket_sql} AS bucket_index, COUNT(*) AS c
+          SELECT project_id, transaction_name AS name, #{bucket_sql} AS bucket_index, COUNT(*) AS c
             FROM transactions
            WHERE timestamp >= ? AND timestamp < ?
              #{proj_filter}
              #{names_filter}
              #{env_filter}
-           GROUP BY 1, 2
+           GROUP BY 1, 2, 3
         ), reduced AS (
-          SELECT name, bucket_index, SUM(c) AS c FROM merged GROUP BY name, bucket_index
+          SELECT project_id, name, bucket_index, SUM(c) AS c FROM merged GROUP BY project_id, name, bucket_index
         ), running AS (
-          SELECT name, bucket_index,
-                 SUM(c) OVER (PARTITION BY name ORDER BY bucket_index) AS cum,
-                 SUM(c) OVER (PARTITION BY name) AS total
+          SELECT project_id, name, bucket_index,
+                 SUM(c) OVER (PARTITION BY project_id, name ORDER BY bucket_index) AS cum,
+                 SUM(c) OVER (PARTITION BY project_id, name) AS total
             FROM reduced
         )
-        SELECT name,
+        SELECT project_id, name,
                MIN(CASE WHEN cum >= 0.50 * total THEN bucket_index END),
                MIN(CASE WHEN cum >= 0.95 * total THEN bucket_index END),
                MIN(CASE WHEN cum >= 0.99 * total THEN bucket_index END)
           FROM running
-         GROUP BY name
+         GROUP BY project_id, name
       SQL
 
       raw_lower = [time_range.begin, until_hour].max
@@ -665,8 +774,8 @@ module TransactionAnalytics
       binds.concat(transaction_names)
       binds << environment if environment.present?
 
-      connection.select_rows(sanitize_sql_array([sql, *binds])).each_with_object({}) do |(name, p50, p95, p99), acc|
-        acc[name] = {
+      connection.select_rows(sanitize_sql_array([sql, *binds])).each_with_object({}) do |(pid, name, p50, p95, p99), acc|
+        acc[[pid.to_i, name]] = {
           p50: p50 && Analytics::Histogram.index_to_ms(p50.to_i),
           p95: p95 && Analytics::Histogram.index_to_ms(p95.to_i),
           p99: p99 && Analytics::Histogram.index_to_ms(p99.to_i)

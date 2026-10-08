@@ -180,6 +180,199 @@ module Mcp
       assert_in_delta 96.0, row["avg_n_plus_one_time_ms"], 0.1
     end
 
+    # ---- Same-named endpoints in different projects. ----
+    #
+    # Two Rails apps on one instance both have ProductsController#index, and
+    # the two share nothing but the convention. On splat-booko the unscoped
+    # summary reported p50 4ms for Booko's 137ms endpoint, because C2A2's
+    # five-times-larger, much faster traffic swamped it.
+
+    test "a single-endpoint tool refuses to pool an endpoint name two projects share" do
+      seed_shared_endpoint
+      at = (Time.current - 2.hours).beginning_of_hour
+
+      [
+        ["get_endpoint_summary", {}],
+        ["get_endpoint_timeseries", {}],
+        ["get_transaction_stats", {}],
+        ["compare_endpoint_performance",
+          {"before_timestamp" => (at + 1.minute).iso8601, "after_timestamp" => (at + 2.minutes).iso8601}]
+      ].each do |tool, extra|
+        call_tool(tool, {"endpoint" => "ProductsController#index"}.merge(extra))
+
+        message = tool_error
+        assert_match "project-one", message, "#{tool} should name the projects to choose from"
+        assert_match "project-two", message, "#{tool} should name the projects to choose from"
+      end
+    end
+
+    test "naming the project answers for that project alone" do
+      seed_shared_endpoint
+
+      call_tool("get_endpoint_summary", {"endpoint" => "ProductsController#index", "project" => "project-one"})
+
+      assert_equal false, JSON.parse(response.body).dig("result", "isError")
+      assert_match(/Total Requests:\*\* 3\b/, tool_text)
+    end
+
+    test "an endpoint name only one project has needs no project argument" do
+      seed_shared_endpoint
+      seed_txn(projects(:one), "BooksController#show", 120)
+
+      call_tool("get_endpoint_summary", {"endpoint" => "BooksController#show"})
+
+      assert_equal false, JSON.parse(response.body).dig("result", "isError")
+      assert_match(/Total Requests:\*\* 1\b/, tool_text)
+    end
+
+    # The rollups don't carry release, so the overlap has to be judged on the
+    # rows the release filter actually selects. A release string belongs to
+    # one app, so filtering by it already says which project is meant.
+    test "a release filter that only one project has settles which project is meant" do
+      seed_shared_endpoint
+      seed_txn(projects(:one), "ProductsController#index", 150, release: "booko-1.0")
+
+      call_tool("get_endpoint_summary", {"endpoint" => "ProductsController#index", "release" => "booko-1.0"})
+
+      assert_equal false, JSON.parse(response.body).dig("result", "isError")
+      assert_match(/Total Requests:\*\* 1\b/, tool_text)
+    end
+
+    test "get_transaction_stats lists a shared endpoint name once per project" do
+      seed_shared_endpoint
+
+      call_tool("get_transaction_stats", {})
+      assert_response :success
+
+      rows = tool_structured["top_endpoints"].select { |r| r["transaction_name"] == "ProductsController#index" }
+      assert_equal [["Project One", 3], ["Project Two", 10]], rows.map { |r| [r["project"], r["count"]] }.sort
+      one, two = rows.sort_by { |r| r["project"] }
+      assert_operator one["p95_duration"], :>, 100, "Project One's p95 must come from its own 150ms requests"
+      assert_operator two["p95_duration"], :<, 10, "Project Two's p95 must come from its own 4ms requests"
+
+      assert_match(/\| Project One \| ProductsController#index \|/, tool_text)
+      assert_match(/\| Project Two \| ProductsController#index \|/, tool_text)
+    end
+
+    test "find_n_plus_one_endpoints lists a shared endpoint name once per project" do
+      2.times { seed_txn(projects(:one), "BooksController#show", 500, query_count: 40, has_n_plus_one: true) }
+      5.times { seed_txn(projects(:two), "BooksController#show", 300, query_count: 30, has_n_plus_one: true) }
+
+      call_tool("find_n_plus_one_endpoints", {})
+      assert_response :success
+
+      rows = tool_structured["endpoints"].select { |r| r["transaction_name"] == "BooksController#show" }
+      assert_equal [["Project One", 2], ["Project Two", 5]], rows.map { |r| [r["project"], r["n_plus_one_count"]] }.sort
+      assert_match(/\| Project One \| BooksController#show \|/, tool_text)
+      assert_match(/\| Project Two \| BooksController#show \|/, tool_text)
+    end
+
+    # Neither the rollups nor the raw fallback compute a DB or view-time
+    # percentile — the histograms are of total duration only — so the summary
+    # used to print a p95 of 0ms under a real, non-zero average.
+    test "get_endpoint_summary doesn't report a DB or view p95 it never computed" do
+      3.times { seed_txn(projects(:one), "BooksController#show", 200, db_time: 80, view_time: 60) }
+
+      call_tool("get_endpoint_summary", {"endpoint" => "BooksController#show"})
+
+      assert_match(/Avg DB Time:\*\* 80ms/, tool_text)
+      assert_match(/Avg View Time:\*\* 60ms/, tool_text)
+      refute_match(/P95 (DB|View) Time:\*\* 0ms/, tool_text)
+    end
+
+    # ---- Per-host views. ----
+    #
+    # web01 stalled on splat-booko on 2026-10-08 (one worker OOM-killed) and no
+    # tool could say which slow requests were web01's, or show its throughput
+    # dropping while web02/web03 picked up the load. server_name is stored on
+    # every transaction; these tools now take it and show it.
+
+    test "search_slow_transactions narrows to one host and names the host on every row" do
+      2.times { seed_txn(projects(:one), "BooksController#show", 3000, server_name: "web01") }
+      seed_txn(projects(:one), "BooksController#show", 4000, server_name: "web02")
+
+      call_tool("search_slow_transactions", {})
+      assert_equal 2, tool_text.scan("Server: web01").size
+      assert_equal 1, tool_text.scan("Server: web02").size
+
+      call_tool("search_slow_transactions", {"server_name" => "web01"})
+      assert_match(/Found 2 transaction/, tool_text)
+      refute_match "web02", tool_text
+    end
+
+    test "get_transactions_by_endpoint narrows to one host" do
+      seed_txn(projects(:one), "BooksController#show", 100, server_name: "web01")
+      seed_txn(projects(:one), "BooksController#show", 100, server_name: "web02")
+
+      call_tool("get_transactions_by_endpoint", {"endpoint" => "BooksController#show", "server_name" => "web01"})
+
+      assert_match(/Showing:\*\* 1 transaction/, tool_text)
+      assert_match "**Server:** web01", tool_text
+      refute_match "web02", tool_text
+    end
+
+    test "get_transaction_stats for one host counts that host's requests alone" do
+      3.times { seed_txn(projects(:one), "BooksController#show", 3000, server_name: "web01") }
+      10.times { seed_txn(projects(:one), "BooksController#show", 50, server_name: "web02") }
+      seed_txn(projects(:one), "WorksController#show", 50, server_name: "web02")
+
+      call_tool("get_transaction_stats", {"server_name" => "web01", "time_range_hours" => 3})
+
+      assert_equal false, JSON.parse(response.body).dig("result", "isError"), tool_text
+      assert_equal 3, tool_structured["total_count"]
+      assert_operator tool_structured.dig("percentiles", "p50"), :>, 2000
+      assert_equal [["BooksController#show", 3]],
+        tool_structured["top_endpoints"].map { |r| [r["transaction_name"], r["count"]] }
+      assert_operator tool_structured["top_endpoints"].first["p95_duration"], :>, 2000
+      assert_match "**Server:** web01", tool_text
+    end
+
+    # The rollups don't carry server_name, so a host filter reads raw rows, and
+    # server_name has no index — only the window bounds the scan.
+    test "a host filter on get_transaction_stats caps the window" do
+      call_tool("get_transaction_stats", {"server_name" => "web01", "time_range_hours" => 48})
+      assert_match(/reduced to 6h/, tool_text)
+
+      call_tool("get_transaction_stats", {"server_name" => "web01",
+        "start_time" => 2.days.ago.iso8601, "end_time" => 1.day.ago.iso8601})
+      assert_match(/capped at 6h/, tool_error)
+    end
+
+    test "get_host_breakdown shows each host's count, avg and max per bucket, zeros included" do
+      base = (Time.current - 30.minutes).beginning_of_minute
+      [[base, "web01", 100], [base, "web01", 100], [base, "web01", 400],
+        [base, "web02", 50], [base + 1.minute, "web02", 70]].each do |at, host, ms|
+        Transaction.create!(project: projects(:one), transaction_id: SecureRandom.uuid,
+          transaction_name: "BooksController#show", timestamp: at + 5.seconds, duration: ms, server_name: host)
+      end
+
+      call_tool("get_host_breakdown", {
+        "start_time" => base.iso8601, "end_time" => (base + 2.minutes).iso8601, "bucket_minutes" => 1
+      })
+      assert_equal false, JSON.parse(response.body).dig("result", "isError"), tool_text
+
+      rows = tool_structured["rows"].index_by { |r| [r["bucket_start"], r["server_name"]] }
+      first, second = base.utc.iso8601, (base + 1.minute).utc.iso8601
+      assert_equal [3, 200.0, 400], rows[[first, "web01"]].values_at("count", "avg_duration", "max_duration")
+      assert_equal [1, 50.0, 50], rows[[first, "web02"]].values_at("count", "avg_duration", "max_duration")
+      # A host that served nothing in a bucket is the signal, not a gap.
+      assert_equal 0, rows[[second, "web01"]]["count"]
+      assert_equal 1, rows[[second, "web02"]]["count"]
+
+      assert_match(/\| Bucket start \| web01 \| web02 \|/, tool_text)
+    end
+
+    test "get_host_breakdown narrows to one host and caps the window" do
+      seed_txn(projects(:one), "BooksController#show", 100, server_name: "web01")
+      seed_txn(projects(:one), "BooksController#show", 100, server_name: "web02")
+
+      call_tool("get_host_breakdown", {"server_name" => "web01", "hours" => 3})
+      assert_equal ["web01"], tool_structured["rows"].map { |r| r["server_name"] }.uniq
+
+      call_tool("get_host_breakdown", {"hours" => 48})
+      assert_match(/reduced to 6h/, tool_text)
+    end
+
     test "get_status reports version, storage, and compression from the snapshot" do
       fake = {
         total: 700_000_000,
@@ -436,6 +629,16 @@ module Mcp
       assert_match "historical line", tool_text
       refute_match(/last 6h/, tool_text, "an absolute window mislabelled as recent is worse than useless")
       assert_match(at.utc.strftime("%Y-%m-%d"), tool_text)
+    end
+
+    # A host breakdown around an incident is minutes long; rounding it to whole
+    # hours labelled it "(0h)".
+    test "a window shorter than an hour is labelled in minutes" do
+      start = 3.hours.ago.beginning_of_minute
+      call_tool("get_host_breakdown", {"start_time" => start.iso8601, "end_time" => (start + 26.minutes).iso8601})
+
+      assert_match(/\(26m\)/, tool_text)
+      refute_match(/\(0h\)/, tool_text)
     end
 
     test "search_slow_transactions rejects invalid tag key without hitting Transaction.slow" do
@@ -1032,6 +1235,19 @@ module Mcp
     def seed_log_in(project, body)
       Log.create!(project_id: project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
         level: :error, source: "sentry", body: body, payload: {})
+    end
+
+    # Into a completed past hour, so the readers serve it from the rollups.
+    def seed_txn(project, name, duration, **attrs)
+      Transaction.create!(project: project, transaction_id: SecureRandom.uuid, transaction_name: name,
+        timestamp: (Time.current - 2.hours).beginning_of_hour, duration: duration, **attrs)
+    end
+
+    # The splat-booko shape: one endpoint name, a little slow traffic in one
+    # project and a lot of fast traffic in the other.
+    def seed_shared_endpoint
+      3.times { seed_txn(projects(:one), "ProductsController#index", 150) }
+      10.times { seed_txn(projects(:two), "ProductsController#index", 4) }
     end
 
     def seed_issue_in(project, exception_type)

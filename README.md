@@ -808,13 +808,26 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 **Performance Monitoring:**
 - `get_transaction_stats` - Overall percentiles plus top endpoints ranked by total time spent (avg × count)
-- `get_endpoint_summary` - Per-endpoint percentiles (overall + DB + view) with fastest/slowest sample requests
+- `get_endpoint_summary` - Per-endpoint percentiles, average DB and view time, and fastest/slowest sample requests
 - `get_endpoint_timeseries` - Bucketed count + p50/p95/p99 for one endpoint over a time range — built for spotting regressions ("did p95 jump after the 14:00 deploy?")
 - `find_n_plus_one_endpoints` - Endpoints ranked by N+1 prevalence (% of transactions affected, avg/max queries per request) so you find the worst offenders quickly
-- `search_slow_transactions` - Find slow individual requests
+- `search_slow_transactions` - Find slow individual requests, each with its host
 - `get_transactions_by_endpoint` - List recent transactions for one endpoint
+- `get_host_breakdown` - Requests, avg and max duration per host per time bucket — for spotting one server stalling while the others pick up its load (raw data, so capped at 6h)
 - `compare_endpoint_performance` - Before/after percentile comparison around a release or timestamp
 - `get_transaction` - Get detailed transaction breakdown
+
+The tools that summarise one endpoint's timings (`get_endpoint_summary`,
+`get_endpoint_timeseries`, `compare_endpoint_performance`, and
+`get_transaction_stats` with an `endpoint`) need a `project` whenever the
+endpoint name has requests in more than one project. Two apps'
+`ProductsController#index` are different code, so they won't be pooled.
+Called without one, the tool replies with the projects to choose from.
+
+`search_slow_transactions`, `get_transactions_by_endpoint` and
+`get_transaction_stats` take a `server_name` to narrow to one host. It isn't
+indexed and the hourly rollups don't carry it, so `get_transaction_stats`
+reads raw transactions when it's set and caps its window at 6h.
 
 **Logs:**
 - `search_logs` - Search structured logs by level, logger, trace, environment, or message text

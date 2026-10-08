@@ -27,10 +27,11 @@ class SplatMcpTools
     end
   end
 
-  # Raised when the caller names a project that doesn't exist, or names one
-  # ambiguously. Surfaced to the agent as a tool error (isError: true) rather
+  # Raised when the caller names a project that doesn't exist, names one
+  # ambiguously, or leaves out one the call needs (require_single_project!).
+  # Surfaced to the agent as a tool error (isError: true) rather
   # than a JSON-RPC error, so it can read the message and correct the argument
-  # itself. The message is composed at the raise site, since the two cases call
+  # itself. The message is composed at the raise site, since each case calls
   # for different advice.
   class ProjectResolutionError < StandardError; end
 
@@ -94,6 +95,36 @@ class SplatMcpTools
 
   def max_hours(source)
     Setting.instance.public_send(RETENTION_SOURCE.fetch(source)) * 24
+  end
+
+  # A host view can't come from the rollups — they don't carry server_name —
+  # and server_name has no index on transactions, so it reads every raw row in
+  # its window. The window is the only bound on that scan, so it gets a ceiling
+  # of its own, far below retention: enough to frame an incident.
+  HOST_SCAN_MAX_HOURS = 6
+
+  # resolve_window under the host-scan ceiling. A duration over it is reduced
+  # with a note, as retention does; an explicit start/end pair is refused
+  # instead, since shrinking it would move one of the bounds the caller set.
+  def resolve_host_window(args, hours_key, default:)
+    note = nil
+    absolute = args["start_time"].present? && args["end_time"].present?
+    requested = args[hours_key]&.to_i || default
+    if !absolute && requested > HOST_SCAN_MAX_HOURS
+      note = "_Requested #{requested}h; a per-host view reads raw transactions, so it is capped at " \
+        "#{HOST_SCAN_MAX_HOURS}h and the duration was reduced to #{HOST_SCAN_MAX_HOURS}h._\n\n"
+      args = args.merge(hours_key => HOST_SCAN_MAX_HOURS)
+    end
+
+    time_range, window_note = resolve_window(args, hours_key, :transactions, default: default)
+    hours = (time_range.end - time_range.begin) / 3600.0
+    if hours > HOST_SCAN_MAX_HOURS
+      raise WindowError,
+        "A per-host view reads raw transactions, so its window is capped at #{HOST_SCAN_MAX_HOURS}h; " \
+        "this one is #{hours.round(1)}h. Narrow start_time/end_time."
+    end
+
+    [time_range, "#{note}#{window_note}".presence]
   end
 
   # Resolve a tool's time window, and clamp it to what retention still holds.
@@ -165,11 +196,14 @@ class SplatMcpTools
   def window_label(time_range)
     return nil unless time_range
 
-    hours = ((time_range.end - time_range.begin) / 3600.0).round
+    # Minutes under an hour: a host breakdown framing an incident is often
+    # 20-30 minutes long, and rounding that to hours printed "0h".
+    seconds = time_range.end - time_range.begin
+    span = (seconds < 3600) ? "#{(seconds / 60.0).round}m" : "#{(seconds / 3600.0).round}h"
     if (Time.current - time_range.end) < 120
-      "last #{hours}h"
+      "last #{span}"
     else
-      "#{time_range.begin.utc.strftime("%Y-%m-%d %H:%M")}Z → #{time_range.end.utc.strftime("%Y-%m-%d %H:%M")}Z (#{hours}h)"
+      "#{time_range.begin.utc.strftime("%Y-%m-%d %H:%M")}Z → #{time_range.end.utc.strftime("%Y-%m-%d %H:%M")}Z (#{span})"
     end
   end
 
@@ -572,17 +606,30 @@ class SplatMcpTools
   def get_transaction_stats(args)
     endpoint = args["endpoint"]
     environment = args["environment"].presence
-    time_range, window_note = resolve_window(args, "time_range_hours", :rollup)
+    server_name = args["server_name"].presence
+    time_range, window_note =
+      if server_name
+        resolve_host_window(args, "time_range_hours", default: HOST_SCAN_MAX_HOURS)
+      else
+        resolve_window(args, "time_range_hours", :rollup)
+      end
     limit = (args["limit"]&.to_i || 10).clamp(1, 50)
 
     project_id = resolve_project_id(args)
+    require_single_project!(endpoint, project_id, [[time_range, nil]], environment: environment, server_name: server_name)
 
     # total_count comes from the same hourly rollups as the percentiles, not
     # from a COUNT over raw transactions. Raw rows and rollups have separate
     # retention windows (transactions_data_retention_days vs
     # histograms_retention_days), so counting raw rows reported a count and a
     # p95 describing different populations once the shorter window elapsed.
-    if endpoint.present?
+    # A host filter can't use the rollups at all, so both figures come from
+    # the same raw rows instead.
+    if server_name
+      percentiles = Transaction.percentiles_raw(time_range, project_id: project_id, environment: environment,
+        server_name: server_name, transaction_name: endpoint.presence)
+      total_count = percentiles[:count]
+    elsif endpoint.present?
       ep_stats = Transaction.percentiles_for_endpoint(endpoint, time_range, project_id: project_id, environment: environment)
       percentiles = {
         avg: ep_stats["avg_duration"]&.to_f || 0,
@@ -598,18 +645,28 @@ class SplatMcpTools
       total_count = percentiles[:count].to_i
     end
 
-    top_endpoints = Transaction.stats_by_endpoint_with_impact(time_range, project_id: project_id, environment: environment, limit: limit)
+    top_endpoints =
+      if server_name
+        Transaction.stats_by_endpoint_raw(time_range, project_id: project_id, environment: environment,
+          server_name: server_name, limit: limit)
+      else
+        Transaction.stats_by_endpoint_with_impact(time_range, project_id: project_id, environment: environment, limit: limit)
+      end
+    project_names = project_names_for(top_endpoints)
 
-    text = format_transaction_stats(percentiles, top_endpoints, total_count, window_label(time_range), endpoint)
+    text = format_transaction_stats(percentiles, top_endpoints, total_count, window_label(time_range), endpoint,
+      project_names: (project_names unless project_id), server_name: server_name)
 
     structured = {
       window: window_out(time_range),
       endpoint: endpoint.presence,
       environment: environment,
+      server_name: server_name,
       total_count: total_count,
       percentiles: percentiles.slice(:avg, :p50, :p95, :p99, :min, :max).transform_values { |v| v&.to_f },
       top_endpoints: top_endpoints.map do |row|
         {
+          project: project_names[row["project_id"]],
           transaction_name: row["transaction_name"],
           time_spent: row["time_spent"]&.to_f,
           avg_duration: row["avg_duration"]&.to_f,
@@ -631,6 +688,7 @@ class SplatMcpTools
     http_method = args["http_method"]
     environment = args["environment"]
     release = args["release"]
+    server_name = args["server_name"]
     time_range, window_note = resolve_window(args, "time_range_hours", :transactions)
     limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
@@ -652,6 +710,7 @@ class SplatMcpTools
       http_method: http_method,
       environment: environment,
       release: release,
+      server_name: server_name,
       tags: tags,
       limit: limit
     )
@@ -738,6 +797,36 @@ class SplatMcpTools
     Project.ids
   end
 
+  # Same-named endpoints in different projects are different code — two Rails
+  # apps' ProductsController#index share nothing but the convention — so
+  # pooling their timings answers about neither. On splat-booko the unscoped
+  # summary gave Booko's 137ms endpoint a p50 of 4ms, because another app's
+  # busier, faster endpoint of the same name swamped it. So when the caller
+  # hasn't named a project and the window holds the endpoint in more than one,
+  # refuse and list them, the way an ambiguous project name is refused.
+  #
+  # arms: a [time_range, release] pair per window the tool reads —
+  # compare_endpoint_performance reads two.
+  def require_single_project!(endpoint, project_id, arms, environment: nil, server_name: nil)
+    return if project_id || endpoint.blank?
+
+    ids = every_project_id
+    counts = arms.map { |range, release|
+      Transaction.endpoint_counts_by_project(
+        endpoint, range, project_ids: ids, environment: environment.presence, release: release.presence,
+        server_name: server_name.presence
+      )
+    }.reduce { |a, b| a.merge(b) { |_, x, y| x + y } }
+    return if counts.size < 2
+
+    slugs = Project.where(id: counts.keys).pluck(:id, :slug).to_h
+    listing = counts.sort_by { |_, c| -c }.map { |id, c| "#{slugs[id]} (#{c} requests)" }.join(", ")
+    raise ProjectResolutionError,
+      "#{endpoint} has requests in #{counts.size} projects in this window: #{listing}. " \
+      "Same-named endpoints in different projects are different code, so their timings aren't pooled. " \
+      "Pass project with one of these slugs."
+  end
+
   def get_endpoint_summary(args)
     endpoint = args["endpoint"]
     environment = args["environment"]
@@ -746,6 +835,7 @@ class SplatMcpTools
     # the window can only reach as far back as raw transactions survive.
     time_range, window_note = resolve_window(args, "hours", release.present? ? :transactions : :rollup)
     project_id = resolve_project_id(args)
+    require_single_project!(endpoint, project_id, [[time_range, release]], environment: environment)
 
     stats = Transaction.percentiles_for_endpoint(
       endpoint, time_range, project_id: project_id, environment: environment, release: release
@@ -761,14 +851,11 @@ class SplatMcpTools
       min: stats["min_duration"]&.to_f || 0,
       max: stats["max_duration"]&.to_f || 0
     }
-    db_percentiles =
-      if stats["avg_db_time"]
-        {avg: stats["avg_db_time"].to_f, p95: stats["p95_db_time"]&.to_f || 0}
-      end
-    view_percentiles =
-      if stats["avg_view_time"]
-        {avg: stats["avg_view_time"].to_f, p95: stats["p95_view_time"]&.to_f || 0}
-      end
+    # Averages only. The histograms are of total duration, so neither the
+    # rollups nor the raw fallback has a DB or view-time percentile to give —
+    # this used to print a p95 of 0ms under a real average.
+    db_percentiles = {avg: stats["avg_db_time"].to_f} if stats["avg_db_time"]
+    view_percentiles = {avg: stats["avg_view_time"].to_f} if stats["avg_view_time"]
 
     slowest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :desc, project_id)
     fastest_request = endpoint_extreme_row(endpoint, time_range, environment, release, :asc, project_id)
@@ -792,17 +879,21 @@ class SplatMcpTools
     environment = args["environment"]
     limit = (args["limit"]&.to_i || 20).clamp(1, 100)
 
+    project_id = resolve_project_id(args)
     rows = Transaction.endpoints_by_n_plus_one(
-      time_range, project_id: resolve_project_id(args), environment: environment, limit: limit
+      time_range, project_id: project_id, environment: environment, limit: limit
     )
+    project_names = project_names_for(rows)
 
-    text = format_n_plus_one_endpoints(rows, window_label(time_range), environment)
+    text = format_n_plus_one_endpoints(rows, window_label(time_range), environment,
+      project_names: (project_names unless project_id))
 
     structured = {
       window: window_out(time_range),
       environment: environment,
       endpoints: rows.map do |r|
         {
+          project: project_names[r["project_id"]],
           transaction_name: r["transaction_name"],
           n_plus_one_count: r["n_plus_one_count"].to_i,
           total_count: r["total_count"].to_i,
@@ -826,9 +917,11 @@ class SplatMcpTools
     release = args["release"]
     time_range, window_note = resolve_window(args, "hours", release.present? ? :transactions : :rollup)
     requested_buckets = (args["buckets"]&.to_i || 24).clamp(4, 168)
+    project_id = resolve_project_id(args)
+    require_single_project!(endpoint, project_id, [[time_range, release]], environment: environment)
 
     series = Transaction.time_series_for_endpoint(
-      endpoint, time_range, project_id: resolve_project_id(args),
+      endpoint, time_range, project_id: project_id,
       bucket_count: requested_buckets, environment: environment, release: release
     )
     # Ask the same helper the reader used rather than re-dividing hours by
@@ -865,6 +958,59 @@ class SplatMcpTools
     render_text("#{window_note}#{text}", structured: structured)
   end
 
+  # Bucket counts for get_host_breakdown: about this many by default, and
+  # never more than the ceiling — 6h of 1-minute buckets is 360 table rows.
+  HOST_BREAKDOWN_BUCKETS = 30
+  HOST_BREAKDOWN_MAX_BUCKETS = 120
+
+  # Requests, average and max duration per host per bucket. Written for the
+  # web01 stall of 2026-10-08: the host's count fell from ~70/min to 0 while
+  # web02 and web03 climbed past 100, which only a per-host, per-minute table
+  # shows. Hosts are columns and a host with nothing in a bucket reads 0, not
+  # a gap — the zero is usually the finding.
+  def get_host_breakdown(args)
+    time_range, window_note = resolve_host_window(args, "hours", default: 1)
+    project_id = resolve_project_id(args)
+    environment = args["environment"].presence
+    server_name = args["server_name"].presence
+    endpoint = args["endpoint"].presence
+
+    window_minutes = ((time_range.end - time_range.begin) / 60.0).ceil
+    floor_minutes = (window_minutes / HOST_BREAKDOWN_MAX_BUCKETS.to_f).ceil
+    requested = args["bucket_minutes"]&.to_i
+    bucket_minutes = (requested || (window_minutes / HOST_BREAKDOWN_BUCKETS.to_f).ceil).clamp(1, 60)
+    if bucket_minutes < floor_minutes
+      window_note = "#{window_note}_Requested #{bucket_minutes}m buckets; widened to #{floor_minutes}m to stay within #{HOST_BREAKDOWN_MAX_BUCKETS} buckets._\n\n"
+      bucket_minutes = floor_minutes
+    end
+    bucket_seconds = bucket_minutes * 60
+    buckets = (window_minutes / bucket_minutes.to_f).ceil
+
+    cells = Transaction.host_breakdown(
+      time_range, bucket_seconds: bucket_seconds, project_id: project_id, environment: environment,
+      server_name: server_name, transaction_name: endpoint
+    ).each_with_object({}) do |(b, host, count, avg, max), acc|
+      next if b.to_i.negative? || b.to_i >= buckets
+      acc[[b.to_i, host]] = {count: count.to_i, avg: avg.to_f.round(1), max: max.to_f}
+    end
+    hosts = cells.keys.map(&:last).uniq.sort_by(&:to_s)
+
+    rows = (0...buckets).flat_map do |b|
+      bucket_start = (time_range.begin + (b * bucket_seconds)).utc.iso8601
+      hosts.map do |host|
+        cell = cells[[b, host]]
+        {bucket_start: bucket_start, server_name: host, count: cell ? cell[:count] : 0,
+         avg_duration: cell&.dig(:avg), max_duration: cell&.dig(:max)}
+      end
+    end
+
+    text = format_host_breakdown(cells, hosts, buckets, bucket_seconds, time_range,
+      environment: environment, server_name: server_name, endpoint: endpoint)
+    structured = {window: window_out(time_range), bucket_seconds: bucket_seconds, servers: hosts, rows: rows}
+
+    render_text("#{window_note}#{text}", structured: structured)
+  end
+
   def endpoint_extreme_row(endpoint, time_range, environment, release, direction, project_id = nil)
     scope = Transaction.where(transaction_name: endpoint, timestamp: time_range)
     scope = scope.where(project_id: project_id) if project_id
@@ -896,8 +1042,10 @@ class SplatMcpTools
     transactions = transactions.where(project_id: project_id) if project_id
     transactions = transactions.where(environment: environment) if environment.present?
     transactions = transactions.where(release: release) if release.present?
+    transactions = transactions.where(server_name: args["server_name"]) if args["server_name"].present?
 
-    text = format_transactions_by_endpoint(transactions, endpoint, window_label(time_range), environment, release)
+    text = format_transactions_by_endpoint(transactions, endpoint, window_label(time_range), environment, release,
+      server_name: args["server_name"])
 
     render_text("#{window_note}#{text}")
   end
@@ -918,6 +1066,9 @@ class SplatMcpTools
     # Validate input - either release-based or timestamp-based comparison
     if before_release.present? && after_release.present?
       # Version-based comparison
+      require_single_project!(endpoint, project_id,
+        [[hours_before.hours.ago..Time.current, before_release], [hours_after.hours.ago..Time.current, after_release]],
+        environment: environment)
       before_transactions = get_transactions_by_filters(endpoint, hours_before, environment, before_release, project_id)
       after_transactions = get_transactions_by_filters(endpoint, hours_after, environment, after_release, project_id)
       comparison_type = "version"
@@ -927,6 +1078,9 @@ class SplatMcpTools
       # Timestamp-based comparison
       before_time = Time.parse(before_timestamp)
       after_time = Time.parse(after_timestamp)
+      require_single_project!(endpoint, project_id,
+        [[(before_time - hours_before.hours)..before_time, nil], [after_time..(after_time + hours_after.hours), nil]],
+        environment: environment)
 
       before_transactions = get_transactions_by_time_range(endpoint, before_time - hours_before.hours, before_time, environment, project_id)
       after_transactions = get_transactions_by_time_range(endpoint, after_time, after_time + hours_after.hours, environment, project_id)
@@ -1052,6 +1206,11 @@ class SplatMcpTools
       end
     end
     result
+  end
+
+  # { project_id => name } for rows carrying a project_id.
+  def project_names_for(rows)
+    Project.where(id: rows.map { |r| r["project_id"] }.uniq).pluck(:id, :name).to_h
   end
 
   # Every tool returns through one of these two. Both produce a successful
@@ -1290,9 +1449,12 @@ class SplatMcpTools
     result
   end
 
-  def format_transaction_stats(percentiles, top_endpoints, total_count, window, endpoint = nil)
+  # project_names is passed only for an unscoped call, where rows from
+  # different projects can share an endpoint name and need telling apart.
+  def format_transaction_stats(percentiles, top_endpoints, total_count, window, endpoint = nil, project_names: nil, server_name: nil)
     result = "## Transaction Performance Statistics\n\n"
     result += "**Endpoint:** #{endpoint}\n" if endpoint.present?
+    result += "**Server:** #{server_name}\n" if server_name.present?
     result += "**Time Range:** #{window}\n"
     result += "**Total Transactions:** #{total_count}\n\n"
 
@@ -1312,9 +1474,10 @@ class SplatMcpTools
 
     if top_endpoints.any?
       result += "### Top Endpoints by Impact (avg × count)\n\n"
-      result += "| Endpoint | Time Spent | Avg | P95 | Count |\n"
-      result += "|---|---:|---:|---:|---:|\n"
+      result += "| #{"Project | " if project_names}Endpoint | Time Spent | Avg | P95 | Count |\n"
+      result += "|#{"---|" if project_names}---|---:|---:|---:|---:|\n"
       top_endpoints.each do |row|
+        result += "| #{project_names[row["project_id"]]} " if project_names
         result += "| #{row["transaction_name"]} " \
                  "| #{format_ms(row["time_spent"])} " \
                  "| #{format_ms(row["avg_duration"])} " \
@@ -1341,6 +1504,7 @@ class SplatMcpTools
       result += "  - Timestamp: #{txn["timestamp"].strftime("%Y-%m-%d %H:%M:%S")}\n"
       result += "  - HTTP: #{txn["http_method"]} #{txn["http_status"]}\n" if txn["http_method"] || txn["http_status"]
       result += "  - Environment: #{txn["environment"]}\n" if txn["environment"]
+      result += "  - Server: #{txn["server_name"]}\n" if txn["server_name"]
       result += "  - Project: #{txn["project_name"]}\n\n" if txn["project_name"]
     end
 
@@ -1545,15 +1709,13 @@ class SplatMcpTools
     # Database performance
     if db_percentiles&.any?
       result += "### Database Performance\n\n"
-      result += "- **Avg DB Time:** #{db_percentiles[:avg]&.round}ms\n"
-      result += "- **P95 DB Time:** #{db_percentiles[:p95]&.round}ms\n\n"
+      result += "- **Avg DB Time:** #{db_percentiles[:avg]&.round}ms\n\n"
     end
 
     # View performance
     if view_percentiles&.any?
       result += "### View Rendering Performance\n\n"
-      result += "- **Avg View Time:** #{view_percentiles[:avg]&.round}ms\n"
-      result += "- **P95 View Time:** #{view_percentiles[:p95]&.round}ms\n\n"
+      result += "- **Avg View Time:** #{view_percentiles[:avg]&.round}ms\n\n"
     end
 
     # Extreme examples
@@ -1575,7 +1737,8 @@ class SplatMcpTools
     result
   end
 
-  def format_n_plus_one_endpoints(rows, window, environment)
+  # project_names as for format_transaction_stats.
+  def format_n_plus_one_endpoints(rows, window, environment, project_names: nil)
     header = "## Endpoints with N+1 Query Issues\n\n"
     header += "**Time Range:** #{window}\n"
     header += "**Environment:** #{environment}\n" if environment.present?
@@ -1585,10 +1748,11 @@ class SplatMcpTools
       return header + "No N+1 patterns detected in this window.\n"
     end
 
-    header += "| Endpoint | N+1 / Total | % Affected | Avg Queries | Max Queries | Wasted | Wasted/req | Avg | P95 |\n"
-    header += "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
+    header += "| #{"Project | " if project_names}Endpoint | N+1 / Total | % Affected | Avg Queries | Max Queries | Wasted | Wasted/req | Avg | P95 |\n"
+    header += "|#{"---|" if project_names}---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
     rows.each do |r|
       wasted = r["n_plus_one_time"].to_i
+      header += "| #{project_names[r["project_id"]]} " if project_names
       header += "| #{r["transaction_name"]} " \
                "| #{r["n_plus_one_count"]} / #{r["total_count"]} " \
                "| #{r["n_plus_one_pct"]}% " \
@@ -1638,15 +1802,38 @@ class SplatMcpTools
     header
   end
 
+  def format_host_breakdown(cells, hosts, buckets, bucket_seconds, time_range, environment:, server_name:, endpoint:)
+    header = "## Requests per Host\n\n"
+    header += "**Time Range:** #{window_label(time_range)}\n"
+    header += "**Buckets:** #{buckets} × #{bucket_seconds / 60}m\n"
+    header += "**Endpoint:** #{endpoint}\n" if endpoint
+    header += "**Environment:** #{environment}\n" if environment
+    header += "**Server:** #{server_name}\n" if server_name
+    header += "\n"
+    return header + "No requests in this window.\n" if hosts.empty?
+
+    header += "Each cell is requests / avg / max. A 0 is a host that served nothing in that bucket.\n\n"
+    header += "| Bucket start | #{hosts.map { |h| h || "(none)" }.join(" | ")} |\n"
+    header += "|---|#{"---:|" * hosts.size}\n"
+    buckets.times do |b|
+      row = hosts.map do |host|
+        cell = cells[[b, host]]
+        cell ? "#{cell[:count]} / #{format_ms(cell[:avg])} / #{format_ms(cell[:max])}" : "0"
+      end
+      header += "| #{(time_range.begin + (b * bucket_seconds)).utc.strftime("%Y-%m-%d %H:%M")} | #{row.join(" | ")} |\n"
+    end
+    header
+  end
+
   def format_ms(value)
     return "—" if value.nil?
     "#{value.to_f.round}ms"
   end
 
-  def format_transactions_by_endpoint(transactions, endpoint, window, environment, release)
+  def format_transactions_by_endpoint(transactions, endpoint, window, environment, release, server_name: nil)
     if transactions.empty?
       result = "No transactions found for endpoint '#{endpoint}'"
-      result += " with the specified filters." if environment.present? || release.present?
+      result += " with the specified filters." if environment.present? || release.present? || server_name.present?
       return result
     end
 
@@ -1655,6 +1842,7 @@ class SplatMcpTools
     result += "**Time Range:** #{window}\n"
     result += "**Environment:** #{environment}\n" if environment.present?
     result += "**Release:** #{release}\n" if release.present?
+    result += "**Server:** #{server_name}\n" if server_name.present?
     result += "\n"
 
     transactions.each_with_index do |txn, index|
