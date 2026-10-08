@@ -11,6 +11,62 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.19.0 — 2026-10-08
+
+Two MCP answers were about the wrong traffic. Endpoint stats blended
+two projects' same-named endpoints, and nothing could separate one host's
+requests from another's. This keeps both apart, and stops `get_transaction`
+timing out on a request that threw no errors.
+
+### Added
+
+- **Per-host views in MCP.** When web01 stalled on 2026-10-08 (one worker
+  was OOM-killed), no tool could say which slow requests were web01's, or
+  show web01's throughput falling while web02 and web03 took its load. That
+  took a hand-written query against production. Now:
+  - `search_slow_transactions`, `get_transactions_by_endpoint` and
+    `get_transaction_stats` take a `server_name` filter, and every slow
+    transaction shows its host.
+  - The new `get_host_breakdown` tool gives requests, average and max
+    duration per host per time bucket, with hosts as columns. A host that
+    served nothing in a bucket shows 0 rather than a gap.
+
+  `server_name` isn't on the hourly rollups and has no index, so
+  `get_host_breakdown` and a host-filtered `get_transaction_stats` read raw
+  transactions. Their window is capped at 6h.
+
+### Fixed
+
+- **MCP endpoint stats no longer blend two projects' same-named endpoints.**
+  Without a `project` argument, the endpoint tools matched on the endpoint
+  name alone. Booko and C2A2 both have `ProductsController#index`, so
+  `get_endpoint_summary` gave Booko's 137ms endpoint a p50 of 4ms, because
+  C2A2's busier, faster traffic made up most of the pool. Nothing in the
+  output said so. `get_endpoint_summary`, `get_endpoint_timeseries`,
+  `compare_endpoint_performance` and `get_transaction_stats` with an
+  `endpoint` now refuse when the name has requests in more than one project
+  in the window, and list the projects with their request counts so the
+  caller can pick one. The top-endpoints list in `get_transaction_stats` and
+  the `find_n_plus_one_endpoints` worklist now have one row per project and
+  endpoint, labelled with the project in both the markdown and
+  `structuredContent`. The web UI was never affected: every page is scoped
+  to one project.
+- **`get_transaction` no longer times out looking for a request's errors.**
+  On splat-booko, `get_transaction(transaction_id: "62475681")` timed out
+  twice in a row. Finding the transaction was a primary-key lookup and was
+  fine. The stall was the lookup after it, for the errors thrown during the
+  request: its `ORDER BY timestamp` led SQLite to walk Booko's events
+  newest-first along `[project_id, timestamp]`, looking for the trace. For a
+  request that threw nothing, which is most of them, that meant reading every
+  event the project has. The errors are now found through the
+  `[project_id, trace_id]` index and sorted in Ruby. The web UI's
+  transaction page used the same lookup and is fixed too.
+- **Windows under an hour are labelled in minutes**, not as `0h`.
+- **`get_endpoint_summary` no longer reports a DB or view-time p95 of 0ms.**
+  The histograms only record total duration, so there was never a p95 for
+  DB or view time to report, and the lines always printed `0ms` under a real
+  average. They're gone; the averages stay.
+
 ## 1.18.3 — 2026-09-30
 
 One MCP call froze the whole instance for three minutes. This fixes the
