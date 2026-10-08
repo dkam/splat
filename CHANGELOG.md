@@ -11,6 +11,31 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.19.1 — 2026-10-08
+
+More numbers that described the wrong traffic, or none at all. An empty
+window read as 0ms, unfiltered overall stats still pooled every project, and
+the new per-host view mixed projects on a shared host.
+
+### Fixed
+
+- **No more 0ms for a window with no requests.** `get_transaction_stats`
+  with an endpoint filled missing figures with 0. An endpoint with no
+  requests, including a misspelt name, came back with every percentile at
+  0ms, which made it look like the fastest endpoint in the app. The figures
+  are now empty and the markdown says no transactions were found. The web UI
+  had the same habit: the endpoints pages and the project dashboard showed a
+  green 0ms, and a green 0% error rate, where they now show N/A.
+- **Unfiltered `get_transaction_stats` no longer pools projects.** Called
+  with neither `project` nor `endpoint`, it blended every project's requests
+  into one set of percentiles. With one project at 150ms and another at 4ms,
+  the pooled p50 was 4ms. Each project with traffic now gets its own row, in
+  the markdown and as `by_project` in `structuredContent`. The pooled figures
+  are empty when there's more than one project.
+- **`get_host_breakdown` keeps projects apart on a shared host.** It now
+  gives each project and host pair its own column, and every row names its
+  project.
+
 ## 1.19.0 — 2026-10-08
 
 Two MCP answers were about the wrong traffic. Endpoint stats blended
