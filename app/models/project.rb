@@ -123,9 +123,11 @@ class Project < ApplicationRecord
     Transaction.count_in_range(time_range: time_range, project_id: id)
   end
 
+  # These return nil, not 0, for a window with no traffic: there's no rate or
+  # response time to report, and a 0 renders as a healthy one.
   def error_rate(time_range = 24.hours.ago..Time.current)
     counts = Transaction.total_and_error_count_in_range(time_range: time_range, project_id: id)
-    return 0 if counts[:total].zero?
+    return nil if counts[:total].zero?
 
     (counts[:errors].to_f / counts[:total] * 100).round(2)
   end
@@ -138,15 +140,15 @@ class Project < ApplicationRecord
   end
 
   def avg_response_time(time_range = 24.hours.ago..Time.current)
-    response_percentiles(time_range)[:avg] || 0
+    response_percentiles(time_range)[:avg]
   end
 
   def p50_response_time(time_range = 24.hours.ago..Time.current)
-    response_percentiles(time_range)[:p50] || 0
+    response_percentiles(time_range)[:p50]
   end
 
   def p95_response_time(time_range = 24.hours.ago..Time.current)
-    response_percentiles(time_range)[:p95] || 0
+    response_percentiles(time_range)[:p95]
   end
 
   def slowest_endpoints(limit: 10, time_range: 24.hours.ago..Time.current)

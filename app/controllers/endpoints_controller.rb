@@ -24,9 +24,11 @@ class EndpointsController < ApplicationController
     base_scope = base_scope.where("transaction_name LIKE ?", "%#{@name_query}%") if @name_query
 
     pct = Transaction.percentiles(time_range, project_id: @project.id, environment: params[:environment], name_query: @name_query)
-    @p50_duration = pct[:p50] || 0
-    @p95_duration = pct[:p95] || 0
-    @p99_duration = pct[:p99] || 0
+    # nil for a window with no requests: format_duration shows N/A, where a
+    # 0 showed as a fast, green 0ms.
+    @p50_duration = pct[:p50]
+    @p95_duration = pct[:p95]
+    @p99_duration = pct[:p99]
 
     # When the user has filtered by name we want to see every match, not just
     # the top 20 by impact.
@@ -69,9 +71,9 @@ class EndpointsController < ApplicationController
     time_range = time_ago..Time.current
 
     stats = Transaction.percentiles_for_endpoint(@endpoint, time_range, project_id: @project.id)
-    @p50_duration = stats["p50_duration"]&.to_f&.round || 0
-    @p95_duration = stats["p95_duration"]&.to_f&.round || 0
-    @p99_duration = stats["p99_duration"]&.to_f&.round || 0
+    @p50_duration = stats["p50_duration"]&.to_f&.round
+    @p95_duration = stats["p95_duration"]&.to_f&.round
+    @p99_duration = stats["p99_duration"]&.to_f&.round
 
     # The P95 trend always spans a full 7 days for long-range context, regardless
     # of the filter window above. Hourly buckets (168 over 7d) read directly from

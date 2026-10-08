@@ -20,6 +20,17 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href=?]", project_logs_path(@project.slug)
   end
 
+  # With no traffic there's no response time or error rate to show. Both
+  # read as a healthy green 0 (0ms, 0%) instead of N/A.
+  test "show gives N/A, not zero, for response time and error rate with no traffic" do
+    get project_url(@project.slug)
+
+    assert_response :success
+    refute_match(/>\s*0ms\s*</, response.body)
+    refute_match(/>\s*0%\s*</, response.body)
+    assert_select "div", text: "N/A", minimum: 3
+  end
+
   test "show offers a DSN pointing at the requested authority when SPLAT_HOST is unset" do
     # Without .env (a fresh clone), a server on a non-default port used to hand
     # out a hardcoded localhost:3000 DSN.

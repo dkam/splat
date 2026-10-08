@@ -26,6 +26,24 @@ class EndpointsControllerTest < ActionDispatch::IntegrationTest
     assert_select "rect.sparkline-hover title", text: /p95 10\dms/
   end
 
+  # No requests in the window means no percentiles. They showed 0ms, in the
+  # green of a fast endpoint, where the helpers already render N/A for nil.
+  test "index shows N/A, not 0ms, when the window has no requests" do
+    get project_endpoints_url(@project.slug)
+
+    assert_response :success
+    assert_select "div.text-3xl", text: "N/A", count: 3
+    refute_match(/>\s*0ms\s*</, response.body)
+  end
+
+  test "detail shows N/A, not 0ms, for an endpoint with no requests in the window" do
+    get detail_project_endpoints_url(@project.slug, name: "NoSuchController#show")
+
+    assert_response :success
+    assert_select "div.text-3xl", text: "N/A", count: 3
+    refute_match(/>\s*0ms\s*</, response.body)
+  end
+
   test "detail shows the trend's best and peak hour" do
     @project.transactions.create!(
       transaction_id: "txn-peak", transaction_name: "SlowController#index",
