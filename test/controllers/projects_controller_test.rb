@@ -31,6 +31,18 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "div", text: "N/A", minimum: 3
   end
 
+  test "show lists recent issues by their message, without the error_highlight snippet" do
+    Issue.create!(
+      project: @project, fingerprint: "highlighted", exception_type: "NameError", count: 1,
+      title: "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^",
+      first_seen: Time.current, last_seen: Time.current, status: :open
+    )
+
+    get project_url(@project.slug)
+    assert_response :success
+    assert_select "h3", text: "undefined local variable or method 'job' for main"
+  end
+
   test "show offers a DSN pointing at the requested authority when SPLAT_HOST is unset" do
     # Without .env (a fresh clone), a server on a non-default port used to hand
     # out a hardcoded localhost:3000 DSN.

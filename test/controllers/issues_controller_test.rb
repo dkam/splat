@@ -106,6 +106,41 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_predicate issue.reload, :ignored?
   end
 
+  test "show heads the page with the message and sets an error_highlight snippet below it as code" do
+    # Ruby's error_highlight appends the offending line and a caret row, both
+    # indented, to the exception message.
+    issue = create_issue("highlighted", <<~TITLE.chomp)
+      Failed to instantiate job, class `JunkSourceProbeJob` doesn't exist (ActiveJob::UnknownJobClassError)
+
+              raise UnknownJobClassError, job_data["job_class"] unless job_class
+              ^^^^^
+    TITLE
+
+    get project_issue_url(@project.slug, issue)
+    assert_response :success
+    assert_select "h1", text: "Failed to instantiate job, class `JunkSourceProbeJob` doesn't exist (ActiveJob::UnknownJobClassError)"
+    # The shared indent goes; the caret keeps its column relative to the code.
+    assert_select "pre#issue-title-detail", text: "raise UnknownJobClassError, job_data[\"job_class\"] unless job_class\n^^^^^"
+  end
+
+  test "index lists an issue by its message, leaving the error_highlight snippet for the issue page" do
+    create_issue("highlighted", "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^")
+
+    get project_issues_url(@project.slug)
+    assert_response :success
+    assert_select "h2", text: "undefined local variable or method 'job' for main"
+    assert_select "h2", text: /\^\^\^/, count: 0
+  end
+
+  test "show sets no snippet under a single-line title" do
+    issue = create_issue("one-line", "undefined method 'name' for nil")
+
+    get project_issue_url(@project.slug, issue)
+    assert_response :success
+    assert_select "h1", text: "undefined method 'name' for nil"
+    assert_select "#issue-title-detail", count: 0
+  end
+
   private
 
   def create_issue(fingerprint, title)

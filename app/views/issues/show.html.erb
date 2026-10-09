@@ -11,18 +11,16 @@
 
   <!-- Issue Header -->
   <div class="mb-8">
-    <div class="flex items-start justify-between gap-4 mb-4">
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-3 mb-2">
-          <span class="text-3xl font-mono text-gray-500 dark:text-gray-400 font-medium">#<%= @issue.id %></span>
-          <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= @issue.title %></h1>
-        </div>
-        <p class="text-gray-600 dark:text-gray-400">
-          <span class="font-mono text-sm bg-gray-100 dark:bg-gray-800 dark:text-gray-200 px-2 py-1 rounded"><%= @issue.exception_type %></span>
-        </p>
+    <!-- Identity on the left, status + actions on the right; the title gets the
+         full width below rather than sharing a row with the buttons. -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="font-mono text-sm text-gray-500 dark:text-gray-400">#<%= @issue.id %></span>
+        <% if @issue.exception_type.present? %>
+          <span class="font-mono text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1 rounded truncate"><%= @issue.exception_type %></span>
+        <% end %>
       </div>
 
-      <!-- Status + Actions -->
       <div class="flex items-center gap-2 shrink-0">
         <div id="issue-status">
           <% if @issue.resolved? %>
@@ -72,9 +70,14 @@
         </div>
       </div>
     </div>
+
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 break-words"><%= @issue.headline %></h1>
+    <% if (detail = @issue.title_detail) %>
+      <pre id="issue-title-detail" class="mt-3 text-sm text-gray-700 dark:text-gray-300 font-mono whitespace-pre overflow-x-auto bg-gray-50 dark:bg-gray-950 rounded p-3 border border-gray-100 dark:border-gray-800"><%= detail %></pre>
+    <% end %>
     <%= turbo_stream_from @issue, "updates" %>
     <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
         <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Events</div>
         <div id="issue-count" class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= @issue.count %></div>

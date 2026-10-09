@@ -74,14 +74,15 @@
               hover (the sparkline, the status buttons) is positioned, which
               paints it above this. %>
           <%= link_to project_issue_path(@project.slug, issue), class: "absolute inset-0" do %>
-            <span class="sr-only">View issue #<%= issue.id %>: <%= issue.title %></span>
+            <span class="sr-only">View issue #<%= issue.id %>: <%= issue.headline %></span>
           <% end %>
 
-          <div class="flex justify-between items-start gap-4">
-            <div class="flex-1">
-              <div class="flex items-center gap-3 mb-2">
-                <span class="text-lg font-mono text-gray-500 dark:text-gray-400 font-medium">#<%= issue.id %></span>
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><%= issue.title %></h2>
+          <%# Side by side from md up; on a phone the sparkline, count and actions
+              go under the title rather than squeezing it to nothing. %>
+          <div class="flex flex-col gap-4 md:flex-row md:justify-between md:items-start">
+            <div class="flex-1 min-w-0">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
+                <h2 class="min-w-0 text-lg font-semibold text-gray-900 dark:text-gray-100 break-words"><%= issue.headline %></h2>
                 <% if issue.resolved? %>
                   <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 rounded">Resolved</span>
                 <% elsif issue.ignored? %>
@@ -95,14 +96,18 @@
                 <% end %>
               </div>
 
-              <div class="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 mb-3">
-                <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 px-2 py-1 rounded"><%= issue.exception_type %></span>
-                <span>•</span>
-                <span class="font-semibold text-gray-900 dark:text-gray-100"><%= issue.count %></span>
-                <span>events</span>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400 mb-3">
+                <span class="flex items-center gap-2 min-w-0">
+                  <span class="font-mono text-gray-500 dark:text-gray-400">#<%= issue.id %></span>
+                  <% if issue.exception_type.present? %>
+                    <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 px-2 py-1 rounded truncate"><%= issue.exception_type %></span>
+                  <% end %>
+                </span>
+                <%# Spacing, not "•" separators, so a row that wraps doesn't
+                    leave a bullet stranded at the end or start of a line. %>
+                <span><span class="font-semibold text-gray-900 dark:text-gray-100"><%= issue.count %></span> events</span>
                 <% envs = @issue_environments[issue.id] %>
                 <% if envs.present? %>
-                  <span>•</span>
                   <span class="flex items-center gap-1" title="Environments this issue has been seen in">
                     <% envs.each do |env| %>
                       <span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 dark:text-gray-300"><%= env %></span>
@@ -111,9 +116,8 @@
                 <% end %>
               </div>
 
-              <div class="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
                 <span>First seen: <%= issue.first_seen.strftime("%Y-%m-%d %H:%M") %></span>
-                <span>•</span>
                 <span>Last seen: <%= time_ago_in_words(issue.last_seen) %> ago</span>
               </div>
             </div>
