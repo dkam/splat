@@ -69,4 +69,52 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     assert_select "nav[aria-label=Breadcrumb] a[href=?]", project_issue_path(@project.slug, event.issue)
     assert_select "nav[aria-label=Breadcrumb] [aria-current=page]", "Event ##{event.id}"
   end
+  # Ruby's error_highlight appends the offending line and a caret row to the
+  # exception message.
+  HIGHLIGHTED = "undefined local variable or method 'job' for main
+
+        job.perform
+        ^^^"
+  MESSAGE = "undefined local variable or method 'job' for main"
+
+  test "show heads the page with the message and sets an error_highlight snippet below it as code" do
+    event = Event.create_from_sentry_payload!(
+      "evt-highlighted",
+      {"exception" => {"values" => [{"type" => "NameError", "value" => HIGHLIGHTED}]},
+       "timestamp" => "2026-07-17T08:00:00Z"},
+      @project
+    )
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select "h1", text: MESSAGE
+    # The shared indent goes; the caret keeps its column under the code.
+    assert_select "pre#event-message-detail", text: "job.perform
+^^^"
+  end
+
+  test "show sets the exception value's error_highlight snippet below its message as code" do
+    event = Event.create_from_sentry_payload!(
+      "evt-highlighted-value",
+      {"exception" => {"values" => [{"type" => "NameError", "value" => HIGHLIGHTED}]},
+       "timestamp" => "2026-07-17T08:00:00Z"},
+      @project
+    )
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select "p", text: MESSAGE
+    assert_select "pre#exception-value-detail", text: "job.perform\n^^^"
+  end
+
+  test "show sets no snippet under a one-line message" do
+    event = Event.create_from_sentry_payload!(
+      "evt-one-line", {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z"}, @project
+    )
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select "h1", text: "boom"
+    assert_select "#event-message-detail", count: 0
+  end
 end

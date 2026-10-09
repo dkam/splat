@@ -132,6 +132,30 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_select "h2", text: /\^\^\^/, count: 0
   end
 
+  test "show lists its events by their message, leaving the snippet to the header" do
+    message = "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^"
+    event = Event.create_from_sentry_payload!(
+      "evt-in-list",
+      {"exception" => {"values" => [{"type" => "NameError", "value" => message}]},
+       "timestamp" => Time.current.iso8601},
+      @project
+    )
+
+    get project_issue_url(@project.slug, event.issue)
+    assert_response :success
+    assert_select "#event-#{event.id}", text: /undefined local variable or method 'job' for main/
+    assert_select "#event-#{event.id}", text: /\^\^\^/, count: 0
+  end
+
+  test "index counts a single event as 1 event" do
+    create_issue("single", "Single")
+
+    get project_issues_url(@project.slug)
+    assert_response :success
+    text = Nokogiri::HTML(response.body).text.squish
+    assert_equal ["1 event"], text.scan(/\b1 events?\b/).uniq
+  end
+
   test "show sets no snippet under a single-line title" do
     issue = create_issue("one-line", "undefined method 'name' for nil")
 

@@ -35,7 +35,7 @@
           <li class="text-sm">
             <%= link_to project_event_path(@project.slug, event),
                 class: "text-red-700 dark:text-red-300 hover:underline font-mono" do %>
-              <%= event.exception_type.presence || "Error" %><%= " — #{event.exception_value}" if event.exception_value.present? %>
+              <%= event.exception_type.presence || "Error" %><%= " — #{ExceptionMessage.headline(event.exception_value)}" if event.exception_value.present? %>
             <% end %>
           </li>
         <% end %>

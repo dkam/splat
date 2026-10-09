@@ -24,6 +24,27 @@ class TransactionsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href=?]", project_event_path(@project.slug, event), text: /NoMethodError/
   end
 
+  test "show lists a request's errors by their message line, without the error_highlight snippet" do
+    trace = "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"
+    txn = @project.transactions.create!(
+      transaction_id: "txn-highlighted", transaction_name: "BooksController#show",
+      timestamp: Time.current, duration: 240, trace_id: trace
+    )
+    message = "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^"
+    event = Event.create_from_sentry_payload!(
+      "evt-highlighted-on-txn",
+      {"exception" => {"values" => [{"type" => "NameError", "value" => message}]},
+       "timestamp" => "2026-07-17T08:00:00Z",
+       "contexts" => {"trace" => {"trace_id" => trace}}},
+      @project
+    )
+
+    get project_transaction_url(@project.slug, txn)
+    assert_response :success
+    assert_select "a[href=?]", project_event_path(@project.slug, event),
+      text: "NameError — undefined local variable or method 'job' for main"
+  end
+
   test "show renders cleanly for a transaction with no linked errors" do
     txn = @project.transactions.create!(
       transaction_id: "txn-clean", transaction_name: "Test",

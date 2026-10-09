@@ -196,6 +196,10 @@ class Event < IssuesEventsRecord
   # Read the promoted column (populated at ingest) so list views don't
   # decompress the payload blob per row; fall back to exception_value.
   def message = self[:message].presence || exception_value
+  # The message's first line, and the error_highlight snippet after it (nil for
+  # a one-line message). See ExceptionMessage.
+  def headline = ExceptionMessage.headline(message)
+  def message_detail = ExceptionMessage.detail(message)
   def level = payload&.dig("level") || "error"
   def tags = payload&.dig("tags") || {}
   def user = payload&.dig("user") || {}

@@ -107,17 +107,14 @@ class Issue < IssuesEventsRecord
     payload.dig("exception", "values", 0, "type")
   end
 
-  # Ruby's error_highlight appends the offending line and a caret row to the
-  # exception message, so a title can run to several lines. The first is the
-  # message proper.
+  # The title's message line, and the error_highlight snippet after it (nil
+  # for a one-line title). See ExceptionMessage.
   def headline
-    title.strip.lines.first.to_s.strip
+    ExceptionMessage.headline(title)
   end
 
-  # The lines after the headline, with their shared indent removed so the
-  # carets stay under the code they point at. Nil for a one-line title.
   def title_detail
-    title.strip.lines.drop(1).join.strip_heredoc.sub(/\A\s*\n/, "").rstrip.presence
+    ExceptionMessage.detail(title)
   end
 
   def record_event!(timestamp: Time.current)

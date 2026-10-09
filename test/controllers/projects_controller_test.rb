@@ -43,6 +43,33 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "h3", text: "undefined local variable or method 'job' for main"
   end
 
+  test "show lists recent events by their message, without the error_highlight snippet" do
+    message = "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^"
+    Event.create_from_sentry_payload!(
+      "evt-recent-highlighted",
+      {"exception" => {"values" => [{"type" => "NameError", "value" => message}]},
+       "timestamp" => Time.current.iso8601},
+      @project
+    )
+
+    get project_url(@project.slug)
+    assert_response :success
+    # The recent issues list above heads with the same message, so look for
+    # the snippet rather than counting headings.
+    assert_select "h3", text: "undefined local variable or method 'job' for main", minimum: 1
+    assert_select "h3", text: /\^\^\^/, count: 0
+  end
+
+  test "show counts a recent issue's single event as 1 event" do
+    Issue.create!(project: @project, fingerprint: "single", title: "Single", count: 1,
+      first_seen: Time.current, last_seen: Time.current, status: :open)
+
+    get project_url(@project.slug)
+    assert_response :success
+    text = Nokogiri::HTML(response.body).text.squish
+    assert_equal ["1 event"], text.scan(/\b1 events?\b/).uniq
+  end
+
   test "show offers a DSN pointing at the requested authority when SPLAT_HOST is unset" do
     # Without .env (a fresh clone), a server on a non-default port used to hand
     # out a hardcoded localhost:3000 DSN.
