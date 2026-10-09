@@ -11,6 +11,33 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.19.2 — 2026-10-10
+
+Issue titles that run to several lines, as Ruby's error_highlight makes
+them, stopped ntfy alerts going out and crowded the issue page.
+
+### Fixed
+
+- **ntfy alerts go out for multi-line titles.** The notification's Title
+  header carried the whole title, and an HTTP header can't hold a line
+  break. The job failed and no alert was sent for any issue whose message
+  error_highlight had annotated. The Title is now the message line.
+- **The issue page's title no longer runs under the Open, Resolve and
+  Ignore buttons.** The status and actions move to a row above the title,
+  which gets the full width.
+- **The issues list fits a phone.** At 390px the page was 291px wider than
+  the screen. On small screens the sparkline, count and actions now drop
+  below the title.
+
+### Changed
+
+- **An issue is headed by its message, with error_highlight's code line and
+  caret row set below it as code**, on the issue page and in the new-issue,
+  reopened and burst emails. Email subjects, the issues list and the project
+  overview show the message line only.
+- **The issue number is a small label beside the exception type**, on the
+  issue page and in the list, rather than a large column of its own.
+
 ## 1.19.1 — 2026-10-08
 
 More numbers that described the wrong traffic, or none at all. An empty
