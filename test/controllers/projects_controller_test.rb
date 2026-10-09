@@ -70,6 +70,23 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_equal ["1 event"], text.scan(/\b1 events?\b/).uniq
   end
 
+  # The row was a link with the issue's link inside it. Browsers don't nest
+  # links: they close the row's link at the inner one and reopen it after,
+  # which left an empty row above the event and its details strewn below.
+  test "show links each recent event once, with its issue link beside rather than inside" do
+    event = Event.create_from_sentry_payload!(
+      "evt-recent-row",
+      {"exception" => {"values" => [{"type" => "NoMethodError", "value" => "boom"}]},
+       "environment" => "production", "timestamp" => Time.current.iso8601},
+      @project
+    )
+
+    get project_url(@project.slug)
+    assert_response :success
+    assert_select "a[href=?]", project_event_path(@project.slug, event), count: 1
+    assert_select "a[href=?]", project_issue_path(@project.slug, event.issue), text: "Issue ##{event.issue.id}"
+  end
+
   test "show offers a DSN pointing at the requested authority when SPLAT_HOST is unset" do
     # Without .env (a fresh clone), a server on a non-default port used to hand
     # out a hardcoded localhost:3000 DSN.

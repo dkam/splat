@@ -110,7 +110,36 @@ class IssueHeaderTest < ApplicationSystemTestCase
     assert_equal 0, spill, "the row's content is #{spill}px wider than the row"
   end
 
+  # The row is one link stretched over it, and its issue link has to stay
+  # clickable on top of that rather than underneath.
+  test "a recent event on the overview opens the event, and its issue link the issue" do
+    event = Event.create_from_sentry_payload!(
+      "evt-overview-row",
+      {"exception" => {"values" => [{"type" => "NoMethodError", "value" => "boom"}]},
+       "timestamp" => Time.current.iso8601},
+      @project
+    )
+    visit project_path(@project.slug)
+
+    issue_link = find_link("Issue ##{event.issue.id}")
+    issue_link.scroll_to(issue_link)
+    assert_equal project_issue_path(@project.slug, event.issue), link_at(issue_link)
+    row = find("a[href='#{project_event_path(@project.slug, event)}']").find(:xpath, "..")
+    assert_equal project_event_path(@project.slug, event), link_at(row.find("h3", text: "boom"))
+  end
+
   private
+
+  # The href of the link a click at the middle of node lands on.
+  def link_at(node)
+    page.evaluate_script(<<~JS, node)
+      ((node) => {
+        const r = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit && hit.closest("a") && hit.closest("a").getAttribute("href");
+      })(arguments[0])
+    JS
+  end
 
   def rect(selector_or_node)
     node = selector_or_node.is_a?(String) ? find(selector_or_node) : selector_or_node
