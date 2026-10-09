@@ -1,6 +1,10 @@
 🔥 Issue Burst Detected
 
-Issue: <%= @issue.title %>
+Issue: <%= @issue.headline %>
+<% if (detail = @issue.title_detail) %>
+
+<%= detail.indent(4) %>
+<% end %>
 
 Rate: <%= number_with_delimiter(@rate) %> events/hour (threshold: <%= number_with_delimiter(@threshold) %>/hour)
 

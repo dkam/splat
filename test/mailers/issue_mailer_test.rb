@@ -66,6 +66,39 @@ class IssueMailerTest < ActionMailer::TestCase
     ENV.delete("SPLAT_EMAIL_FROM")
   end
 
+  # Ruby's error_highlight appends the offending line and a caret row to the
+  # exception message. A subject holds one line, and an h2 collapses the
+  # snippet's whitespace, so the message alone heads the email.
+  HIGHLIGHTED = "undefined local variable or method 'job' for main\n\n        job.perform\n        ^^^"
+  MESSAGE = "undefined local variable or method 'job' for main"
+
+  test "an error_highlight title gives its message line, not its snippet, to the subject" do
+    @issue.update!(title: HIGHLIGHTED)
+
+    assert_equal "[Splat] New Issue: #{MESSAGE}", IssueMailer.new_issue(@issue).subject
+    assert_equal "[Splat] Issue Reopened: #{MESSAGE}", IssueMailer.issue_reopened(@issue).subject
+    assert_equal "[Splat] Issue burst detected: #{MESSAGE}", IssueMailer.burst_detected(@issue, 500).subject
+  end
+
+  test "an error_highlight title heads the email with its message and sets the snippet below as code" do
+    @issue.update!(title: HIGHLIGHTED)
+
+    each_email do |name, email|
+      html = Nokogiri::HTML(email.html_part.body.decoded)
+      assert_equal MESSAGE, html.at_css("h2").text.strip, "#{name} html heading"
+      # The shared indent goes; the caret keeps its column under the code.
+      assert_equal "job.perform\n^^^", html.at_css("pre")&.text, "#{name} html snippet"
+      assert_includes email.text_part.body.decoded, "Issue: #{MESSAGE}\n\n    job.perform\n    ^^^\n", "#{name} text"
+    end
+  end
+
+  test "a one-line title gets no snippet" do
+    each_email do |name, email|
+      assert_nil Nokogiri::HTML(email.html_part.body.decoded).at_css("pre"), name
+      assert_match(/^Issue: Test Error\n\n\S/, email.text_part.body.decoded, name)
+    end
+  end
+
   test "includes issue URL in email body" do
     email = IssueMailer.new_issue(@issue)
 
@@ -74,5 +107,15 @@ class IssueMailerTest < ActionMailer::TestCase
     # loads .env (localhost:3030); CI leaves it unset.
     host = ENV.fetch("SPLAT_HOST", "localhost:3000")
     assert_match "http://#{host}/projects", email.body.encoded
+  end
+
+  private
+
+  def each_email
+    {
+      new_issue: IssueMailer.new_issue(@issue),
+      issue_reopened: IssueMailer.issue_reopened(@issue),
+      burst_detected: IssueMailer.burst_detected(@issue, 500)
+    }.each { |name, email| yield name, email }
   end
 end

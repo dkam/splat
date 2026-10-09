@@ -1,6 +1,10 @@
 ⚠️ Issue Reopened
 
-Issue: <%= @issue.title %>
+Issue: <%= @issue.headline %>
+<% if (detail = @issue.title_detail) %>
+
+<%= detail.indent(4) %>
+<% end %>
 
 Details:
 - Exception Type: <%= @issue.exception_type || 'Unknown' %>

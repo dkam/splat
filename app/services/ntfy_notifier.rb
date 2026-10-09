@@ -55,7 +55,9 @@ class NtfyNotifier
 
       headers = {
         "Content-Type" => "text/plain; charset=utf-8",
-        "Title" => "[Splat] #{meta[:subject]}: #{issue.title}",
+        # The headline, not the title: a header can't hold a line break, and an
+        # error_highlight title has several. Net::HTTP raises on one.
+        "Title" => "[Splat] #{meta[:subject]}: #{issue.headline}",
         "Priority" => setting.ntfy_priority.presence || "default",
         "Tags" => meta[:tags].join(",")
       }

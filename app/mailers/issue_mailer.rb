@@ -9,7 +9,7 @@ class IssueMailer < ApplicationMailer
     mail(
       from: ENV.fetch("SPLAT_EMAIL_FROM", "splat@example.com"),
       to: admin_emails,
-      subject: "[Splat] New Issue: #{issue.title}"
+      subject: "[Splat] New Issue: #{issue.headline}"
     )
   end
 
@@ -21,7 +21,7 @@ class IssueMailer < ApplicationMailer
     mail(
       from: ENV.fetch("SPLAT_EMAIL_FROM", "splat@example.com"),
       to: admin_emails,
-      subject: "[Splat] Issue Reopened: #{issue.title}"
+      subject: "[Splat] Issue Reopened: #{issue.headline}"
     )
   end
 
@@ -35,7 +35,7 @@ class IssueMailer < ApplicationMailer
     mail(
       from: ENV.fetch("SPLAT_EMAIL_FROM", "splat@example.com"),
       to: admin_emails,
-      subject: "[Splat] Issue burst detected: #{issue.title}"
+      subject: "[Splat] Issue burst detected: #{issue.headline}"
     )
   end
 

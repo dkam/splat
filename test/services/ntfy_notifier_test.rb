@@ -82,6 +82,46 @@ class NtfyNotifierTest < ActiveSupport::TestCase
     assert_includes req[:body], "1500 events/hr"
   end
 
+  # Ruby's error_highlight appends the offending line and a caret row to the
+  # exception message, and an HTTP header can't carry a line break.
+  HIGHLIGHTED = "undefined local variable or method 'job' for main\n\n        job.perform\n        ^^^"
+
+  test "outbound_request titles an error_highlight issue by its message line" do
+    @issue.update!(title: HIGHLIGHTED)
+    setting = build_setting(ntfy_url: "https://ntfy.sh/splat-test")
+
+    req = NtfyNotifier.outbound_request(@issue, "new_issue", setting: setting)
+
+    assert_equal "[Splat] New Issue: undefined local variable or method 'job' for main", req[:headers]["Title"]
+  end
+
+  # Net::HTTP refuses a header with a line break by raising ArgumentError, which
+  # isn't a Faraday::Error — so it escaped deliver, failed the job, and the
+  # notification never went out. A local listener stands in for ntfy.
+  test "an error_highlight issue's notification reaches ntfy" do
+    @issue.update!(title: HIGHLIGHTED)
+    server = TCPServer.new("127.0.0.1", 0)
+    received = Thread.new do
+      Thread.current.report_on_exception = false
+      client = server.accept
+      head = []
+      while (line = client.gets) && line != "\r\n"
+        head << line
+      end
+      client.write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+      client.close
+      head
+    end
+    Setting.instance.update!(ntfy_url: "http://127.0.0.1:#{server.addr[1]}/splat-test")
+
+    NtfyNotifier.notify_new_issue(@issue)
+
+    assert received.join(5), "ntfy never received the notification"
+    assert_includes received.value.map(&:downcase), "title: [splat] new issue: undefined local variable or method 'job' for main\r\n"
+  ensure
+    server&.close
+  end
+
   test "outbound_request raises InvalidUrl when ntfy_url is blank" do
     setting = build_setting(ntfy_url: nil)
 

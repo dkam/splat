@@ -7,7 +7,8 @@
   <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
     <div style="border-left: 4px solid #f59e0b; padding: 20px; background: #fffbeb; border-radius: 0 8px 8px 0;">
       <h1 style="margin: 0 0 10px 0; color: #b45309;">🔥 Issue Burst Detected</h1>
-      <h2 style="margin: 0 0 20px 0; color: #78350f; font-size: 1.2em;"><%= @issue.title %></h2>
+      <h2 style="margin: 0 0 20px 0; color: #78350f; font-size: 1.2em;"><%= @issue.headline %></h2>
+      <%= render "title_detail", issue: @issue %>
     </div>
 
     <div style="margin: 20px 0; padding: 15px; background: #f8fafc; border-radius: 8px;">

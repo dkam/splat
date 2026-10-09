@@ -1,0 +1,5 @@
+<%# Ruby's error_highlight appends the offending line and a caret row to the
+    message. Kept as code, so the caret stays under what it points at. %>
+<% if (detail = issue.title_detail) %>
+  <pre style="margin: 0; padding: 12px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 6px; font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; color: #374151; white-space: pre; overflow-x: auto;"><%= detail %></pre>
+<% end %>
