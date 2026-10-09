@@ -11,6 +11,44 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.19.3 — 2026-10-10
+
+The rest of the UI catches up with 1.19.2's issue page. Events are headed
+by their message, issue rows give their title the full width, and the
+event page, the overview and the header fit a phone.
+
+### Fixed
+
+- **The event page fits a phone.** Its View Issue and Delete Event buttons
+  were pushed off the right edge, and the page was 395px wider than the
+  screen. It now has the issue page's header: the id, event ID and
+  environment in a small row with the buttons on the right, and the
+  message across the full width below.
+- **The overview's Recent Events rows hold together.** Each row was a link
+  with its issue's link inside it, which browsers split apart. That left an
+  empty row above each event, its details scattered below, and at 390px a
+  page 185px wider than the screen.
+- **The header fits a phone.** Its right-hand controls ran 109px past the
+  edge, so the status badge and the sign-in controls were cut off. Below
+  `lg` the labels give way to icons and badges, each with a tooltip.
+- **"1 event", not "1 events"**, on the issues list and the overview.
+
+### Changed
+
+- **Events are headed by their message, with error_highlight's code line
+  and caret row set below as code.** That applies to the event page and to
+  the event page's exception box. On a phone the code scrolls sideways
+  rather than wrapping, so the carets stay under the code. The event rows
+  on an issue's page, the overview's recent events and a transaction's
+  errors show the message line only.
+- **Issues list rows take the issue page's shape.** The id, type and
+  badges sit at the left of a top row, with the sparkline, count and
+  buttons at the right. The title runs across the full width below, where
+  it used to get two thirds of the row. The event count is shown once
+  rather than twice.
+- **The overview's recent issues and events lead with their message.** The
+  id moves to sit beside the exception type, so the titles line up.
+
 ## 1.19.2 — 2026-10-10
 
 Issue titles that run to several lines, as Ruby's error_highlight makes
