@@ -110,6 +110,18 @@ class IssueHeaderTest < ApplicationSystemTestCase
     assert_equal 0, spill, "the row's content is #{spill}px wider than the row"
   end
 
+  # The header is fixed, so its overflow doesn't scroll the page; it's just
+  # cut off, taking the queue status and the sign-in controls with it.
+  [390, 940].each do |width|
+    test "the header's controls fit within it at #{width}px" do
+      page.current_window.resize_to(width, 900)
+      visit project_path(@project.slug)
+
+      spill = page.evaluate_script("(h => h.scrollWidth - h.clientWidth)(document.querySelector('header'))")
+      assert_equal 0, spill, "the header's content is #{spill}px wider than the header"
+    end
+  end
+
   # The row is one link stretched over it, and its issue link has to stay
   # clickable on top of that rather than underneath.
   test "a recent event on the overview opens the event, and its issue link the issue" do
