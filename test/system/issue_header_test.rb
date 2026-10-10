@@ -86,28 +86,45 @@ class IssueHeaderTest < ApplicationSystemTestCase
   end
 
   # The sparkline, count and buttons sat beside the title and took a third of
-  # the row from it, so a long message wrapped to three or four lines.
-  test "an issues list row gives its title the full width, below the counts and buttons" do
-    page.current_window.resize_to(940, 900)
-    visit project_issues_path(@project.slug)
+  # the row from it, so a long message wrapped to three or four lines. The
+  # issues list and the overview's recent issues share one row partial; both
+  # pages are checked so a change made for one is seen on the other.
+  {"issues list" => :project_issues_path, "project overview" => :project_path}.each do |where, path|
+    test "an issue row on the #{where} gives its title the full width, below the counts and buttons" do
+      page.current_window.resize_to(940, 900)
+      visit public_send(path, @project.slug)
 
-    heading = rect(find("h2", text: "Failed to instantiate job"))
-    resolve = rect(find("form[action$='/issues/#{@issue.id}/resolve'] button"))
-    assert_operator heading["top"], :>=, resolve["bottom"],
-      "the title #{heading.inspect} sits beside the buttons #{resolve.inspect}"
-  end
+      heading = rect(find("h2, h3", text: "Failed to instantiate job"))
+      resolve = rect(find("form[action$='/issues/#{@issue.id}/resolve'] button"))
+      assert_operator heading["top"], :>=, resolve["bottom"],
+        "the title #{heading.inspect} sits beside the buttons #{resolve.inspect}"
+    end
 
-  test "the issues list fits a phone without scrolling sideways" do
-    page.current_window.resize_to(390, 900)
-    visit project_issues_path(@project.slug)
-    find("h2", text: "Failed to instantiate job")
+    # Wrapping the top line put the count and buttons on a line of their own,
+    # stranded at the left of the row.
+    test "an issue row on the #{where} cuts a long exception type short rather than wrapping" do
+      @issue.update!(exception_type: "ActionController::Redirecting::OpenRedirectError")
+      page.current_window.resize_to(940, 900)
+      visit public_send(path, @project.slug)
 
-    assert_equal 0, horizontal_overflow, "the page is #{horizontal_overflow}px wider than the viewport"
-    # The row itself, too: the page only shows an overflow when the row's
-    # spills past the viewport's edge, which a scrollbar can decide.
-    row = find("a[href$='/issues/#{@issue.id}']").find(:xpath, "..")
-    spill = page.evaluate_script("arguments[0].scrollWidth - arguments[0].clientWidth", row)
-    assert_equal 0, spill, "the row's content is #{spill}px wider than the row"
+      id = rect(find("span", text: "##{@issue.id}", exact_text: true))
+      resolve = rect(find("form[action$='/issues/#{@issue.id}/resolve'] button"))
+      assert_operator resolve["top"], :<, id["bottom"],
+        "the buttons #{resolve.inspect} wrapped below the id #{id.inspect}"
+    end
+
+    test "an issue row on the #{where} fits a phone without scrolling sideways" do
+      page.current_window.resize_to(390, 900)
+      visit public_send(path, @project.slug)
+      find("h2, h3", text: "Failed to instantiate job")
+
+      assert_equal 0, horizontal_overflow, "the page is #{horizontal_overflow}px wider than the viewport"
+      # The row itself, too: the page only shows an overflow when the row's
+      # spills past the viewport's edge, which a scrollbar can decide.
+      row = find("a[href$='/issues/#{@issue.id}']").find(:xpath, "..")
+      spill = page.evaluate_script("arguments[0].scrollWidth - arguments[0].clientWidth", row)
+      assert_equal 0, spill, "the row's content is #{spill}px wider than the row"
+    end
   end
 
   # The header is fixed, so its overflow doesn't scroll the page; it's just

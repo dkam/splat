@@ -1,0 +1,86 @@
+<%# locals: (issue:, project:, sparkline:, deploy_markers:, sparkline_range:, burst_threshold:, environments: nil, heading: :h2) -%>
+<%# One issue's row, on the issues list and the project overview's recent
+    issues. sparkline is the issue's per-bucket event counts over
+    sparkline_range; environments are its chips, nil where a project only
+    reports one. heading is the title's tag, h3 where the list sits under a
+    section's h2. %>
+<div class="relative p-4 sm:p-6 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+  <%# Stretched link — keeps the whole row clickable now that the row is
+      a div rather than an <a>. Anything that needs its own clicks or
+      hover (the sparkline, the status buttons) is positioned, which
+      paints it above this. %>
+  <%= link_to project_issue_path(project.slug, issue), class: "absolute inset-0" do %>
+    <span class="sr-only">View issue #<%= issue.id %>: <%= issue.headline %></span>
+  <% end %>
+
+  <%# The issue page's shape: identity on the left and the sparkline,
+      count and actions on the right, then the title across the full
+      width below rather than squeezed beside them. %>
+  <%# One line from sm up, the type truncating to make room; on a phone the
+      counts and actions drop to a line of their own. %>
+  <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-4 gap-y-2 mb-2">
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="shrink-0 font-mono text-sm text-gray-500 dark:text-gray-400">#<%= issue.id %></span>
+      <% if issue.exception_type.present? %>
+        <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1 rounded truncate" title="<%= issue.exception_type %>"><%= issue.exception_type %></span>
+      <% else %>
+        <%# Grouped from a message (capture_message, a logged error) rather than
+            a raised exception, so there's no class to show. Set in the
+            body font, so it doesn't read as one. %>
+        <span class="shrink-0 text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1 rounded" title="Reported as a message, not a raised exception">Message</span>
+      <% end %>
+      <% if issue.resolved? %>
+        <span class="shrink-0 px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 rounded">Resolved</span>
+      <% elsif issue.ignored? %>
+        <span class="shrink-0 px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 rounded">Ignored</span>
+      <% end %>
+      <% if issue.bursting? %>
+        <% very_hot = issue.last_burst_rate.to_i >= burst_threshold * 2 %>
+        <span class="shrink-0 whitespace-nowrap px-2 py-1 text-xs font-medium <%= very_hot ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' %> rounded" title="Bursting — events/hour at last check vs threshold">
+          <%= very_hot ? "🚨" : "🔥" %> <%= number_to_human(issue.last_burst_rate.to_i, units: { thousand: "k", million: "M" }, precision: 2, strip_insignificant_zeros: true) %>/hr
+        </span>
+      <% end %>
+    </div>
+
+    <%# Wraps rather than spilling out of the row on a phone when the
+        count runs to five or six digits. %>
+    <div class="w-full sm:w-auto sm:shrink-0 flex flex-wrap items-center justify-end gap-x-3 gap-y-2 sm:gap-x-4">
+      <% spark = sparkline %>
+      <% if spark&.any? { |v| v.to_i.positive? } %>
+        <div class="relative text-blue-500 dark:text-blue-400" data-controller="sparkline-tooltip"
+             title="Events per hour, last 24h. Dashed lines = deploys.">
+          <%= sparkline(spark, width: 120, height: 28,
+              title: "#{spark.sum} events in last 24h, #{deploy_markers.size} deploy#{'s' if deploy_markers.size != 1}",
+              markers: deploy_markers, time_range: sparkline_range,
+              bar_titles: sparkline_bucket_titles(spark, range: sparkline_range, empty: "no events") { |v| pluralize(v, "event") }) %>
+        </div>
+      <% else %>
+        <%# Holds the sparkline's column; a phone has no columns to hold. %>
+        <div class="hidden sm:block w-[120px] h-[28px]"></div>
+      <% end %>
+      <%# A fixed width keeps the counts in a column from row to row. %>
+      <div class="sm:min-w-[5.5rem] text-right text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+        <span class="text-xl font-bold text-gray-900 dark:text-gray-100"><%= number_with_delimiter(issue.count) %></span>
+        <%= "event".pluralize(issue.count) %>
+      </div>
+
+      <%= render "issues/row_actions", project: project, issue: issue %>
+    </div>
+  </div>
+
+  <%= content_tag heading, issue.headline, class: "text-lg font-semibold text-gray-900 dark:text-gray-100 break-words mb-2" %>
+
+  <%# Spacing, not "•" separators, so a row that wraps doesn't
+      leave a bullet stranded at the end or start of a line. %>
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
+    <span>First seen: <%= issue.first_seen.strftime("%Y-%m-%d %H:%M") %></span>
+    <span>Last seen: <%= time_ago_in_words(issue.last_seen) %> ago</span>
+        <% if environments.present? %>
+      <span class="flex items-center gap-1" title="Environments this issue has been seen in">
+        <% environments.each do |env| %>
+          <span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 dark:text-gray-300"><%= env %></span>
+        <% end %>
+      </span>
+    <% end %>
+  </div>
+</div>

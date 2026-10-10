@@ -156,6 +156,22 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_equal ["1 event"], text.scan(/\b1 events?\b/).uniq
   end
 
+  # An issue grouped from a message rather than a raised exception has no
+  # exception type, which left its id alone in the row's top line.
+  test "index and show label an issue with no exception type as a message" do
+    issue = Issue.create!(project_id: @project.id, fingerprint: "a-message",
+      title: "amazon.asin identifier already held by another record", count: 4,
+      first_seen: Time.current, last_seen: Time.current, status: :open)
+
+    get project_issues_url(@project.slug)
+    assert_response :success
+    assert_select "span", text: "Message"
+
+    get project_issue_url(@project.slug, issue)
+    assert_response :success
+    assert_select "span", text: "Message"
+  end
+
   test "show sets no snippet under a single-line title" do
     issue = create_issue("one-line", "undefined method 'name' for nil")
 

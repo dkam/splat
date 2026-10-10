@@ -131,39 +131,11 @@
     <% if @recent_issues.any? %>
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 divide-y divide-gray-200 dark:divide-gray-800">
         <% @recent_issues.each do |issue| %>
-          <%= link_to project_issue_path(@project.slug, issue), class: "block hover:bg-gray-50 dark:hover:bg-gray-800/60 p-4 transition-colors" do %>
-            <div class="flex justify-between items-center gap-4">
-              <div class="flex-1 min-w-0">
-                <h3 class="font-semibold text-gray-900 dark:text-gray-100 truncate mb-1"><%= issue.headline %></h3>
-                <%# The id sits with the type, as on the issues list, so the
-                    titles line up at the left. Spacing, not "•" separators,
-                    so a row that wraps doesn't strand one at a line end. %>
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
-                  <span class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-gray-500 dark:text-gray-400">#<%= issue.id %></span>
-                    <% if issue.exception_type.present? %>
-                      <span class="truncate"><%= issue.exception_type %></span>
-                    <% end %>
-                  </span>
-                  <span><%= number_with_delimiter(issue.count) %> <%= "event".pluralize(issue.count) %></span>
-                  <span>Last seen <%= time_ago_in_words(issue.last_seen) %> ago</span>
-                </div>
-              </div>
-              <% spark = @issue_sparklines[issue.id] %>
-              <% if spark&.any? { |v| v.to_i.positive? } %>
-                <span class="text-blue-500 dark:text-blue-400 shrink-0" data-controller="sparkline-tooltip"
-                      title="Dashed lines = deploys">
-                  <%= sparkline(spark, width: 100, height: 24,
-                      title: "#{spark.sum} events in last 24h",
-                      markers: @deploy_markers, time_range: @sparkline_range,
-                      bar_titles: sparkline_bucket_titles(spark, range: @sparkline_range, empty: "no events") { |v| pluralize(v, "event") }) %>
-                </span>
-              <% else %>
-                <%# Hold the slot, so a quiet issue's title stops where the rest do. %>
-                <span class="w-[100px] h-[24px] shrink-0"></span>
-              <% end %>
-            </div>
-          <% end %>
+          <%# The issues list's own row, so the two can't drift apart. %>
+          <%= render "issues/issue_row", issue: issue, project: @project,
+                sparkline: @issue_sparklines[issue.id], deploy_markers: @deploy_markers,
+                sparkline_range: @sparkline_range, burst_threshold: @burst_threshold,
+                environments: @issue_environments[issue.id], heading: :h3 %>
         <% end %>
       </div>
     <% else %>

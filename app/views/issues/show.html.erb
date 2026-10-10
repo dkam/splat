@@ -18,6 +18,9 @@
         <span class="font-mono text-sm text-gray-500 dark:text-gray-400">#<%= @issue.id %></span>
         <% if @issue.exception_type.present? %>
           <span class="font-mono text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1 rounded truncate"><%= @issue.exception_type %></span>
+        <% else %>
+          <%# No exception class to show: see issues/_issue_row. %>
+          <span class="text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1 rounded" title="Reported as a message, not a raised exception">Message</span>
         <% end %>
       </div>
 

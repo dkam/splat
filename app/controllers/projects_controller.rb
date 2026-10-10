@@ -166,6 +166,16 @@ class ProjectsController < ApplicationController
     @deploy_markers = @project.releases
       .where(first_seen_at: @sparkline_range)
       .pluck(:first_seen_at)
+
+    # The recent issues render the issues list's row, so they need what it
+    # does: the threshold for its burst badge, and environment chips, which
+    # the list leaves off a project that only reports one environment.
+    @burst_threshold = Setting.instance.burst_threshold
+    @issue_environments = if IssueFacet.values_for(@project.id, :environment).many?
+      IssueFacet.values_by_issue(issue_ids, :environment)
+    else
+      {}
+    end
   end
 
   def new

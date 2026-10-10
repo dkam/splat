@@ -87,6 +87,31 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href=?]", project_issue_path(@project.slug, event.issue), text: "Issue ##{event.issue.id}"
   end
 
+  # The recent issues share the issues list's row, so they offer the same
+  # triage and show the same environments.
+  test "show offers resolve and ignore on each recent issue, as the issues list does" do
+    issue = Issue.create!(project: @project, fingerprint: "triage", title: "Triage me", count: 1,
+      first_seen: Time.current, last_seen: Time.current, status: :open)
+
+    get project_url(@project.slug)
+    assert_response :success
+    assert_select "form[action=?]", resolve_project_issue_path(@project.slug, issue)
+    assert_select "form[action=?]", ignore_project_issue_path(@project.slug, issue)
+    assert_select "a form", count: 0
+  end
+
+  test "show's recent issues carry their environments once a project reports more than one" do
+    issue = Issue.create!(project: @project, fingerprint: "two-envs", title: "Two envs", count: 2,
+      first_seen: Time.current, last_seen: Time.current, status: :open)
+    IssueFacet.reset_throttle!
+    IssueFacet.harvest!(project_id: @project.id, issue_id: issue.id, values: {environment: "production"})
+    IssueFacet.harvest!(project_id: @project.id, issue_id: issue.id, values: {environment: "staging"})
+
+    get project_url(@project.slug)
+    assert_response :success
+    assert_select "[title=?] span", "Environments this issue has been seen in", text: "staging"
+  end
+
   test "show offers a DSN pointing at the requested authority when SPLAT_HOST is unset" do
     # Without .env (a fresh clone), a server on a non-default port used to hand
     # out a hardcoded localhost:3000 DSN.
