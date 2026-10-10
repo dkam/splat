@@ -11,6 +11,27 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.19.4 — 2026-10-10
+
+The overview's recent issues now use the issues list's row, and an issue
+reported as a message is labelled instead of blank.
+
+### Fixed
+
+- **A long exception type no longer breaks a row's top line.** A type like
+  `ActionController::Redirecting::OpenRedirectError` wrapped the line, so
+  the count and buttons sat on a line of their own at the left of the row.
+  The type is now cut off with "…", with the full name on hover.
+
+### Changed
+
+- **The overview's recent issues use the issues list's row.** It is one
+  shared template, so the two can't drift apart again. The overview gains
+  the list's Resolve and Ignore buttons and its environment chips.
+- **An issue reported as a message is labelled "Message".** It has no
+  exception type, which used to leave its id alone at the start of the row.
+  The badge appears on the issues list, the overview and the issue page.
+
 ## 1.19.3 — 2026-10-10
 
 The rest of the UI catches up with 1.19.2's issue page. Events are headed
