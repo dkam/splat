@@ -297,6 +297,64 @@ class Transaction::SpanAnalyzerTest < ActiveSupport::TestCase
     assert_in_delta 7, result[:n_plus_one_time_ms], 1
   end
 
+  # ---- View time ----
+  #
+  # sentry-rails opens view.process_action.action_controller in a
+  # prepend_around_action, so despite the name it times the whole action —
+  # filters, queries and render. Rendering is template.render_template.action_view,
+  # and the queries a template fires land beside it as siblings (children of the
+  # action span), so they overlap it in time rather than nesting under it.
+
+  def timed_span(op, from_ms, to_ms, at: 1_700_000_000.0)
+    {"op" => op, "start_timestamp" => at + from_ms / 1000.0, "timestamp" => at + to_ms / 1000.0}
+  end
+
+  # The shape of a real ProductsController#show: a 137ms action span wrapping
+  # the queries and a 61ms render. Reading the action span as view time made
+  # db 49% + view 96% of a 142ms request.
+  test "view_time is the template render, not the controller action span" do
+    spans = [
+      timed_span("view.process_action.action_controller", 0, 137),
+      timed_span("db.sql.active_record", 5, 35),
+      timed_span("template.render_template.action_view", 60, 121)
+    ]
+
+    timing = Transaction::SpanAnalyzer.extract_timing_data(spans)
+    assert_equal 30, timing[:db_time]
+    assert_equal 61, timing[:view_time]
+  end
+
+  # Rails' own "Views: Xms" takes out the queries run during the render, so
+  # db and view together never exceed the request.
+  test "queries a template runs while rendering count as db time, not view time" do
+    spans = [
+      timed_span("template.render_template.action_view", 0, 60),
+      timed_span("db.sql.active_record", 10, 30)
+    ]
+
+    timing = Transaction::SpanAnalyzer.extract_timing_data(spans)
+    assert_equal 20, timing[:db_time]
+    assert_equal 40, timing[:view_time]
+  end
+
+  test "a template rendered inside another is not counted twice" do
+    spans = [
+      timed_span("template.render_template.action_view", 0, 50),
+      timed_span("template.render_template.action_view", 10, 30)
+    ]
+
+    assert_equal 50, Transaction::SpanAnalyzer.extract_timing_data(spans)[:view_time]
+  end
+
+  test "a request that renders no template has no view time" do
+    spans = [
+      timed_span("view.process_action.action_controller", 0, 50),
+      timed_span("db.sql.active_record", 5, 15)
+    ]
+
+    assert_nil Transaction::SpanAnalyzer.extract_timing_data(spans)[:view_time]
+  end
+
   # ---- Non-Rails SDKs ----
   #
   # The Rails SDK is instrumented off ActiveSupport::Notifications, so its op

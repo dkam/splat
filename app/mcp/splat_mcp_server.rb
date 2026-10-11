@@ -656,7 +656,7 @@ class SplatMcpServer
             project: PROJECT_ARG,
             op_filter: {
               type: "string",
-              description: "Filter spans by op prefix (e.g. 'db' for all db.* spans, 'db.sql' for SQL only, 'http' for outbound HTTP, 'view' for renders). Default: no filter."
+              description: "Filter spans by op prefix (e.g. 'db' for all db.* spans, 'db.sql' for SQL only, 'http' for outbound HTTP, 'template' for template renders — Rails' 'view.process_action' span is the whole controller action, not the render). Default: no filter."
             },
             limit: integer_arg("Max spans to render in the list (default: 100, max: 1000). Op summary and repeated-description sections always cover all spans.", default: 100)
           }

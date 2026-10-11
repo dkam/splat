@@ -14,12 +14,17 @@ class Transaction
     # key + raw example). Sentry truncates around 1 KB for the same reason.
     MAX_SQL_LENGTH = 1000
 
-    # The Rails view op. Left as a literal exact match rather than widened to a
-    # `view.` prefix the way db is: this is not an oversight. A non-Rails
-    # service usually has no view layer at all, and there is no cross-SDK
-    # convention to widen to — view_time being null for a Go or Python client
-    # is the truth about that client, not a gap in the matching.
-    VIEW_OP = "view.process_action.action_controller"
+    # The Rails template-render op. Not view.process_action.action_controller,
+    # whatever its name says: sentry-rails opens that span in a
+    # prepend_around_action, so it times the whole action — filters, queries
+    # and render — and reading it as view time counted the queries twice.
+    #
+    # Left as a literal exact match rather than widened to a prefix the way db
+    # is: this is not an oversight. A non-Rails service usually has no view
+    # layer at all, and there is no cross-SDK convention to widen to —
+    # view_time being null for a Go or Python client is the truth about that
+    # client, not a gap in the matching.
+    TEMPLATE_OP = "template.render_template.action_view"
 
     # Sentry's cross-SDK convention for database work is a `db.` prefix with a
     # driver-specific suffix — db.sql.query (Go, Python, Node), db.query,
@@ -36,11 +41,10 @@ class Transaction
       return {db_time: nil, view_time: nil} if spans.blank?
 
       db_time = calculate_total_time_for_operations(spans) { |op| db_op?(op) }
-      view_time = calculate_total_time_for_operations(spans) { |op| op == VIEW_OP }
 
       {
         db_time: db_time&.round,
-        view_time: view_time&.round
+        view_time: render_time(spans)
       }
     end
 
@@ -191,6 +195,42 @@ class Transaction
       (total_time > 0) ? total_time.round : nil
     end
 
+    # Rails' own "Views: Xms": the time inside a template render that wasn't
+    # spent on a query. sentry-rails records the queries a template fires as
+    # siblings of its span, not children, so they're taken out by overlap in
+    # time rather than by parentage. Both sides are merged first, so a
+    # template rendered inside another, or concurrent queries, count once.
+    # Nil when nothing rendered a template — an API action has no view time.
+    def self.render_time(spans)
+      renders = merged_intervals(spans) { |op| op == TEMPLATE_OP }
+      return nil if renders.empty?
+
+      queries = merged_intervals(spans) { |op| db_op?(op) }
+      seconds = renders.sum do |from, to|
+        (to - from) - queries.sum { |q_from, q_to| [[to, q_to].min - [from, q_from].max, 0].max }
+      end
+      (seconds * 1000).round
+    end
+
+    # The [start, end] intervals of the spans whose op the block accepts,
+    # sorted and with overlaps merged.
+    def self.merged_intervals(spans, &matches_op)
+      intervals = spans.filter_map do |span|
+        next unless matches_op.call(span["op"].to_s)
+        next unless span["start_timestamp"] && span["timestamp"]
+
+        [span["start_timestamp"], span["timestamp"]]
+      end
+
+      intervals.sort.each_with_object([]) do |(from, to), merged|
+        if merged.any? && from <= merged.last[1]
+          merged.last[1] = [merged.last[1], to].max
+        else
+          merged << [from, to]
+        end
+      end
+    end
+
     # Queries against framework/infrastructure tables — cache, job queue,
     # cable, schema bookkeeping, SQLite introspection — are not application
     # N+1s. They share a tiny set of SQL shapes (SolidCache alone fires
@@ -265,6 +305,6 @@ class Transaction
     end
 
     private_class_method :calculate_total_time_for_operations, :normalize_sql_pattern, :truncate_sql,
-      :attribute_span_durations, :n_plus_one_time_ms, :span_sql_statements
+      :attribute_span_durations, :n_plus_one_time_ms, :span_sql_statements, :render_time, :merged_intervals
   end
 end
