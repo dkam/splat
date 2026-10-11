@@ -34,14 +34,15 @@ fi
 VERSION=$(ruby -e "require './config/version'; puts Splat::VERSION")
 echo "Building v${VERSION}"
 
-# Branch policy depends on the version. A pre-release (X.Y.Z-dev) only ever
-# publishes :vX.Y.Z-dev and never moves :latest (see TAGS below), so it's safe
-# to build from any branch for testing. A real release moves :latest, so it
-# must come from main to avoid an ambiguously-tagged image.
+# Branch policy depends on the version. A pre-release (X.Y.Z-dev) never moves
+# :latest (see TAGS below), so it's safe to build from any branch for testing —
+# off main it publishes :vX.Y.Z-dev alone, because :dev feeds an instance that
+# auto-pulls and must not silently land on a feature branch. A real release
+# moves :latest, so it must come from main to avoid an ambiguously-tagged image.
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 case "$VERSION" in
   *-*)
-    [ "$BRANCH" != "main" ] && echo "Pre-release build from branch '$BRANCH' — publishes :v${VERSION} only, never :latest"
+    [ "$BRANCH" != "main" ] && echo "Pre-release build from branch '$BRANCH' — publishes :v${VERSION} only, never :dev or :latest"
     ;;
   *)
     if [ "$BRANCH" != "main" ]; then
@@ -51,11 +52,20 @@ case "$VERSION" in
     ;;
 esac
 
-# Always publish :vX.Y.Z; only move :latest for a non-pre-release version.
+# Three tags, each answering a different question:
+#   :vX.Y.Z  immutable — exactly this build, forever. Pin production to it.
+#   :latest  newest *release*; never moves for a pre-release.
+#   :dev     newest build from main, pre-release or release, whichever came
+#            last — what an instance tracking the tip of development pulls.
+#
+# :dev moves on releases too, deliberately: if it only followed pre-releases it
+# would go stale the moment a real release shipped, leaving the instance that
+# tracks it on an older image than :latest — the opposite of what it's for.
 TAGS=(-t "reg.tbdb.info/splat:v${VERSION}")
+[ "$BRANCH" = "main" ] && TAGS+=(-t reg.tbdb.info/splat:dev)
 case "$VERSION" in
-  *-*) echo "Pre-release ${VERSION} — publishing :v${VERSION} only (not :latest)" ;;
-  *)   TAGS+=(-t reg.tbdb.info/splat:latest); echo "Release ${VERSION} — publishing :v${VERSION} + :latest" ;;
+  *-*) echo "Pre-release ${VERSION} — publishing :v${VERSION}$([ "$BRANCH" = "main" ] && echo " + :dev") (not :latest)" ;;
+  *)   TAGS+=(-t reg.tbdb.info/splat:latest); echo "Release ${VERSION} — publishing :v${VERSION} + :dev + :latest" ;;
 esac
 
 # Use the multi-builder
