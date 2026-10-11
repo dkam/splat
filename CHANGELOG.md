@@ -37,7 +37,8 @@ A chained exception is grouped by the exception actually raised, with its
 causes shown on the event. Envelopes are read by byte length, as the spec
 says. And SQLite's page cache drops to 2 MB a connection, growing only while
 ingest catches up on a backlog, with a report to Splat's own Splat once a
-minute to judge the trade by.
+minute to judge the trade by. A transaction's view time is its template
+render, no longer the whole controller action with its queries counted twice.
 
 ### Changed
 
@@ -88,6 +89,26 @@ minute to judge the trade by.
 - **An event or transaction payload that isn't a JSON object is dropped at
   the door.** It used to be queued, then fail in the consumer on every retry
   until tuber buried it.
+- **A transaction's view time is its template render, not the whole
+  controller action.** Splat read view time from sentry-rails'
+  `view.process_action.action_controller` span, which despite its name times
+  the whole action, queries included — so database and view time together
+  came to more than the request: a 142 ms page showed 49% database and 96%
+  view. View time is now the template render less the queries run during it,
+  so the two never exceed the request. It falls short of Rails' own "Views:"
+  figure by the layout, which sentry-rails sends no span for; that time shows
+  as other. An action that renders no template, such as a JSON API, has no
+  view time. Transactions already stored keep the old figure until retention
+  removes them.
+- **Database and view time are no longer blank when a client sends a
+  measurement of its own.** Splat read them from the spans only when the
+  client sent no measurements at all, so any custom metric switched them off.
+  A client's own `db` or `view` measurement still wins; the spans fill in
+  whichever is missing.
+- **The span waterfall no longer draws a Rails request as one long render.**
+  The controller action span was coloured as a view render; it's drawn as
+  other now, and `get_transaction_spans` points at `template` for renders
+  rather than `view`.
 
 ### Added
 
