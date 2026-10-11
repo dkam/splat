@@ -100,4 +100,12 @@ class ApplicationHelperTest < ActionView::TestCase
   test "time_ago_compact returns a dash for nil" do
     assert_equal "\u2014", time_ago_compact(nil)
   end
+
+  # sentry-rails' view.process_action.action_controller span times the whole
+  # action \u2014 queries and all \u2014 so painting it the render colour drew nearly
+  # every Rails request as one long render.
+  test "span_op_color doesn't paint the Rails controller action as a render" do
+    assert_equal "bg-green-500", span_op_color("template.render_template.action_view")
+    assert_equal "bg-gray-500", span_op_color("view.process_action.action_controller")
+  end
 end

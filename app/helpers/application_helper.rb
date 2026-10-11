@@ -218,9 +218,14 @@ module ApplicationHelper
   # Tailwind colour for a span's bar in the waterfall view, keyed off the
   # Sentry op prefix. Op taxonomy is ~30 distinct values; bucketing by prefix
   # gets us 90% of the legibility for none of the per-op upkeep.
+  #
+  # The one exception is sentry-rails' controller span: named view.* but
+  # opened in a prepend_around_action, it times the whole action, so it's
+  # drawn as "other" rather than as a render.
   def span_op_color(op)
     return "bg-gray-400" if op.blank?
     case op
+    when "view.process_action.action_controller" then "bg-gray-500"
     when /\Adb\./ then "bg-blue-500"
     when /\Ahttp\./ then "bg-orange-500"
     when /\A(?:view|template|render)\./ then "bg-green-500"
