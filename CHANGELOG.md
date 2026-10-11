@@ -11,7 +11,29 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
-## Unreleased
+## 1.20.0 — 2026-10-12
+
+Tuber runs Splat's recurring jobs, from tuber 0.16, and Settings and
+`/_health` say when nothing does. OIDC is configured from the provider's
+issuer alone, checked against its discovery document. Errors are grouped by
+the function in your code they came from rather than a gem's line, and a
+chained exception by the exception actually raised, with its causes shown on
+the event. What eight real SDKs send is now replayed through ingest by the
+tests, and the replay found seven ways their events were lost or misread.
+Envelopes are read by byte length, as the spec says. SQLite's page cache
+drops to 2 MB a connection, growing only while ingest catches up on a
+backlog. And a transaction's view time is its template render, no longer the
+whole controller action.
+
+**Before upgrading:**
+
+1. **Upgrade tuber to 0.16 first**, backing up its binlog: the first start
+   on an older binlog needs `--migrate-wal`, and older tubers can't read the
+   result. "Recurring jobs" in the README has the steps. Staying on an older
+   tuber, start the `scheduler` service with `--profile old-tuber`, or
+   nothing fires the jobs.
+2. **Using OIDC, replace `OIDC_DISCOVERY_URL` with `OIDC_ISSUER` in `.env`**
+   before `up -d`, or the UI returns `503`. See below.
 
 ### Changed — breaking
 
@@ -39,51 +61,6 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   `OIDC_AUTH_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`, `OIDC_USERINFO_ENDPOINT` and
   `OIDC_JWKS_ENDPOINT` were documented but never read by any code. Nothing
   changed in behaviour; the docs stopped claiming otherwise.
-
-### Fixed
-
-- **A scheduled job held back by a buried earlier run is reported.** A buried
-  job keeps its `idp:` key, so every later run of that entry creates nothing.
-  Tuber said so in its reply (`INSERTED <id> BURIED`) and the scheduler threw
-  the reply away; on 2026-09-09 that hid a dead hourly rollup for three days.
-  Each lost run now logs an error and reaches Sentry, one issue per entry, so
-  the issue's count is the number of runs lost.
-- **An envelope with a header that is JSON but not an object is logged as an
-  invalid envelope,** not as an error inside Splat with a backtrace. It's
-  dropped either way.
-- **`{{ default }}` in an SDK fingerprint stands for Splat's own grouping.**
-  It was kept as literal text, so every event sharing the rest of the
-  fingerprint went into one issue, whatever its error.
-- **An SDK fingerprint sent as a string rather than a list no longer fails
-  ingest.** It raised `NoMethodError`, retried, and was buried.
-- **sentry-go's errors are ingested.** sentry-go sends `exception` as a bare
-  list rather than `{"values": [...]}`, which the protocol allows and Splat
-  didn't: every Go error failed ingest, retried, and was buried.
-- **An event's page shows breadcrumbs sent as a bare list.** @sentry/node,
-  sentry-go, sentry-java and sentry-dotnet all send them that way, and the
-  page and MCP's `get_event` failed with an error for any of their events
-  carrying one. A transaction carrying them would have failed ingest.
-- **MCP's `get_event` takes breadcrumb times written as text.** Python, Go,
-  Java and .NET send ISO 8601 strings, not epoch seconds; `get_event` failed
-  on any event with a breadcrumb, which sentry-python's logging integration
-  records by default. The page showed the raw string, and now shows the time
-  as for the others.
-- **@sentry/node's parameterised messages are shown filled in.** It sends the
-  template and its params and leaves the text for the server to make;
-  Splat showed `Card %s declined`. It's filled in now as Sentry does it.
-- **sentry-go's stack frames show their file.** They carry only `abs_path`,
-  and each showed as "unknown".
-- **Transactions from sentry-python, sentry-go, sentry-dotnet and sentry-rust
-  are ingested when they have a database span.** These SDKs send span times
-  as ISO 8601 strings (sentry-rust the end time only), and Splat subtracted
-  them as numbers: the transaction failed ingest, retried, and was buried.
-  Their spans were also put in no particular order in the waterfall, sorted
-  by the year they start with.
-
-The last seven were found by replaying what eight SDKs — Ruby, Python, Node,
-Go, Java, .NET, Rust and PHP — actually send, now recorded in
-`test/fixtures/files/sdk_envelopes/` and run through ingest by the test suite
-(`script/sdk_envelopes/` records them again).
 
 ### Changed
 
@@ -123,6 +100,17 @@ Go, Java, .NET, Rust and PHP — actually send, now recorded in
   duplicate into a no-op. `data_retention` and `cleanup_expired_oidc_sessions`
   gain keys, so a buried retention run now holds back the next night's too —
   and is reported.
+- **SQLite's page cache is 2 MB per connection, not 20 MB, and grows only
+  where it pays.** A connection fills its cache and keeps it, and the ingest
+  worker alone holds ~17 connections, so 20 MB each set a ~340 MB ceiling.
+  Each ingest consumer now raises the cache on the database it writes while
+  its reserves come back full (a backlog), and drops it 60 s after the last
+  full one. In a 2M-row benchmark the small cache cost nothing on reads and
+  ~12% on inserts at random index positions. Each consumer logs jobs and
+  ms/job at each size, plus process memory, once a minute — to the container
+  log and to `SENTRY_DSN` — so the trade can be judged on real traffic.
+  `SPLAT_SQLITE_CACHE_KB` and `SPLAT_SQLITE_CACHE_BOOST_KB` set the two sizes;
+  `SPLAT_SQLITE_CACHE_KB=20000` restores the old behaviour.
 - **An error is grouped by its type and the function in your code it came
   from.** Splat used the innermost frame's file and line. When that frame was
   inside a gem, every caller shared it: every `ActiveRecord::RecordNotFound`
@@ -147,29 +135,6 @@ Go, Java, .NET, Rust and PHP — actually send, now recorded in
   places — a gem frame shared by many callers — the first to recur keeps it,
   and the rest open as new issues as they recur, each with its notification.
   The old catch-all "Unknown Error" issue isn't carried over.
-
-## 1.20.0 — 2026-10-11
-
-A chained exception is grouped by the exception actually raised, with its
-causes shown on the event. Envelopes are read by byte length, as the spec
-says. And SQLite's page cache drops to 2 MB a connection, growing only while
-ingest catches up on a backlog, with a report to Splat's own Splat once a
-minute to judge the trade by. A transaction's view time is its template
-render, no longer the whole controller action with its queries counted twice.
-
-### Changed
-
-- **SQLite's page cache is 2 MB per connection, not 20 MB, and grows only
-  where it pays.** A connection fills its cache and keeps it, and the ingest
-  worker alone holds ~17 connections, so 20 MB each set a ~340 MB ceiling.
-  Each ingest consumer now raises the cache on the database it writes while
-  its reserves come back full (a backlog), and drops it 60 s after the last
-  full one. In a 2M-row benchmark the small cache cost nothing on reads and
-  ~12% on inserts at random index positions. Each consumer logs jobs and
-  ms/job at each size, plus process memory, once a minute — to the container
-  log and to `SENTRY_DSN` — so the trade can be judged on real traffic.
-  `SPLAT_SQLITE_CACHE_KB` and `SPLAT_SQLITE_CACHE_BOOST_KB` set the two sizes;
-  `SPLAT_SQLITE_CACHE_KB=20000` restores the old behaviour.
 
 ### Fixed
 
@@ -226,6 +191,48 @@ render, no longer the whole controller action with its queries counted twice.
   The controller action span was coloured as a view render; it's drawn as
   other now, and `get_transaction_spans` points at `template` for renders
   rather than `view`.
+- **A scheduled job held back by a buried earlier run is reported.** A buried
+  job keeps its `idp:` key, so every later run of that entry creates nothing.
+  Tuber said so in its reply (`INSERTED <id> BURIED`) and the scheduler threw
+  the reply away; on 2026-09-09 that hid a dead hourly rollup for three days.
+  Each lost run now logs an error and reaches Sentry, one issue per entry, so
+  the issue's count is the number of runs lost.
+- **An envelope with a header that is JSON but not an object is logged as an
+  invalid envelope,** not as an error inside Splat with a backtrace. It's
+  dropped either way.
+- **`{{ default }}` in an SDK fingerprint stands for Splat's own grouping.**
+  It was kept as literal text, so every event sharing the rest of the
+  fingerprint went into one issue, whatever its error.
+- **An SDK fingerprint sent as a string rather than a list no longer fails
+  ingest.** It raised `NoMethodError`, retried, and was buried.
+- **sentry-go's errors are ingested.** sentry-go sends `exception` as a bare
+  list rather than `{"values": [...]}`, which the protocol allows and Splat
+  didn't: every Go error failed ingest, retried, and was buried.
+- **An event's page shows breadcrumbs sent as a bare list.** @sentry/node,
+  sentry-go, sentry-java and sentry-dotnet all send them that way, and the
+  page and MCP's `get_event` failed with an error for any of their events
+  carrying one. A transaction carrying them would have failed ingest.
+- **MCP's `get_event` takes breadcrumb times written as text.** Python, Go,
+  Java and .NET send ISO 8601 strings, not epoch seconds; `get_event` failed
+  on any event with a breadcrumb, which sentry-python's logging integration
+  records by default. The page showed the raw string, and now shows the time
+  as for the others.
+- **@sentry/node's parameterised messages are shown filled in.** It sends the
+  template and its params and leaves the text for the server to make;
+  Splat showed `Card %s declined`. It's filled in now as Sentry does it.
+- **sentry-go's stack frames show their file.** They carry only `abs_path`,
+  and each showed as "unknown".
+- **Transactions from sentry-python, sentry-go, sentry-dotnet and sentry-rust
+  are ingested when they have a database span.** These SDKs send span times
+  as ISO 8601 strings (sentry-rust the end time only), and Splat subtracted
+  them as numbers: the transaction failed ingest, retried, and was buried.
+  Their spans were also put in no particular order in the waterfall, sorted
+  by the year they start with.
+
+The last seven were found by replaying what eight SDKs — Ruby, Python, Node,
+Go, Java, .NET, Rust and PHP — actually send, now recorded in
+`test/fixtures/files/sdk_envelopes/` and run through ingest by the test suite
+(`script/sdk_envelopes/` records them again).
 
 ### Added
 
