@@ -1,0 +1,151 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Records the envelopes real Sentry SDKs send, for test/integration/sdk_envelopes_test.rb.
+#
+#   script/sdk_envelopes/capture            # every SDK
+#   script/sdk_envelopes/capture python go  # just these
+#
+# Each SDK runs in a container (see run.sh in its directory) against a
+# recording server here, once per scenario. The project id in the DSN names
+# the scenario, so every request lands in the right file whatever order the
+# SDK sends it in:
+#
+#   test/fixtures/files/sdk_envelopes/<sdk>/<scenario>-<n>.envelope[.gz|.br|.zst|.deflate]
+#
+# The bytes are kept exactly as sent, compressed or not; the extension records
+# the Content-Encoding. See README.md.
+
+require "socket"
+require "fileutils"
+
+ROOT = File.expand_path("../..", __dir__)
+HERE = __dir__
+OUT = File.join(ROOT, "test/fixtures/files/sdk_envelopes")
+
+# Every program maps SCENARIO to a project id the same way.
+SCENARIOS = {"1" => "chained", "2" => "library_error", "3" => "message"}.freeze
+
+IMAGES = {
+  "ruby" => "ruby:3.4-slim",
+  "python" => "python:3.13-slim",
+  "node" => "node:22-slim",
+  "go" => "golang:1.25",
+  "java" => "maven:3.9-eclipse-temurin-21",
+  "rust" => "rust:1-slim",
+  "php" => "composer:2",
+  "dotnet" => "mcr.microsoft.com/dotnet/sdk:10.0"
+}.freeze
+
+EXTENSIONS = {"gzip" => ".gz", "br" => ".br", "zstd" => ".zst", "deflate" => ".deflate"}.freeze
+
+class Recorder
+  attr_reader :port
+
+  def initialize(dir)
+    @dir = dir
+    @counts = Hash.new(0)
+    @lock = Mutex.new
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.addr[1]
+  end
+
+  def start
+    @thread = Thread.new do
+      loop do
+        client = @server.accept
+        Thread.new(client) { |socket| serve(socket) }
+      end
+    rescue IOError
+      # closed by #stop
+    end
+    self
+  end
+
+  def stop
+    @server.close
+    @thread&.join
+  end
+
+  private
+
+  # HTTP/1.1, keep-alive, Content-Length or chunked bodies.
+  def serve(socket)
+    while (request_line = socket.gets)
+      method, path, = request_line.split
+      headers = read_headers(socket)
+      body = read_body(socket, headers)
+      record(method, path, headers, body)
+      socket.write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}")
+    end
+  rescue Errno::ECONNRESET, IOError
+    nil
+  ensure
+    socket.close
+  end
+
+  def read_headers(socket)
+    headers = {}
+    while (line = socket.gets) && line != "\r\n"
+      name, value = line.split(":", 2)
+      headers[name.strip.downcase] = value.to_s.strip
+    end
+    headers
+  end
+
+  def read_body(socket, headers)
+    if headers["transfer-encoding"].to_s.downcase.include?("chunked")
+      body = +"".b
+      loop do
+        size = socket.gets.to_s.strip.to_i(16)
+        if size.zero?
+          read_headers(socket) # trailers
+          break
+        end
+        body << socket.read(size)
+        socket.read(2)
+      end
+      body
+    else
+      socket.read(headers["content-length"].to_i).to_s.b
+    end
+  end
+
+  def record(method, path, headers, body)
+    scenario = path.to_s[%r{\A/api/(\d+)/envelope/?(?:\?|\z)}, 1].then { SCENARIOS[it] }
+    unless method == "POST" && scenario
+      warn "  ignored #{method} #{path}"
+      return
+    end
+
+    encoding = headers["content-encoding"].to_s.downcase
+    n = @lock.synchronize { @counts[scenario] += 1 }
+    file = File.join(@dir, "#{scenario}-#{n}.envelope#{EXTENSIONS.fetch(encoding, "")}")
+    File.binwrite(file, body)
+    warn "  #{File.basename(file)} (#{body.bytesize} bytes#{", Content-Encoding: #{encoding}" unless encoding.empty?})"
+  end
+end
+
+sdks = ARGV.empty? ? IMAGES.keys : ARGV
+unknown = sdks - IMAGES.keys
+abort "Unknown SDK: #{unknown.join(", ")} (have #{IMAGES.keys.join(", ")})" if unknown.any?
+
+sdks.each do |sdk|
+  dir = File.join(OUT, sdk)
+  FileUtils.rm_rf(dir)
+  FileUtils.mkdir_p(dir)
+
+  recorder = Recorder.new(dir).start
+  warn "#{sdk}: #{IMAGES[sdk]}"
+  # The program is copied to /app inside the container so builds don't leave
+  # root-owned files here, and frames show /app rather than this checkout.
+  ok = system(
+    "docker", "run", "--rm", "--network", "host",
+    "-v", "#{File.join(HERE, sdk)}:/src:ro",
+    "-e", "SPLAT_DSN_BASE=http://public@127.0.0.1:#{recorder.port}",
+    IMAGES[sdk], "sh", "-c", "mkdir -p /app && cp -r /src/. /app && cd /app && sh run.sh"
+  )
+  sleep 1 # let the last request land
+  recorder.stop
+  abort "#{sdk}: run.sh failed" unless ok
+end

@@ -163,7 +163,7 @@
           <% @event.breadcrumbs.each do |breadcrumb| %>
             <div class="flex items-start gap-4 text-sm py-2 border-l-2 border-gray-300 dark:border-gray-700 pl-3">
               <span class="text-gray-500 dark:text-gray-400 font-mono text-xs min-w-[140px]">
-                <%= Time.at(breadcrumb["timestamp"]).strftime("%H:%M:%S.%L") rescue breadcrumb["timestamp"] %>
+                <%= SentryProtocol::Payload.time(breadcrumb["timestamp"])&.strftime("%H:%M:%S.%L") || breadcrumb["timestamp"] %>
               </span>
               <span class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 rounded min-w-[80px] text-center">
                 <%= breadcrumb["category"] || breadcrumb["type"] %>

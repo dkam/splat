@@ -1,0 +1,3 @@
+{"sent_at":"2026-10-11T07:38:07.866Z","sdk":{"name":"sentry.javascript.node","version":"11.6.0"}}
+{"type":"session"}
+{"sid":"9c28f0fafc8343f8b2238ace91159ed1","init":true,"started":"2026-10-11T07:38:07.856Z","timestamp":"2026-10-11T07:38:07.866Z","status":"ok","errors":1,"duration":0.010411977767944336,"attrs":{"release":"fixture@1.0.0","environment":"fixture","user_agent":"Node.js/22"}}

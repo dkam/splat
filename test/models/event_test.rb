@@ -458,6 +458,23 @@ class EventTest < ActiveSupport::TestCase
     assert_not_equal card.issue_id, stock.issue_id
   end
 
+  # @sentry/node sends a template and its params with no formatted text, and
+  # leaves Sentry's server to fill it in: "%s" templates printf-style, "{0}"
+  # ones by position or name. Splat showed the template.
+  test "a message sent as a template and params, unformatted, is shown filled in" do
+    printf = Event.create_from_sentry_payload!("unformatted-1",
+      {"logentry" => {"message" => "Card %s declined after %d tries", "params" => ["4412", 3]}, "timestamp" => "2026-10-11T08:00:00Z"}, @project)
+    positional = Event.create_from_sentry_payload!("unformatted-2",
+      {"logentry" => {"message" => "Card {0} declined after {1} tries", "params" => ["4412", 3]}, "timestamp" => "2026-10-11T08:00:00Z"}, @project)
+    named = Event.create_from_sentry_payload!("unformatted-3",
+      {"logentry" => {"message" => "Card {card} declined", "params" => {"card" => "4412"}}, "timestamp" => "2026-10-11T08:00:00Z"}, @project)
+
+    assert_equal "Card 4412 declined after 3 tries", printf.message
+    assert_equal "Card 4412 declined after 3 tries", positional.message
+    assert_equal "Card 4412 declined", named.message
+    assert_equal "Card 4412 declined after 3 tries", printf.issue.title
+  end
+
   private
 
   # sentry-ruby's shape for `rescue Net::ReadTimeout; raise PaymentFailed`: the

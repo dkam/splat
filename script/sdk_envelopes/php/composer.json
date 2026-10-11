@@ -1,0 +1,14 @@
+{
+    "name": "splat/sdk-envelope-fixture",
+    "description": "See ../README.md.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "sentry/sentry": "4.34.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
+    }
+}

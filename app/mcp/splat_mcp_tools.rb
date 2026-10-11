@@ -1349,7 +1349,7 @@ class SplatMcpTools
   # Innermost frame first, the way Ruby prints a backtrace.
   def format_frames(frames)
     lines = frames.reverse.map do |frame|
-      "  at #{frame["function"] || "unknown"} (#{frame["filename"] || "unknown"}:#{frame["lineno"] || "?"})\n"
+      "  at #{frame["function"] || "unknown"} (#{SentryProtocol::Payload.frame_file(frame) || "unknown"}:#{frame["lineno"] || "?"})\n"
     end
     "```\n#{lines.join}```\n"
   end
@@ -1474,7 +1474,7 @@ class SplatMcpTools
     if breadcrumbs.present? && breadcrumbs.any?
       result += "### Breadcrumbs (Last #{[breadcrumbs.size, 10].min})\n\n"
       breadcrumbs.last(10).each do |crumb|
-        timestamp = crumb["timestamp"] ? Time.at(crumb["timestamp"]).strftime("%H:%M:%S") : "?"
+        timestamp = SentryProtocol::Payload.time(crumb["timestamp"])&.strftime("%H:%M:%S") || "?"
         category = crumb["category"] || "default"
         message = crumb["message"] || crumb["type"] || "No message"
         result += "- **[#{timestamp}]** #{category}: #{message}\n"

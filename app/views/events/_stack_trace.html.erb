@@ -6,7 +6,7 @@
         <span class="text-gray-500 min-w-[2rem] text-right"><%= index + 1 %></span>
         <div class="flex-1">
           <div>
-            <span class="text-blue-300"><%= frame["filename"] || "unknown" %></span>
+            <span class="text-blue-300"><%= SentryProtocol::Payload.frame_file(frame) || "unknown" %></span>
             <% if frame["lineno"] %>
               <span class="text-gray-500">:<%= frame["lineno"] %></span>
               <% if frame["colno"] %>

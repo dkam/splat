@@ -207,7 +207,7 @@ class Event < IssuesEventsRecord
   def user = payload&.dig("user") || {}
   def request = payload&.dig("request") || {}
   def contexts = payload&.dig("contexts") || {}
-  def breadcrumbs = payload&.dig("breadcrumbs", "values") || []
+  def breadcrumbs = payload.present? ? SentryProtocol::Payload.breadcrumbs(payload) : []
 
   # The transaction this error was thrown inside, or nil. Mirrors
   # LogsController#related_transaction — trace_id is not globally unique, so the

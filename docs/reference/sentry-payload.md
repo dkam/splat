@@ -192,10 +192,24 @@ event row is written. It prefers the SDK's `payload["fingerprint"]` when
 present, with `"{{ default }}"` in it standing for Splat's own. Booko's SDK sends
 `[]`, so in practice Splat derives one: the raised exception's type and the
 function in your code it came from — the innermost frame with `in_app: true`
-(§4), or the innermost of all when none is, named by `module` or `filename` and
-`function`. Not the line number, which moves with every edit above it, and not a
-frame inside a gem, which every caller shares. An event without an exception
-groups by its message, with numbers, UUIDs and hex ids taken out.
+(§4), named by `module` or `filename` and `function`. Not the line number, which
+moves with every edit above it, and not a frame inside a gem, which every caller
+shares. An event without an exception groups by its message, with numbers, UUIDs
+and hex ids taken out.
+
+Three cases need more than that, all seen in real SDK output (§7):
+
+- **A built-in reported as your code.** sentry-ruby sends a core method written
+  in C — `Hash#fetch`, `Integer#/` — as a frame of its own at its caller's file
+  and line, so `in_app: true`; sentry-php does the same for `json_decode`. A
+  frame at its caller's very file and line is passed over for the caller, or
+  every `KeyError` from `fetch` in the app would be one issue.
+- **No frame marked as your code.** sentry-java marks none unless
+  `inAppIncludes` is set. Then the whole stack groups, still by module and
+  function, as Sentry does — the innermost frame would be the JDK's.
+- **No stack trace.** sentry-rust sends none by default. Then the type and the
+  message, numbers taken out, as Sentry does — by type alone, every
+  `serde_json::Error` (type `Error`) in an app would be one issue.
 
 A compiled template's `function` carries a number that differs in every
 process. Rails names the method after the template's path plus
@@ -223,6 +237,24 @@ canonical name, which sentry-python's logging integration uses), each either a
 string or a `{message, params, formatted}` object (sentry-java, sentry-dotnet).
 `message` there is the template, `formatted` the template with its params filled
 in. Splat titles by `formatted` and groups by the template.
+
+## 7. Other SDKs
+
+`test/fixtures/files/sdk_envelopes/` holds what eight SDKs — Ruby, Python, Node,
+Go, Java, .NET, Rust, PHP — actually send for the same three scenarios, and
+`test/integration/sdk_envelopes_test.rb` runs them through ingest and the pages.
+`script/sdk_envelopes/README.md` records them again. What differs from the
+sentry-ruby shapes above:
+
+| | |
+|---|---|
+| `exception`, `breadcrumbs` | a bare list rather than `{"values": [...]}` — sentry-go for both; @sentry/node, sentry-java and sentry-dotnet for breadcrumbs. The protocol allows either; `SentryProtocol::Payload` reads both. |
+| breadcrumb `timestamp` | epoch seconds or an ISO 8601 string, by SDK |
+| frames | sentry-go sends `abs_path` and no `filename`. sentry-java sends no `in_app` at all by default. sentry-dotnet's `function` is a full signature, `void Checkout.Charge(string cardId)`. |
+| stack trace | none from sentry-rust unless `attach_stacktrace` is on; a Go error has none of its own, so sentry-go records where it was captured |
+| message | `logentry` from sentry-python and sentry-dotnet (the latter without `params`), a `message` object from sentry-java, `logentry` without `formatted` from @sentry/node — Splat fills the params in as Sentry's server does |
+| types | as the language names them: `*main.CheckoutError` (Go), `Example.CheckoutError` (.NET) |
+| compression | gzip from Python, Java, .NET and PHP; none from Ruby, Node, Go and Rust |
 
 ## Reading a real one yourself
 

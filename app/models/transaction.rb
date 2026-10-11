@@ -97,7 +97,7 @@ class Transaction < TransactionsSpansRecord
       view_time ||= span_timing[:view_time]
     end
 
-    breadcrumbs_values = payload.dig("breadcrumbs", "values") || []
+    breadcrumbs_values = SentryProtocol::Payload.breadcrumbs(payload)
     query_analysis = SpanAnalyzer.analyze_sql_queries(breadcrumbs_values, spans: payload["spans"] || [])
 
     # The JSON never duplicates a column: db/view are promoted to db_time/

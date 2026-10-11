@@ -4,11 +4,12 @@ class Issue
   # What makes two events one issue.
   #
   # An exception groups by its type and the function in your code it was
-  # raised from: the innermost in-app frame (the innermost of all frames when
-  # none is in-app), named by module or file and function. Not by line number,
-  # which moves whenever the file is edited, and not by a frame inside a gem,
-  # which every caller shares — every ActiveRecord::RecordNotFound comes out of
-  # the same line of active_record/core.rb.
+  # raised from: the innermost in-app frame, named by module or file and
+  # function. Not by line number, which moves whenever the file is edited, and
+  # not by a frame inside a gem, which every caller shares — every
+  # ActiveRecord::RecordNotFound comes out of the same line of
+  # active_record/core.rb. With no frame in your code, it groups by the whole
+  # stack, and with no stack trace at all by its message, as Sentry does.
   #
   # A message groups by its text, with the numbers, UUIDs and hex ids that vary
   # between occurrences taken out: "Timeout after 3021ms for user 4412" is one
@@ -43,11 +44,13 @@ class Issue
     end
 
     def exception(payload)
-      type = SentryProtocol::Payload.raised_exception(payload)&.dig("type")
+      raised = SentryProtocol::Payload.raised_exception(payload)
+      type = raised&.dig("type")
       return if type.blank?
 
-      frame = culprit_frame(SentryProtocol::Payload.stacktrace(payload)&.dig("frames"))
-      [type, (frame_identity(frame) if frame)].compact.join("::")
+      frames = SentryProtocol::Payload.stacktrace(payload)&.dig("frames")
+      frames = frames.is_a?(Array) ? frames.grep(Hash) : []
+      [type, place(frames) || described(raised)].compact.join("::")
     end
 
     def message(payload)
@@ -55,11 +58,44 @@ class Issue
       Digest::MD5.hexdigest(text.present? ? normalize_message(text) : "Unknown Error")
     end
 
-    # Frames arrive oldest first, so the innermost is last.
-    def culprit_frame(frames)
-      return if frames.blank?
+    # Where in the code: the culprit frame, or with none in your code the whole
+    # stack — sentry-java marks no frame in-app unless configured to.
+    def place(frames)
+      return if frames.empty?
 
-      frames.rfind { it["in_app"] == true } || frames.last
+      frame = culprit_frame(frames)
+      return frame_identity(frame) if frame
+
+      identities = frames.map { frame_identity(it) }.chunk_while { _1 == _2 }.map(&:first) # recursion
+      Digest::MD5.hexdigest(identities.join("\n"))
+    end
+
+    # The innermost in-app frame. Frames arrive oldest first, so that's the
+    # last one marked in_app, unless it sits at its caller's very file and
+    # line: a built-in the caller called, which sentry-ruby (Hash#fetch,
+    # Integer#/) and sentry-php (json_decode) report as a frame of its own at
+    # the caller's place, so as your code. Then it's the caller.
+    def culprit_frame(frames)
+      index = frames.rindex { it["in_app"] == true }
+      return if index.nil?
+
+      index -= 1 while index.positive? && same_place?(frames[index], frames[index - 1])
+      frames[index]
+    end
+
+    def same_place?(frame, caller)
+      file = SentryProtocol::Payload.frame_file(frame)
+      file.present? && frame["lineno"].present? &&
+        file == SentryProtocol::Payload.frame_file(caller) && frame["lineno"] == caller["lineno"]
+    end
+
+    # With no stack trace — sentry-rust's default — its message, without the
+    # numbers and ids that vary, and without a Ruby error_highlight snippet.
+    def described(exception)
+      value = exception["value"]
+      return if value.blank? || !value.is_a?(String)
+
+      Digest::MD5.hexdigest(normalize_message(ExceptionMessage.headline(value)))
     end
 
     # Module or file, and function: what survives an edit elsewhere in the file
@@ -108,7 +144,7 @@ class Issue
     # object failed ingest.
     def as_of_1_19_4(payload)
       sdk = payload["fingerprint"]
-      root = payload.dig("exception", "values", 0)
+      root = SentryProtocol::Payload.exceptions(payload).first
       message = payload["message"]
 
       if sdk.present?

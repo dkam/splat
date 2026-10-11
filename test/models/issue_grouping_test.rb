@@ -38,13 +38,48 @@ class IssueGroupingTest < ActiveSupport::TestCase
     assert_equal first.issue_id, after_restart.issue_id
   end
 
-  test "with no frame in your code, the innermost frame stands in" do
+  # sentry-ruby reports a core method written in C — Hash#fetch, Integer#/ — as
+  # a frame of its own at its caller's file and line, so as your code. So does
+  # sentry-php for a built-in like json_decode. Measured from sentry-ruby 7.0.0.
+  test "an error raised by a core method groups by the function in your code that called it" do
+    price = ingest(exception_payload("KeyError",
+      frame("app/models/book.rb", 4, "fetch", "Hash"),
+      frame("app/models/book.rb", 4, "price", "Book"),
+      frame("app/controllers/books_controller.rb", 10, "show", "BooksController")))
+    stock = ingest(exception_payload("KeyError",
+      frame("app/models/book.rb", 9, "fetch", "Hash"),
+      frame("app/models/book.rb", 9, "stock", "Book"),
+      frame("app/controllers/books_controller.rb", 11, "show", "BooksController")))
+
+    assert_equal "KeyError::Book::price", price.issue.fingerprint
+    assert_equal "KeyError::Book::stock", stock.issue.fingerprint
+  end
+
+  # As Sentry does: without a frame of your code to anchor on, the whole stack.
+  test "with no frame in your code, the whole stack stands in, without line numbers" do
     before_upgrade = ingest(exception_payload("Net::ReadTimeout",
-      frame("net/protocol.rb", 229, "rbuf_fill", "Net::BufferedIO", app: false)))
+      frame("net/protocol.rb", 229, "rbuf_fill", "Net::BufferedIO", app: false),
+      frame("net/http.rb", 1500, "request", "Net::HTTP", app: false)))
     after_upgrade = ingest(exception_payload("Net::ReadTimeout",
-      frame("net/protocol.rb", 231, "rbuf_fill", "Net::BufferedIO", app: false)))
+      frame("net/protocol.rb", 231, "rbuf_fill", "Net::BufferedIO", app: false),
+      frame("net/http.rb", 1512, "request", "Net::HTTP", app: false)))
+    other_caller = ingest(exception_payload("Net::ReadTimeout",
+      frame("net/protocol.rb", 229, "rbuf_fill", "Net::BufferedIO", app: false),
+      frame("net/smtp.rb", 600, "deliver", "Net::SMTP", app: false)))
 
     assert_equal before_upgrade.issue_id, after_upgrade.issue_id
+    assert_not_equal before_upgrade.issue_id, other_caller.issue_id
+  end
+
+  # As Sentry does: sentry-rust sends none by default. By type alone, every
+  # serde_json::Error in an app — type "Error" — was one issue.
+  test "an exception with no stack trace groups by its type and message, without the numbers" do
+    eof = ingest(exception_payload("Error").merge("exception" => {"values" => [{"type" => "Error", "value" => "EOF while parsing an object at line 1 column 1"}]}))
+    eof_elsewhere = ingest(exception_payload("Error").merge("exception" => {"values" => [{"type" => "Error", "value" => "EOF while parsing an object at line 3 column 14"}]}))
+    refused = ingest(exception_payload("Error").merge("exception" => {"values" => [{"type" => "Error", "value" => "Connection refused (os error 111)"}]}))
+
+    assert_equal eof.issue_id, eof_elsewhere.issue_id
+    assert_not_equal eof.issue_id, refused.issue_id
   end
 
   # ---- An SDK's own fingerprint

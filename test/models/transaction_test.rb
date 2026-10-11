@@ -26,6 +26,21 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal 250, transaction.duration # 250ms
   end
 
+  # @sentry/node, sentry-go, sentry-java and sentry-dotnet send breadcrumbs as
+  # a bare list rather than {"values": [...]} (script/sdk_envelopes).
+  test "create_from_sentry_payload! takes breadcrumbs sent as a bare list" do
+    payload = {
+      "transaction" => "GET /api/users",
+      "start_timestamp" => "2025-10-18T08:00:00.000Z",
+      "timestamp" => "2025-10-18T08:00:00.250Z",
+      "breadcrumbs" => [{"category" => "query", "message" => "SELECT 1", "timestamp" => "2025-10-18T08:00:00.100Z"}]
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-bare-breadcrumbs", payload, @project)
+
+    assert_equal 250, transaction.duration
+  end
+
   test "create_from_sentry_payload! promotes trace_id from the trace context" do
     payload = {
       "transaction" => "GET /x",

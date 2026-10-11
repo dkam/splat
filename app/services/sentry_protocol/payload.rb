@@ -2,17 +2,26 @@
 
 module SentryProtocol
   # Readers for the parts of an event payload that SDKs send in more than one
-  # shape. Grouping, titles, the promoted event columns and the MCP tools all
-  # read through here, so they agree on what an event says.
+  # shape. Grouping, titles, the promoted event columns, the pages and the MCP
+  # tools all read through here, so they agree on what an event says.
+  # test/integration/sdk_envelopes_test.rb holds the shapes real SDKs send.
   module Payload
     module_function
 
     # Chained exceptions are listed oldest to newest — sentry-ruby reverses the
     # cause chain to match — so values[0] is the root cause and the raised
     # exception is last.
-    def exceptions(payload)
-      values = payload.dig("exception", "values")
-      values.is_a?(Array) ? values : []
+    def exceptions(payload) = listed(payload["exception"])
+
+    # Oldest first, as sent.
+    def breadcrumbs(payload) = listed(payload["breadcrumbs"])
+
+    # An interface holding a list arrives as {"values": [...]} or, from
+    # sentry-go, @sentry/node, sentry-java and sentry-dotnet, as the bare list;
+    # the protocol allows both.
+    def listed(interface)
+      values = interface.is_a?(Hash) ? interface["values"] : interface
+      values.is_a?(Array) ? values.grep(Hash) : []
     end
 
     # The exception that was raised. For Rails' ActionView::Template::Error
@@ -36,13 +45,30 @@ module SentryProtocol
       nil
     end
 
+    # A frame's file as an SDK names it. sentry-go sends only the absolute path.
+    def frame_file(frame) = frame["filename"].presence || frame["abs_path"].presence
+
+    # A breadcrumb's time, which arrives as epoch seconds or an ISO 8601 string
+    # depending on the SDK. Nil when it's neither.
+    def time(value)
+      case value
+      when Numeric then Time.at(value)
+      when String then Time.iso8601(value)
+      end
+    rescue ArgumentError
+      nil
+    end
+
     # The message to show. It arrives as "message" or as "logentry"
     # (sentry-python's logging integration), and as a string or a
     # {message, params, formatted} object (sentry-java, sentry-dotnet), where
-    # `formatted` is the template with its params filled in.
+    # `formatted` is the template with its params filled in. @sentry/node
+    # leaves `formatted` out, for the server to fill in.
     def message(payload)
       raw = raw_message(payload)
-      raw.is_a?(Hash) ? (raw["formatted"].presence || raw["message"].presence) : raw.presence
+      return raw.presence unless raw.is_a?(Hash)
+
+      raw["formatted"].presence || fill_in(raw["message"], raw["params"]) || raw["message"].presence
     end
 
     # The message to group by: the template where there is one, so
@@ -54,6 +80,37 @@ module SentryProtocol
 
     def raw_message(payload)
       payload["message"].presence || payload["logentry"].presence
+    end
+
+    PRINTF_PLACEHOLDER = /%(?:\((\w+)\))?[-#0 +]*\d*(?:\.\d+)?([diouxXeEfFgGcrsa%])/
+    CURLY_PLACEHOLDER = /\{(\w*)\}/
+
+    # A template with its params filled in, the way Sentry's server does it
+    # (Relay's normalize_logentry): a template with "%" printf-style — "%s",
+    # "%(name)s" — or else one with "{" by position or name — "{}", "{0}",
+    # "{card}". Nil when a placeholder has no param, as Relay leaves those.
+    def fill_in(template, params)
+      return unless template.is_a?(String)
+      return unless params.is_a?(Array) || params.is_a?(Hash)
+
+      position = -1
+      param = ->(name) do
+        key = name.presence || (position += 1)
+        value = if params.is_a?(Hash)
+          params[key.to_s]
+        elsif (index = key.is_a?(Integer) ? key : Integer(key, 10, exception: false))
+          params[index]
+        end
+        value.nil? ? throw(:missing) : value.to_s
+      end
+
+      catch(:missing) do
+        if template.include?("%")
+          template.gsub(PRINTF_PLACEHOLDER) { ($2 == "%") ? "%" : param.call($1) }
+        elsif template.include?("{")
+          template.gsub(CURLY_PLACEHOLDER) { param.call($1) }
+        end
+      end
     end
   end
 end

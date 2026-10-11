@@ -26,6 +26,28 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   fingerprint went into one issue, whatever its error.
 - **An SDK fingerprint sent as a string rather than a list no longer fails
   ingest.** It raised `NoMethodError`, retried, and was buried.
+- **sentry-go's errors are ingested.** sentry-go sends `exception` as a bare
+  list rather than `{"values": [...]}`, which the protocol allows and Splat
+  didn't: every Go error failed ingest, retried, and was buried.
+- **An event's page shows breadcrumbs sent as a bare list.** @sentry/node,
+  sentry-go, sentry-java and sentry-dotnet all send them that way, and the
+  page and MCP's `get_event` failed with an error for any of their events
+  carrying one. A transaction carrying them would have failed ingest.
+- **MCP's `get_event` takes breadcrumb times written as text.** Python, Go,
+  Java and .NET send ISO 8601 strings, not epoch seconds; `get_event` failed
+  on any event with a breadcrumb, which sentry-python's logging integration
+  records by default. The page showed the raw string, and now shows the time
+  as for the others.
+- **@sentry/node's parameterised messages are shown filled in.** It sends the
+  template and its params and leaves the text for the server to make;
+  Splat showed `Card %s declined`. It's filled in now as Sentry does it.
+- **sentry-go's stack frames show their file.** They carry only `abs_path`,
+  and each showed as "unknown".
+
+All of these were found by replaying what eight SDKs — Ruby, Python, Node,
+Go, Java, .NET, Rust and PHP — actually send, now recorded in
+`test/fixtures/files/sdk_envelopes/` and run through ingest by the test suite
+(`script/sdk_envelopes/` records them again).
 
 ### Changed
 
@@ -40,10 +62,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   inside a gem, every caller shared it: every `ActiveRecord::RecordNotFound`
   from `find` was one issue, wherever it was called. And an edit that moved
   the line split the issue in two after the next deploy. Now it's the
-  innermost frame marked as your code (the innermost of all where none is),
-  by module or file and function, with no line number. Rails' compiled
-  template methods carry a number that changes with every restart, which is
-  stripped.
+  innermost frame marked as your code, by module or file and function, with
+  no line number. Rails' compiled template methods carry a number that
+  changes with every restart, which is stripped. A core method like
+  `Hash#fetch`, which sentry-ruby reports at its caller's line as if it were
+  your code, is passed over for the caller. With no frame marked as your code
+  (sentry-java, unless configured), the whole stack groups; with no stack
+  trace at all (sentry-rust's default), the type and the message — both as
+  Sentry does.
 - **Messages that differ only in numbers, UUIDs or hex ids are one issue.**
   "Timeout after 3021ms for user 4412" no longer opens an issue per user.
   The title is still the first message seen.
