@@ -84,23 +84,32 @@ When you need error tracking that:
 
 ## Screenshots
 
-### 1. Projects Dashboard
-[![Projects Dashboard](docs/screenshots/thumbs/1-projects.png)](docs/screenshots/1-projects.png)
+<p align="center">
+  <img src="docs/screenshots/tour.webp" width="800" alt="A tour of Splat: projects, project overview, issues, issue detail, an event, performance, endpoint detail, a transaction, logs, a log entry and cron monitors">
+</p>
 
-### 2. Project Detail View
-[![Project Detail](docs/screenshots/thumbs/2-project.png)](docs/screenshots/2-project.png)
-
-### 3. Issues List
-[![Issues List](docs/screenshots/thumbs/3-issues.png)](docs/screenshots/3-issues.png)
-
-### 4. Issue Detail with Stack Trace
-[![Issue Detail](docs/screenshots/thumbs/4-issue.png)](docs/screenshots/4-issue.png)
-
-### 5. Event Details
-[![Event Details](docs/screenshots/thumbs/5-event.png)](docs/screenshots/5-event.png)
-
-### 6. Performance Monitoring
-[![Performance Monitoring](docs/screenshots/thumbs/6-performance.png)](docs/screenshots/6-performance.png)
+<table>
+  <tr>
+    <td align="center"><a href="docs/screenshots/1-projects.png"><img src="docs/screenshots/thumbs/1-projects.png" width="230" alt="Projects"></a><br><sub>Projects</sub></td>
+    <td align="center"><a href="docs/screenshots/2-project.png"><img src="docs/screenshots/thumbs/2-project.png" width="230" alt="Project overview"></a><br><sub>Project overview</sub></td>
+    <td align="center"><a href="docs/screenshots/11-monitors.png"><img src="docs/screenshots/thumbs/11-monitors.png" width="230" alt="Cron monitors"></a><br><sub>Cron monitors</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/3-issues.png"><img src="docs/screenshots/thumbs/3-issues.png" width="230" alt="Issues"></a><br><sub>Issues</sub></td>
+    <td align="center"><a href="docs/screenshots/4-issue.png"><img src="docs/screenshots/thumbs/4-issue.png" width="230" alt="Issue detail"></a><br><sub>Issue detail</sub></td>
+    <td align="center"><a href="docs/screenshots/5-event.png"><img src="docs/screenshots/thumbs/5-event.png" width="230" alt="Event"></a><br><sub>Event</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/6-performance.png"><img src="docs/screenshots/thumbs/6-performance.png" width="230" alt="Performance"></a><br><sub>Performance</sub></td>
+    <td align="center"><a href="docs/screenshots/7-endpoint.png"><img src="docs/screenshots/thumbs/7-endpoint.png" width="230" alt="Endpoint detail"></a><br><sub>Endpoint detail</sub></td>
+    <td align="center"><a href="docs/screenshots/8-transaction.png"><img src="docs/screenshots/thumbs/8-transaction.png" width="230" alt="Transaction"></a><br><sub>Transaction</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/9-logs.png"><img src="docs/screenshots/thumbs/9-logs.png" width="230" alt="Logs"></a><br><sub>Logs</sub></td>
+    <td align="center"><a href="docs/screenshots/10-log.png"><img src="docs/screenshots/thumbs/10-log.png" width="230" alt="Log entry, linked to its trace"></a><br><sub>Log entry → trace</sub></td>
+    <td></td>
+  </tr>
+</table>
 
 ## Getting Started
 
