@@ -11,7 +11,13 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
-## Unreleased
+## 1.20.0 — 2026-10-11
+
+A chained exception is grouped by the exception actually raised, with its
+causes shown on the event. Envelopes are read by byte length, as the spec
+says. And SQLite's page cache drops to 2 MB a connection, growing only while
+ingest catches up on a backlog, with a report to Splat's own Splat once a
+minute to judge the trade by.
 
 ### Changed
 
