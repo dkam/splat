@@ -24,7 +24,7 @@ HERE = __dir__
 OUT = File.join(ROOT, "test/fixtures/files/sdk_envelopes")
 
 # Every program maps SCENARIO to a project id the same way.
-SCENARIOS = {"1" => "chained", "2" => "library_error", "3" => "message"}.freeze
+SCENARIOS = {"1" => "chained", "2" => "library_error", "3" => "message", "4" => "transaction"}.freeze
 
 IMAGES = {
   "ruby" => "ruby:3.4-slim",

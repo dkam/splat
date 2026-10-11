@@ -2,7 +2,7 @@ require "test_helper"
 
 # Envelopes recorded from real Sentry SDKs, through the whole ingest path: the
 # endpoint, posted as the SDK posted them; the queue; the consumer; then the
-# pages and MCP tools that show the result. Every SDK runs the same three
+# pages and MCP tools that show the result. Every SDK runs the same four
 # scenarios — script/sdk_envelopes/README.md says what they are and how to
 # record them again.
 class SdkEnvelopesTest < ActionDispatch::IntegrationTest
@@ -100,19 +100,69 @@ class SdkEnvelopesTest < ActionDispatch::IntegrationTest
       assert_equal 1, events.map(&:issue_id).uniq.size
       events.each { assert_shown(it) }
     end
+
+    # Span timestamps arrive as epoch seconds (Ruby, Java, PHP), as ISO 8601
+    # strings (Python, Go, .NET), or one of each (Rust: start, then end).
+    test "#{sdk}: a transaction with two queries, timed by its spans" do
+      skip "@sentry/node 11 streams spans (span v2 items) instead of sending a transaction" if sdk == "node"
+      transaction = ingest_transactions(sdk).sole
+
+      assert_equal ["POST /checkout", "http.server"], [transaction.transaction_name, transaction.op]
+      # Each query is held open 10 ms, one after the other.
+      assert_operator transaction.db_time, :>=, 20
+      assert_operator transaction.duration, :>=, transaction.db_time
+      queries = transaction.query_patterns.fetch("SELECT * FROM cards WHERE id = ?")
+      assert_equal 2, queries["count"]
+      assert_operator queries["total_time_ms"], :>=, 20
+
+      spans = SpanTree.find_by!(project_id: @project.id, transaction_id: transaction.transaction_id).tree["spans"]
+      assert_equal ["POST /checkout", "SELECT * FROM cards WHERE id = ?", "SELECT * FROM cards WHERE id = ?"],
+        spans.map { it["description"] }
+      starts = spans.map { Time.iso8601(it["ts"]) }
+      assert_equal starts.sort, starts
+      assert_operator starts.last - starts[1], :>=, 0.01
+
+      get project_transaction_url(@project.slug, transaction)
+      assert_response :success
+      [SplatMcpTools.new.get_transaction("transaction_id" => transaction.transaction_id),
+        SplatMcpTools.new.get_transaction_spans("transaction_id" => transaction.transaction_id)].each do |result|
+        assert_not result.error?, result.content.inspect
+      end
+    end
   end
 
   private
 
-  # Posts a scenario's envelopes as recorded, compressed or not, and runs what
-  # they queue through the consumer's own call — after a round trip through
-  # JSON, as a job on the queue takes.
+  # The events a scenario queues, through the call the event consumer makes.
   def ingest(sdk, scenario)
+    queued(sdk, scenario, Ingest::Tuber::EVENTS_TUBE).map do
+      Event.create_from_sentry_payload!(it["event_id"], it["payload"], @project)
+    end
+  end
+
+  # Through the consumer itself, which also builds the span tree and retries
+  # a job that raises.
+  def ingest_transactions(sdk)
+    job = Struct.new(:body, :outcome) do
+      def delete = self.outcome = :done
+      def release(**) = self.outcome = :retried
+      def stats = Struct.new(:releases).new(0)
+    end
+    jobs = queued(sdk, "transaction", Ingest::Tuber::TRANSACTIONS_TUBE).map { job.new(JSON.generate(it)) }
+    Ingest::TransactionConsumer.new.send(:process_batch, jobs)
+
+    assert_equal [:done], jobs.map(&:outcome).uniq, "The consumer failed a job; log/test.log says why"
+    Transaction.where(project: @project).to_a
+  end
+
+  # What a scenario's envelopes, posted as recorded, compressed or not, put on
+  # the tube — after a round trip through JSON, as a job on the queue takes.
+  def queued(sdk, scenario, tube)
     files = Dir[FIXTURES.join(sdk, "#{scenario}-*")].sort
     assert files.any?, "No #{sdk} #{scenario} envelopes: run script/sdk_envelopes/capture #{sdk}"
 
     jobs = []
-    queue = ->(tube, job, **) { jobs << JSON.parse(JSON.generate(job)) if tube == Ingest::Tuber::EVENTS_TUBE }
+    queue = ->(to, job, **) { jobs << JSON.parse(JSON.generate(job)) if to == tube }
     with_stub(Ingest::Tuber, :put, queue) do
       files.each do |file|
         headers = {"Content-Type" => "application/x-sentry-envelope", "Content-Encoding" => ENCODINGS[File.extname(file)]}
@@ -120,8 +170,7 @@ class SdkEnvelopesTest < ActionDispatch::IntegrationTest
         assert_response :success
       end
     end
-
-    jobs.map { Event.create_from_sentry_payload!(it["event_id"], it["payload"], @project) }
+    jobs
   end
 
   # The event's page, its issue's page, and the MCP tools that describe them

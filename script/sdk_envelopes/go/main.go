@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"github.com/getsentry/sentry-go"
 )
 
-var projects = map[string]int{"chained": 1, "library_error": 2, "message": 3}
+var projects = map[string]int{"chained": 1, "library_error": 2, "message": 3, "transaction": 4}
 
 var receipt = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0x0A, 0x72, 0x65, 0x63, 0x0A, 0x0A}
 
@@ -57,6 +58,9 @@ func main() {
 		Release:     "fixture@1.0.0",
 		Environment: "fixture",
 		ServerName:  "fixture-host",
+		// Tracing only for the scenario that needs it.
+		EnableTracing:    scenario == "transaction",
+		TracesSampleRate: 1.0,
 	})
 	if err != nil {
 		panic(err)
@@ -78,5 +82,13 @@ func main() {
 	case "message":
 		sentry.CaptureMessage("Card 4412 declined")
 		sentry.CaptureMessage("Card 9001 declined")
+	case "transaction":
+		transaction := sentry.StartTransaction(context.Background(), "POST /checkout", sentry.WithOpName("http.server"))
+		for _, card := range []string{"4412", "9001"} {
+			span := transaction.StartChild("db.sql.query", sentry.WithDescription("SELECT * FROM cards WHERE id = "+card))
+			time.Sleep(10 * time.Millisecond)
+			span.Finish()
+		}
+		transaction.Finish()
 	}
 }

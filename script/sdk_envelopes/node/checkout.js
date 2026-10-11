@@ -1,7 +1,7 @@
 // See ../README.md.
 const Sentry = require("@sentry/node");
 
-const PROJECTS = { chained: 1, library_error: 2, message: 3 };
+const PROJECTS = { chained: 1, library_error: 2, message: 3, transaction: 4 };
 const RECEIPT = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x0a, 0x72, 0x65, 0x63, 0x0a, 0x0a]);
 
 class CardNotFound extends Error {
@@ -45,6 +45,7 @@ async function main() {
     release: "fixture@1.0.0",
     environment: "fixture",
     serverName: "fixture-host",
+    tracesSampleRate: scenario === "transaction" ? 1.0 : undefined,
   });
 
   if (scenario === "chained") {
@@ -70,6 +71,14 @@ async function main() {
     for (const card of ["4412", "9001"]) {
       Sentry.captureMessage(Sentry.parameterize`Card ${card} declined`);
     }
+  } else if (scenario === "transaction") {
+    await Sentry.startSpan({ name: "POST /checkout", op: "http.server" }, async () => {
+      for (const card of ["4412", "9001"]) {
+        await Sentry.startSpan({ name: `SELECT * FROM cards WHERE id = ${card}`, op: "db.sql.query" }, () =>
+          new Promise((resolve) => setTimeout(resolve, 10)),
+        );
+      }
+    });
   }
 
   await Sentry.close(5000);

@@ -71,6 +71,41 @@ class IssueGroupingTest < ActiveSupport::TestCase
     assert_not_equal before_upgrade.issue_id, other_caller.issue_id
   end
 
+  # The JVM names the classes it generates — reflection accessors, proxies,
+  # Spring and Hibernate subclasses, lambdas — with numbers and hashes that
+  # differ from one run to the next. sentry-java marks no frame in-app by
+  # default, so they're in the whole stack that stands in. Taken out as Sentry
+  # does; $Proxy's number too, which Sentry leaves.
+  test "a Java error through generated classes is the same issue after a restart" do
+    stack = ->(accessor, proxy, cglib, hibernate, lambda_class, lambda_n) do
+      exception_payload("IllegalStateException",
+        java_frame("com.example.Card#{hibernate}", "getNumber"),
+        java_frame("com.example.CheckoutService", "lambda$charge$#{lambda_n}"),
+        java_frame("com.example.CheckoutService#{lambda_class}", "accept"),
+        java_frame("com.example.CheckoutService#{cglib}", "charge"),
+        java_frame(proxy, "charge"),
+        java_frame("jdk.internal.reflect.GeneratedMethodAccessor#{accessor}", "invoke"),
+        java_frame("com.example.Checkout", "main"))
+    end
+
+    # Spring 5 on JDK 17, then Spring 6 on JDK 21, which name them differently.
+    before = ingest(stack.call(123, "jdk.proxy2.$Proxy45", "$$EnhancerBySpringCGLIB$$a1b2c3d4", "$HibernateProxy$Ab12Cd34",
+      "$$Lambda$14/0x0000000800c02a00", 0))
+    after_restart = ingest(stack.call(456, "jdk.proxy3.$Proxy47", "$$EnhancerBySpringCGLIB$$9f8e7d6c", "$HibernateProxy$Zz98Yy76",
+      "$$Lambda$15/0x0000000800c41b38", 2))
+    jdk_21 = ingest(stack.call(789, "jdk.proxy2.$Proxy12", "$$SpringCGLIB$$0", "$HibernateProxy$Qq55Rr44",
+      "$$Lambda/0x000071b4a0003a00", 1))
+    jdk_21_after_restart = ingest(stack.call(790, "jdk.proxy2.$Proxy13", "$$SpringCGLIB$$1", "$HibernateProxy$Pp11Oo22",
+      "$$Lambda/0x00007f00c0004b10", 0))
+    other_service = ingest(exception_payload("IllegalStateException",
+      java_frame("com.example.OrderService$$EnhancerBySpringCGLIB$$a1b2c3d4", "place"),
+      java_frame("com.example.Checkout", "main")))
+
+    assert_equal before.issue_id, after_restart.issue_id
+    assert_equal jdk_21.issue_id, jdk_21_after_restart.issue_id
+    assert_not_equal before.issue_id, other_service.issue_id
+  end
+
   # As Sentry does: sentry-rust sends none by default. By type alone, every
   # serde_json::Error in an app — type "Error" — was one issue.
   test "an exception with no stack trace groups by its type and message, without the numbers" do
@@ -184,6 +219,14 @@ class IssueGroupingTest < ActiveSupport::TestCase
   # A frame as sentry-ruby sends it. `app: false` is a gem's.
   def frame(filename, lineno, function, module_name = nil, app: true)
     {"filename" => filename, "lineno" => lineno, "function" => function, "module" => module_name, "in_app" => app}.compact
+  end
+
+  # A frame as sentry-java sends it by default: no in_app, and a generated
+  # class has no source file.
+  def java_frame(class_name, method)
+    generated = class_name.match?(/\$\$|\$Proxy|\$HibernateProxy\$|Accessor\d/)
+    {"module" => class_name, "function" => method, "filename" => (generated ? nil : "#{class_name.split(".").last}.java"),
+     "lineno" => (generated ? nil : 10)}.compact
   end
 
   # Frames innermost first, as Ruby prints a backtrace; Sentry sends them the

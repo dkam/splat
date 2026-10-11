@@ -26,6 +26,25 @@ class Issue
     # An anonymous class in a label: "block in #<Class:0x000055d5c3a0>#call".
     OBJECT_ADDRESS = /0x\h+/
 
+    # Classes the JVM generates, named with numbers and hashes that differ from
+    # one run to the next, and what's kept of each name. Sentry's list, plus
+    # $Proxy's number, which Sentry leaves in.
+    JVM_GENERATED = [
+      [/(Generated(?:Method|(?:Serialization)?Constructor)Accessor)\d+/, '\1'], # reflection
+      [/(\$\$\w+?CGLIB\$\$)\h+(?:_\d+)?/, '\1'],                                 # Spring
+      [/(\$\$?EnhancerBy\w+?\$?\$)\h+(?:_\d+)?/, '\1'],
+      [/(\$\$?FastClassBy\w+?\$?\$)\h+(?:_\d+)?/, '\1'],
+      [/(\$\$?HibernateProxy\$?\$)\w+(?:_\d+)?/, '\1'],
+      [/(\$\$_javassist)(?:_seam)?(?:_\d+)?/, '\1'],
+      [/(\$fn__)\d+/, '\1'],                                                     # Clojure
+      [/(\$\$Lambda)\S*/, '\1'],             # $$Lambda$14/0x0000000800c02a00, $$Lambda/0x… on JDK 21
+      [/\A(jdk\.proxy)\d+\./, '\1.'],        # jdk.proxy2.$Proxy45
+      [/(\$Proxy)\d+/, '\1']
+    ].freeze
+    # A lambda's body, numbered in the order the class declares its lambdas:
+    # lambda$charge$0.
+    JAVA_LAMBDA_BODY = /\A(lambda\$.*)\$\d+\z/
+
     # A hex id is 8 or more hex digits with at least one number among them, so
     # words like "deadbeef" or "accessed" survive.
     HEX_ID = /\b(?:0x\h+|(?=\h*\d)\h{8,})\b/i
@@ -101,9 +120,15 @@ class Issue
     # Module or file, and function: what survives an edit elsewhere in the file
     # and a restart. The line number stands in only for a missing function.
     def frame_identity(frame)
-      place = frame["module"].presence || frame["filename"].presence || frame["abs_path"]
-      function = frame["function"].to_s.sub(COMPILED_TEMPLATE_SUFFIX, "").gsub(OBJECT_ADDRESS, "0x")
+      place = without_generated(frame["module"].to_s).presence || frame["filename"].presence || frame["abs_path"]
+      function = frame["function"].to_s.sub(COMPILED_TEMPLATE_SUFFIX, "").sub(JAVA_LAMBDA_BODY, '\1').gsub(OBJECT_ADDRESS, "0x")
       [place, function.presence || frame["lineno"]].join("::")
+    end
+
+    def without_generated(class_name)
+      return class_name unless class_name.include?("$") || class_name.include?("Accessor")
+
+      JVM_GENERATED.reduce(class_name) { |name, (pattern, kept)| name.gsub(pattern, kept) }
     end
 
     def normalize_message(text)

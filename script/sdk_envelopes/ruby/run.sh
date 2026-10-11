@@ -1,5 +1,5 @@
 set -e
 gem install --silent --no-document sentry-ruby -v 7.0.0
-for scenario in chained library_error message; do
+for scenario in chained library_error message transaction; do
   SCENARIO=$scenario ruby lib/checkout.rb
 done

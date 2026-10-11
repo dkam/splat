@@ -206,7 +206,12 @@ Three cases need more than that, all seen in real SDK output (§7):
   every `KeyError` from `fetch` in the app would be one issue.
 - **No frame marked as your code.** sentry-java marks none unless
   `inAppIncludes` is set. Then the whole stack groups, still by module and
-  function, as Sentry does — the innermost frame would be the JDK's.
+  function, as Sentry does — the innermost frame would be the JDK's. The JVM
+  names the classes it generates with numbers and hashes that change every
+  run — `GeneratedMethodAccessor123`, `$Proxy45`,
+  `$$EnhancerBySpringCGLIB$$a1b2c3d4`, `$HibernateProxy$…`, `$$Lambda$14/0x…`,
+  and `lambda$charge$0` for a lambda's body — so those are taken out first,
+  or every restart would open the issue again.
 - **No stack trace.** sentry-rust sends none by default. Then the type and the
   message, numbers taken out, as Sentry does — by type alone, every
   `serde_json::Error` (type `Error`) in an app would be one issue.
@@ -241,7 +246,7 @@ in. Splat titles by `formatted` and groups by the template.
 ## 7. Other SDKs
 
 `test/fixtures/files/sdk_envelopes/` holds what eight SDKs — Ruby, Python, Node,
-Go, Java, .NET, Rust, PHP — actually send for the same three scenarios, and
+Go, Java, .NET, Rust, PHP — actually send for the same four scenarios, and
 `test/integration/sdk_envelopes_test.rb` runs them through ingest and the pages.
 `script/sdk_envelopes/README.md` records them again. What differs from the
 sentry-ruby shapes above:
@@ -255,6 +260,8 @@ sentry-ruby shapes above:
 | message | `logentry` from sentry-python and sentry-dotnet (the latter without `params`), a `message` object from sentry-java, `logentry` without `formatted` from @sentry/node — Splat fills the params in as Sentry's server does |
 | types | as the language names them: `*main.CheckoutError` (Go), `Example.CheckoutError` (.NET) |
 | compression | gzip from Python, Java, .NET and PHP; none from Ruby, Node, Go and Rust |
+| span `start_timestamp`, `timestamp` | epoch seconds from Ruby, Java and PHP; ISO 8601 strings from Python, Go and .NET; sentry-rust sends the start as seconds and the end as a string |
+| transactions | @sentry/node 11 sends none: it streams spans instead, as `span` items in the span v2 format (`application/vnd.sentry.items.span.v2+json`), the transaction as a span with `is_segment: true`. Splat doesn't read these yet, so @sentry/node's performance data is dropped. |
 
 ## Reading a real one yourself
 

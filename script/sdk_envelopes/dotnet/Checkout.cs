@@ -11,7 +11,7 @@ public class CheckoutError(string message, Exception inner) : Exception(message,
 
 public static class Checkout
 {
-    static readonly Dictionary<string, int> Projects = new() { ["chained"] = 1, ["library_error"] = 2, ["message"] = 3 };
+    static readonly Dictionary<string, int> Projects = new() { ["chained"] = 1, ["library_error"] = 2, ["message"] = 3, ["transaction"] = 4 };
     static readonly byte[] Receipt = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0x0A, 0x72, 0x65, 0x63, 0x0A, 0x0A];
 
     static void LoadCard(string cardId) => throw new CardNotFound($"card {cardId} not found");
@@ -38,6 +38,10 @@ public static class Checkout
         options.Release = "fixture@1.0.0";
         options.Environment = "fixture";
         options.ServerName = "fixture-host";
+        if (scenario == "transaction")
+        {
+            options.TracesSampleRate = 1.0;
+        }
     }
 
     public static void Main()
@@ -87,6 +91,16 @@ public static class Checkout
                 {
                     SentrySdk.CaptureException(e);
                 }
+                break;
+            case "transaction":
+                var transaction = SentrySdk.StartTransaction("POST /checkout", "http.server");
+                foreach (var card in new[] { "4412", "9001" })
+                {
+                    var span = transaction.StartChild("db.sql.query", $"SELECT * FROM cards WHERE id = {card}");
+                    Thread.Sleep(10);
+                    span.Finish();
+                }
+                transaction.Finish();
                 break;
             default:
                 throw new ArgumentException(scenario);

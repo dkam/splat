@@ -2,6 +2,8 @@ package com.example;
 
 // See ../../../../../README.md.
 import io.sentry.Attachment;
+import io.sentry.ISpan;
+import io.sentry.ITransaction;
 import io.sentry.Sentry;
 import io.sentry.SentryOptions;
 import io.sentry.jul.SentryHandler;
@@ -10,7 +12,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class Checkout {
-  static final Map<String, Integer> PROJECTS = Map.of("chained", 1, "library_error", 2, "message", 3);
+  static final Map<String, Integer> PROJECTS = Map.of("chained", 1, "library_error", 2, "message", 3, "transaction", 4);
   static final byte[] RECEIPT = {
     (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, (byte) 0xFF, 0x0A, 0x72, 0x65, 0x63, 0x0A, 0x0A
   };
@@ -41,9 +43,12 @@ public class Checkout {
     options.setRelease("fixture@1.0.0");
     options.setEnvironment("fixture");
     options.setServerName("fixture-host");
+    if (scenario.equals("transaction")) {
+      options.setTracesSampleRate(1.0);
+    }
   }
 
-  public static void main(String[] args) {
+  public static void main(String[] args) throws InterruptedException {
     String scenario = System.getenv("SCENARIO");
     // sentry-jul initialises the SDK itself, from the options it's given.
     if (!scenario.equals("message")) {
@@ -80,6 +85,15 @@ public class Checkout {
         log.addHandler(new SentryHandler(options));
         log.log(Level.SEVERE, "Card {0} declined", "4412");
         log.log(Level.SEVERE, "Card {0} declined", "9001");
+      }
+      case "transaction" -> {
+        ITransaction transaction = Sentry.startTransaction("POST /checkout", "http.server");
+        for (String card : new String[] {"4412", "9001"}) {
+          ISpan span = transaction.startChild("db.sql.query", "SELECT * FROM cards WHERE id = " + card);
+          Thread.sleep(10);
+          span.finish();
+        }
+        transaction.finish();
       }
       default -> throw new IllegalArgumentException(scenario);
     }

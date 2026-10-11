@@ -38,6 +38,7 @@ fn main() {
         "chained" => 1,
         "library_error" => 2,
         "message" => 3,
+        "transaction" => 4,
         other => panic!("unknown scenario {other}"),
     };
     let base = std::env::var("SPLAT_DSN_BASE").expect("SPLAT_DSN_BASE");
@@ -46,6 +47,9 @@ fn main() {
     options.release = Some("fixture@1.0.0".into());
     options.environment = Some("fixture".into());
     options.server_name = Some("fixture-host".into());
+    if scenario == "transaction" {
+        options = options.traces_sample_rate(1.0);
+    }
     // Dropping the guard flushes.
     let _guard = sentry::init((format!("{base}/{project}"), options));
 
@@ -77,9 +81,18 @@ fn main() {
                 }
             }
         }
-        _ => {
+        "message" => {
             sentry::capture_message("Card 4412 declined", sentry::Level::Error);
             sentry::capture_message("Card 9001 declined", sentry::Level::Error);
+        }
+        _ => {
+            let transaction = sentry::start_transaction(sentry::TransactionContext::new("POST /checkout", "http.server"));
+            for card in ["4412", "9001"] {
+                let span = transaction.start_child("db.sql.query", &format!("SELECT * FROM cards WHERE id = {card}"));
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                span.finish();
+            }
+            transaction.finish();
         }
     }
 }

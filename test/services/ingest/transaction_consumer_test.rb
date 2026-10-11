@@ -54,6 +54,20 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
     end
   end
 
+  # sentry-python, sentry-go and sentry-dotnet send span times as ISO 8601
+  # strings, which sorted as the year they start with.
+  test "spans sent with string timestamps are kept in the order they started" do
+    later = {"span_id" => "later", "parent_span_id" => "root", "op" => "db.sql.query", "description" => "SELECT 2",
+             "start_timestamp" => "2023-11-14T22:13:20.300Z", "timestamp" => "2023-11-14T22:13:20.400Z"}
+    earlier = later.merge("span_id" => "earlier", "description" => "SELECT 1",
+      "start_timestamp" => "2023-11-14T22:13:20.100Z", "timestamp" => "2023-11-14T22:13:20.200Z")
+
+    @consumer.send(:process_batch, [job_for(transaction_id: "txn-iso", spans: [later, earlier])])
+
+    tree = SpanTree.find_by!(project_id: @project.id, transaction_id: "txn-iso").tree
+    assert_equal ["root", "earlier", "later"], tree["spans"].map { it["span_id"] }
+  end
+
   test "spans beyond the cap are truncated and flagged" do
     job = job_for(transaction_id: "txn-cap", spans: sample_spans(Transaction::SPAN_CAP + 5))
     @consumer.send(:process_batch, [job])

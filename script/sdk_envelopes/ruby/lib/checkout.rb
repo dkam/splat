@@ -4,7 +4,7 @@
 require "json"
 require "sentry-ruby"
 
-PROJECTS = {"chained" => 1, "library_error" => 2, "message" => 3}.freeze
+PROJECTS = {"chained" => 1, "library_error" => 2, "message" => 3, "transaction" => 4}.freeze
 RECEIPT = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0x0A, 0x72, 0x65, 0x63, 0x0A, 0x0A].pack("C*")
 
 class CardNotFound < StandardError; end
@@ -32,6 +32,7 @@ Sentry.init do |config|
   config.environment = "fixture"
   config.server_name = "fixture-host"
   config.background_worker_threads = 0 # send before returning
+  config.traces_sample_rate = 1.0 if scenario == "transaction"
 end
 
 case scenario
@@ -54,4 +55,10 @@ when "library_error"
 when "message"
   Sentry.capture_message("Card 4412 declined")
   Sentry.capture_message("Card 9001 declined")
+when "transaction"
+  transaction = Sentry.start_transaction(name: "POST /checkout", op: "http.server")
+  ["4412", "9001"].each do |card|
+    transaction.with_child_span(op: "db.sql.query", description: "SELECT * FROM cards WHERE id = #{card}") { sleep 0.01 }
+  end
+  transaction.finish
 end

@@ -44,7 +44,7 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 - **sentry-go's stack frames show their file.** They carry only `abs_path`,
   and each showed as "unknown".
 
-All of these were found by replaying what eight SDKs — Ruby, Python, Node,
+The last six were found by replaying what eight SDKs — Ruby, Python, Node,
 Go, Java, .NET, Rust and PHP — actually send, now recorded in
 `test/fixtures/files/sdk_envelopes/` and run through ingest by the test suite
 (`script/sdk_envelopes/` records them again).
@@ -53,6 +53,9 @@ Go, Java, .NET, Rust and PHP — actually send, now recorded in
 
 - **A second scheduler is harmless.** Every schedule entry now carries an
   `idp:` key with a 30 s cooldown, and the two `every` entries are cron lines,
+- **An envelope with a header that is JSON but not an object is logged as an
+  invalid envelope,** not as an error inside Splat with a backtrace. It's
+  dropped either way.
   so schedulers fire each entry on the same second and Tuber turns the
   duplicate into a no-op. `data_retention` and `cleanup_expired_oidc_sessions`
   gain keys, so a buried retention run now holds back the next night's too —
@@ -64,12 +67,20 @@ Go, Java, .NET, Rust and PHP — actually send, now recorded in
   the line split the issue in two after the next deploy. Now it's the
   innermost frame marked as your code, by module or file and function, with
   no line number. Rails' compiled template methods carry a number that
-  changes with every restart, which is stripped. A core method like
+  changes with every restart, which is stripped, as are the numbers and
+  hashes in the names of classes the JVM generates — reflection accessors,
+  proxies, Spring and Hibernate subclasses, lambdas. A core method like
   `Hash#fetch`, which sentry-ruby reports at its caller's line as if it were
   your code, is passed over for the caller. With no frame marked as your code
   (sentry-java, unless configured), the whole stack groups; with no stack
   trace at all (sentry-rust's default), the type and the message — both as
   Sentry does.
+- **Transactions from sentry-python, sentry-go, sentry-dotnet and sentry-rust
+  are ingested when they have a database span.** These SDKs send span times
+  as ISO 8601 strings (sentry-rust the end time only), and Splat subtracted
+  them as numbers: the transaction failed ingest, retried, and was buried.
+  Their spans were also put in no particular order in the waterfall, sorted
+  by the year they start with.
 - **Messages that differ only in numbers, UUIDs or hex ids are one issue.**
   "Timeout after 3021ms for user 4412" no longer opens an issue per user.
   The title is still the first message seen.

@@ -157,13 +157,14 @@ class Transaction
       spans.each do |span|
         next unless db_op?(span["op"].to_s)
         description = span["description"]
-        next if description.blank? || !span["start_timestamp"] || !span["timestamp"]
+        from, to = interval(span)
+        next if description.blank? || from.nil?
 
         pattern = truncate_sql(normalize_sql_pattern(description))
         data = query_patterns[pattern]
         next unless data
 
-        data[:total_time_ms] = (data[:total_time_ms] || 0.0) + ((span["timestamp"] - span["start_timestamp"]) * 1000)
+        data[:total_time_ms] = (data[:total_time_ms] || 0.0) + ((to - from) * 1000)
       end
 
       query_patterns.each_value do |data|
@@ -186,10 +187,10 @@ class Transaction
       return nil if matching_spans.empty?
 
       total_time = matching_spans.sum do |span|
-        next 0 unless span["start_timestamp"] && span["timestamp"]
+        from, to = interval(span)
+        next 0 if from.nil?
 
-        duration_ms = (span["timestamp"] - span["start_timestamp"]) * 1000
-        duration_ms.round
+        ((to - from) * 1000).round
       end
 
       (total_time > 0) ? total_time.round : nil
@@ -218,12 +219,7 @@ class Transaction
     # The [start, end] intervals of the spans whose op the block accepts,
     # sorted and with overlaps merged.
     def self.merged_intervals(spans, &matches_op)
-      intervals = spans.filter_map do |span|
-        next unless matches_op.call(span["op"].to_s)
-        next unless span["start_timestamp"] && span["timestamp"]
-
-        [span["start_timestamp"], span["timestamp"]]
-      end
+      intervals = spans.filter_map { |span| interval(span) if matches_op.call(span["op"].to_s) }
 
       intervals.sort.each_with_object([]) do |(from, to), merged|
         if merged.any? && from <= merged.last[1]
@@ -232,6 +228,15 @@ class Transaction
           merged << [from, to]
         end
       end
+    end
+
+    # A span's start and end in epoch seconds, or nil without both. SDKs send
+    # each as a number (Ruby, Java, PHP) or an ISO 8601 string (Python, Go,
+    # .NET) — sentry-rust one of each.
+    def self.interval(span)
+      from = SentryProtocol::Payload.time(span["start_timestamp"])
+      to = SentryProtocol::Payload.time(span["timestamp"])
+      [from.to_f, to.to_f] if from && to
     end
 
     # Queries against framework/infrastructure tables — cache, job queue,

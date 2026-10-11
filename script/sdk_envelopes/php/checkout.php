@@ -7,8 +7,10 @@ require __DIR__ . '/vendor/autoload.php';
 use Sentry\Attachment\Attachment;
 use Sentry\Breadcrumb;
 use Sentry\State\Scope;
+use Sentry\Tracing\SpanContext;
+use Sentry\Tracing\TransactionContext;
 
-const PROJECTS = ['chained' => 1, 'library_error' => 2, 'message' => 3];
+const PROJECTS = ['chained' => 1, 'library_error' => 2, 'message' => 3, 'transaction' => 4];
 const RECEIPT = "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A\x00\xFF\x0A\x72\x65\x63\x0A\x0A";
 
 class CardNotFound extends RuntimeException {}
@@ -45,6 +47,7 @@ $scenario = getenv('SCENARIO');
     'release' => 'fixture@1.0.0',
     'environment' => 'fixture',
     'server_name' => 'fixture-host',
+    'traces_sample_rate' => $scenario === 'transaction' ? 1.0 : null,
 ]);
 
 switch ($scenario) {
@@ -71,6 +74,15 @@ switch ($scenario) {
     case 'message':
         \Sentry\captureMessage('Card 4412 declined');
         \Sentry\captureMessage('Card 9001 declined');
+        break;
+    case 'transaction':
+        $transaction = \Sentry\startTransaction(TransactionContext::make()->setName('POST /checkout')->setOp('http.server'));
+        foreach (['4412', '9001'] as $card) {
+            $span = $transaction->startChild(SpanContext::make()->setOp('db.sql.query')->setDescription("SELECT * FROM cards WHERE id = {$card}"));
+            usleep(10_000);
+            $span->finish();
+        }
+        $transaction->finish();
         break;
 }
 

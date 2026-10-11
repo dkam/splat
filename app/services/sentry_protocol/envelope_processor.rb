@@ -80,19 +80,26 @@ module SentryProtocol
       raise InvalidEnvelope, "Empty envelope body" if body.strip.empty?
 
       header_line, pos = read_line(body, 0)
-      envelope_headers = JSON.parse(header_line).with_indifferent_access
+      envelope_headers = parse_header(header_line)
       items = []
 
       while pos < body.bytesize
         line, pos = read_line(body, pos)
         next if line.strip.empty? # tolerate blank lines between items
 
-        item_headers = JSON.parse(line).with_indifferent_access
+        item_headers = parse_header(line)
         payload, pos = read_payload(body, pos, item_headers[:length])
         items << {headers: item_headers, payload: parse_payload(payload)}
       end
 
       {headers: envelope_headers, items: items}
+    end
+
+    def parse_header(line)
+      header = JSON.parse(line)
+      raise InvalidEnvelope, "Header is not an object: #{line.truncate(100)}" unless header.is_a?(Hash)
+
+      header.with_indifferent_access
     end
 
     # The bytes up to the next "\n" or EOF, and the offset past the "\n".

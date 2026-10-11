@@ -160,6 +160,16 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     assert_not processor.process
   end
 
+  test "rejects a header that is JSON but not an object as an invalid envelope" do
+    item_header = "{\"event_id\":\"abc123\"}\n[]\n{\"message\":\"Test\"}\n"
+    envelope_header = "[]\n{\"type\":\"event\"}\n{\"message\":\"Test\"}\n"
+
+    [item_header, envelope_header].each do |body|
+      logged = capture_error_logs { assert_not SentryProtocol::EnvelopeProcessor.new(body, @project).process }
+      assert_match(/\AInvalid envelope: .*not an object/, logged.first)
+    end
+  end
+
   test "accepts envelope with valid sent_at timestamp" do
     envelope_body = build_envelope(
       event_id: "abc123",

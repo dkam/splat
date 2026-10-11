@@ -20,10 +20,10 @@ the pin, rerun `capture` for it, and see what the test makes of the result.
 
 ## The scenarios
 
-Every program does the same three things, in its own language's idiom. The
+Every program does the same four things, in its own language's idiom. The
 scenario picks the DSN's project id, which is how the recorder names the files:
-`chained` is project 1, `library_error` 2, `message` 3. The DSN is
-`$SPLAT_DSN_BASE/<id>`.
+`chained` is project 1, `library_error` 2, `message` 3, `transaction` 4. The
+DSN is `$SPLAT_DSN_BASE/<id>`.
 
 Every program sets `release: "fixture@1.0.0"`, `environment: "fixture"` and
 `server_name: "fixture-host"`, sends synchronously or flushes before exiting,
@@ -55,6 +55,15 @@ out of the box.
    parameters — it's sent that way, with the template `Card %s declined` or the
    language's equivalent (`Card {Card} declined`); otherwise as a plain
    capture-message string.
+
+4. **`transaction`** — a traced request that runs two queries. The one default
+   changed, and only for this scenario: the trace sample rate is 1.0, since
+   the SDKs send no transactions without it. The program starts a transaction
+   named `POST /checkout` with the op `http.server`. Inside it, one after the
+   other, it opens two child spans with the op `db.sql.query`, described
+   `SELECT * FROM cards WHERE id = 4412` and then
+   `SELECT * FROM cards WHERE id = 9001`, each held open for 10 ms by a
+   sleep. Then it finishes the transaction.
 
 Function and type names follow the language's conventions (`parse_order`,
 `parseOrder`, `ParseOrder`), and the code that matters goes where the SDK

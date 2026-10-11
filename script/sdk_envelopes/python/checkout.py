@@ -2,10 +2,11 @@
 import json
 import logging
 import os
+import time
 
 import sentry_sdk
 
-PROJECTS = {"chained": 1, "library_error": 2, "message": 3}
+PROJECTS = {"chained": 1, "library_error": 2, "message": 3, "transaction": 4}
 RECEIPT = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0x0A, 0x72, 0x65, 0x63, 0x0A, 0x0A])
 
 
@@ -42,6 +43,7 @@ sentry_sdk.init(
     release="fixture@1.0.0",
     environment="fixture",
     server_name="fixture-host",
+    traces_sample_rate=1.0 if scenario == "transaction" else None,
 )
 
 if scenario == "chained":
@@ -63,5 +65,10 @@ elif scenario == "message":
     log = logging.getLogger("billing")
     log.error("Card %s declined", "4412")
     log.error("Card %s declined", "9001")
+elif scenario == "transaction":
+    with sentry_sdk.start_transaction(name="POST /checkout", op="http.server"):
+        for card in ("4412", "9001"):
+            with sentry_sdk.start_span(op="db.sql.query", name=f"SELECT * FROM cards WHERE id = {card}"):
+                time.sleep(0.01)
 
 sentry_sdk.flush()
