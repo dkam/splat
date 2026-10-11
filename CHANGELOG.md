@@ -21,6 +21,11 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   the reply away; on 2026-09-09 that hid a dead hourly rollup for three days.
   Each lost run now logs an error and reaches Sentry, one issue per entry, so
   the issue's count is the number of runs lost.
+- **`{{ default }}` in an SDK fingerprint stands for Splat's own grouping.**
+  It was kept as literal text, so every event sharing the rest of the
+  fingerprint went into one issue, whatever its error.
+- **An SDK fingerprint sent as a string rather than a list no longer fails
+  ingest.** It raised `NoMethodError`, retried, and was buried.
 
 ### Changed
 
@@ -30,6 +35,24 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   duplicate into a no-op. `data_retention` and `cleanup_expired_oidc_sessions`
   gain keys, so a buried retention run now holds back the next night's too —
   and is reported.
+- **An error is grouped by its type and the function in your code it came
+  from.** Splat used the innermost frame's file and line. When that frame was
+  inside a gem, every caller shared it: every `ActiveRecord::RecordNotFound`
+  from `find` was one issue, wherever it was called. And an edit that moved
+  the line split the issue in two after the next deploy. Now it's the
+  innermost frame marked as your code (the innermost of all where none is),
+  by module or file and function, with no line number. Rails' compiled
+  template methods carry a number that changes with every restart, which is
+  stripped.
+- **Messages that differ only in numbers, UUIDs or hex ids are one issue.**
+  "Timeout after 3021ms for user 4412" no longer opens an issue per user.
+  The title is still the first message seen.
+- **Upgrading: existing issues carry over.** Each is re-keyed by its next
+  event, keeping its history and status, so it doesn't open again as new or
+  send a "new issue" email. Where one old issue collected errors from several
+  places — a gem frame shared by many callers — the first to recur keeps it,
+  and the rest open as new issues as they recur, each with its notification.
+  The old catch-all "Unknown Error" issue isn't carried over.
 
 ## 1.20.0 — 2026-10-11
 

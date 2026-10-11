@@ -58,7 +58,10 @@ class Issue < IssuesEventsRecord
 
   def self.group_event(event_payload, project, timestamp: Time.current)
     fingerprint = generate_fingerprint(event_payload)
-    rekey_root_cause_issue(event_payload, project, fingerprint)
+    existing = find_by(project: project, fingerprint: fingerprint) ||
+      rekey_legacy_issue(event_payload, project, fingerprint)
+    return existing if existing
+
     attempts = 0
     begin
       find_or_create_by!(project: project, fingerprint: fingerprint) do |issue|
@@ -77,26 +80,8 @@ class Issue < IssuesEventsRecord
     end
   end
 
-  def self.generate_fingerprint(payload)
-    # Use Sentry's fingerprint if provided
-    if payload["fingerprint"].present?
-      payload["fingerprint"].join("::")
-    else
-      exception_fingerprint(SentryProtocol::Payload.raised_exception(payload), SentryProtocol::Payload.stacktrace(payload)) ||
-        # Fallback to message if no exception
-        Digest::MD5.hexdigest(SentryProtocol::Payload.message_template(payload).to_s.presence || "Unknown Error")
-    end
-  end
-
-  # Exception type + the innermost frame of the stack trace it was raised
-  # with; nil without a type.
-  def self.exception_fingerprint(exception, stacktrace)
-    type = exception&.dig("type")
-    return if type.blank?
-
-    frame = stacktrace&.dig("frames")&.last || {}
-    "#{type}::#{frame["filename"]}::#{frame["lineno"]}"
-  end
+  # See Issue::Fingerprint.
+  def self.generate_fingerprint(payload) = Fingerprint.generate(payload)
 
   def self.extract_title(payload)
     exception = SentryProtocol::Payload.raised_exception(payload) || {}
@@ -110,24 +95,27 @@ class Issue < IssuesEventsRecord
     SentryProtocol::Payload.raised_exception(payload)&.dig("type")
   end
 
-  # Splat used to group a chained exception by its root cause, values[0],
-  # rather than the exception raised. An issue keyed that way is re-keyed by
-  # the first event to match it, so the change of grouping doesn't open every
-  # existing wrapped-error issue again as new — and email about each one.
-  def self.rekey_root_cause_issue(payload, project, fingerprint)
-    return if payload["fingerprint"].present?
+  # Splat 1.20.0 and earlier grouped differently (see Issue::Fingerprint).
+  # An issue keyed that way is re-keyed by the first event to match it rather
+  # than opened again as new, which would email about every one of them. Where
+  # one old issue covered events that now group apart, the first to arrive
+  # keeps it; the rest open as the new issues they are.
+  def self.rekey_legacy_issue(payload, project, fingerprint)
+    previous = Fingerprint.previous(payload) - [fingerprint]
+    return if previous.empty?
 
-    root_cause = SentryProtocol::Payload.root_cause(payload)
-    old_fingerprint = exception_fingerprint(root_cause, root_cause&.dig("stacktrace"))
-    return if old_fingerprint.nil? || old_fingerprint == fingerprint
-    return if exists?(project: project, fingerprint: fingerprint)
-
-    where(project: project, fingerprint: old_fingerprint).update_all(
+    found = where(project: project, fingerprint: previous).index_by(&:fingerprint)
+    issue = found.values_at(*previous).compact.first
+    issue&.update_columns(
       fingerprint: fingerprint,
       title: extract_title(payload),
       exception_type: extract_exception_type(payload),
       updated_at: Time.current
     )
+    issue
+  rescue ActiveRecord::RecordNotUnique
+    # Another worker made or re-keyed the new issue first; find_or_create finds it.
+    nil
   end
 
   # The title's message line, and the error_highlight snippet after it (nil

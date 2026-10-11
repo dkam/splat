@@ -137,7 +137,7 @@ post_context    [3 lines]     ← source lines after
 ```
 
 Frames are ordered **oldest first** — the innermost call is the *last* frame, not
-the first. Splat's fingerprinting uses `frames[-1]` for exactly this reason (§6).
+the first. Splat's grouping walks them from the end for exactly this reason (§6).
 
 `pre_context` / `context_line` / `post_context` mean each frame carries 7 lines of
 source. That's why frames dominate the payload, and why they compress so well —
@@ -186,13 +186,22 @@ The mapping is `Event.create_from_sentry_payload!` (`app/models/event.rb:38`):
 | `timestamp` | `parse_timestamp(payload["timestamp"])` — handles both forms |
 | `payload` | the whole thing, compressed |
 
-**Grouping happens at ingest, not at query time.** `Issue.group_event`
-(`app/models/issue.rb:39`) derives a fingerprint and finds-or-creates the issue
-before the event row is written. It prefers the SDK's `payload["fingerprint"]`
-when present; Booko's SDK sends `[]`, so in practice Splat derives one from the
-raised exception's type and its innermost frame's file and line — which is why
-`frames[-1]` in §4 matters, and why a stack that shifts by one line can create a
-new issue. An event without an exception groups by its message.
+**Grouping happens at ingest, not at query time.** `Issue.group_event` derives
+a fingerprint (`Issue::Fingerprint`) and finds-or-creates the issue before the
+event row is written. It prefers the SDK's `payload["fingerprint"]` when
+present, with `"{{ default }}"` in it standing for Splat's own. Booko's SDK sends
+`[]`, so in practice Splat derives one: the raised exception's type and the
+function in your code it came from — the innermost frame with `in_app: true`
+(§4), or the innermost of all when none is, named by `module` or `filename` and
+`function`. Not the line number, which moves with every edit above it, and not a
+frame inside a gem, which every caller shares. An event without an exception
+groups by its message, with numbers, UUIDs and hex ids taken out.
+
+A compiled template's `function` carries a number that differs in every
+process. Rails names the method after the template's path plus
+`String#hash` of it, which Ruby seeds per process, and its object id:
+`_app_views_books_show_html_erb__1033375417407740265_9816` in one process is
+`…__2552903438630504205_9816` in the next. Grouping strips the suffix.
 
 The raised exception is `values[-1]`, not `values[0]`. The protocol orders a
 chain oldest to newest, and sentry-ruby reverses Ruby's cause chain to match
