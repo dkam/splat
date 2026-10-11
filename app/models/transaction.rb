@@ -88,7 +88,10 @@ class Transaction < TransactionsSpansRecord
     db_time = measurements.dig("db", "value")
     view_time = measurements.dig("view", "value")
 
-    if measurements.empty? && payload["spans"].present?
+    # The client's own db/view measurements win; the spans fill whichever is
+    # missing. Not gated on measurements being empty — a client sending a
+    # measurement of its own would lose both span timings.
+    if (db_time.nil? || view_time.nil?) && payload["spans"].present?
       span_timing = SpanAnalyzer.extract_timing_data(payload["spans"])
       db_time ||= span_timing[:db_time]
       view_time ||= span_timing[:view_time]

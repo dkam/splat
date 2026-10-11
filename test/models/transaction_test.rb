@@ -87,6 +87,47 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal({"custom_metric" => {"value" => 42}}, transaction.measurements)
   end
 
+  def timed_spans
+    at = 1_760_774_400.0
+    [
+      {"op" => "db.sql.active_record", "start_timestamp" => at, "timestamp" => at + 0.030},
+      {"op" => "template.render_template.action_view", "start_timestamp" => at + 0.040, "timestamp" => at + 0.100}
+    ]
+  end
+
+  # A measurement of the client's own used to switch the span fallback off
+  # altogether, so its db and view times came out blank with the spans right there.
+  test "span timings still fill in when the client sends a measurement of its own" do
+    payload = {
+      "transaction" => "ProductsController#index",
+      "start_timestamp" => "2025-10-18T08:00:00.000Z",
+      "timestamp" => "2025-10-18T08:00:00.150Z",
+      "measurements" => {"custom_metric" => {"value" => 42}},
+      "spans" => timed_spans
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-custom-measurement", payload, @project)
+
+    assert_equal 30, transaction.db_time
+    assert_equal 60, transaction.view_time
+    assert_equal({"custom_metric" => {"value" => 42}}, transaction.measurements.slice("custom_metric"))
+  end
+
+  test "a client's own db measurement wins, and the spans fill in the rest" do
+    payload = {
+      "transaction" => "ProductsController#index",
+      "start_timestamp" => "2025-10-18T08:00:00.000Z",
+      "timestamp" => "2025-10-18T08:00:00.150Z",
+      "measurements" => {"db" => {"value" => 45}},
+      "spans" => timed_spans
+    }
+
+    transaction = Transaction.create_from_sentry_payload!("txn-client-db", payload, @project)
+
+    assert_equal 45, transaction.db_time
+    assert_equal 60, transaction.view_time
+  end
+
   test "create_from_sentry_payload! stores only query_patterns in the JSON and derives the rest" do
     breadcrumbs = 5.times.map { |i|
       {"category" => "sql.active_record",
