@@ -83,7 +83,9 @@ deployment    release           app version
               environment       "production"
               server_name       which box sent it
 
-the error     exception.values[]        ← usually 1, more when causes are chained
+the error     exception.values[]        ← usually 1, more when causes are chained:
+                                          oldest first, so the raised exception is
+                                          the LAST and values[0] its root cause
                 .type                   "NoMethodError"
                 .value                  the message
                 .module                 namespace
@@ -117,7 +119,7 @@ are linked.
 
 ## 4. A stack frame
 
-`exception.values[0].stacktrace.frames[]` is where the bulk of an error payload
+`exception.values[-1].stacktrace.frames[]` is where the bulk of an error payload
 lives — 65 frames on the sample event, each carrying source context:
 
 ```
@@ -185,8 +187,30 @@ The mapping is `Event.create_from_sentry_payload!` (`app/models/event.rb:38`):
 (`app/models/issue.rb:39`) derives a fingerprint and finds-or-creates the issue
 before the event row is written. It prefers the SDK's `payload["fingerprint"]`
 when present; Booko's SDK sends `[]`, so in practice Splat derives one from the
-exception type and the innermost frame's file and line — which is why `frames[-1]`
-in §4 matters, and why a stack that shifts by one line can create a new issue.
+raised exception's type and its innermost frame's file and line — which is why
+`frames[-1]` in §4 matters, and why a stack that shifts by one line can create a
+new issue. An event without an exception groups by its message.
+
+The raised exception is `values[-1]`, not `values[0]`. The protocol orders a
+chain oldest to newest, and sentry-ruby reverses Ruby's cause chain to match
+(`Sentry::ExceptionInterface.build`). Every `rescue … raise Wrapped` in a Rails
+app sends at least two, and so does every template error:
+`ActionView::Template::Error` wraps its cause, borrowing its message and
+backtrace. `SentryProtocol::Payload.raised_exception` is the one reader.
+
+**The raised exception may have no stack trace.** sentry-ruby sends each
+backtrace once per chain, on the oldest exception holding it (it dedupes by the
+backtrace array's `object_id`). `ActionView::Template::Error#backtrace` returns
+its cause's array, so a template error arrives as a `NoMethodError` with frames
+and an `ActionView::Template::Error` with none. Read `values[-1].stacktrace`
+alone and every template error in the app has the same location.
+`SentryProtocol::Payload.stacktrace` falls back to the nearest cause's.
+
+The message comes in four shapes: `message` or `logentry` (the protocol's
+canonical name, which sentry-python's logging integration uses), each either a
+string or a `{message, params, formatted}` object (sentry-java, sentry-dotnet).
+`message` there is the template, `formatted` the template with its params filled
+in. Splat titles by `formatted` and groups by the template.
 
 ## Reading a real one yourself
 
@@ -196,8 +220,8 @@ Structure, no values — safe to paste into a terminal, nothing sensitive printe
 # bin/rails runner
 e = Event.order(id: :desc).first
 puts e.payload.keys.sort                                  # top-level shape
-puts e.payload.dig("exception", "values", 0, "type")      # the error class
-puts e.payload.dig("exception","values",0,"stacktrace","frames").size
+puts e.payload.dig("exception", "values", -1, "type")     # the error raised
+puts e.payload.dig("exception","values",-1,"stacktrace","frames").size
 puts e.payload["modules"].keys.size                        # the Gemfile.lock rider
 ```
 

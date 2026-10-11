@@ -1,0 +1,27 @@
+<%# Frames arrive oldest first; shown innermost first, the way Ruby prints them. %>
+<div class="bg-gray-900 dark:bg-black rounded-lg p-4 overflow-x-auto border border-gray-800 dark:border-gray-700">
+  <% frames.reverse.each_with_index do |frame, index| %>
+    <div class="stack-frame mb-3 font-mono text-sm <%= frame['in_app'] ? 'text-red-400' : 'text-gray-400' %>">
+      <div class="flex items-start gap-3">
+        <span class="text-gray-500 min-w-[2rem] text-right"><%= index + 1 %></span>
+        <div class="flex-1">
+          <div>
+            <span class="text-blue-300"><%= frame["filename"] || "unknown" %></span>
+            <% if frame["lineno"] %>
+              <span class="text-gray-500">:<%= frame["lineno"] %></span>
+              <% if frame["colno"] %>
+                <span class="text-gray-500">:<%= frame["colno"] %></span>
+              <% end %>
+            <% end %>
+          </div>
+          <% if frame["function"] %>
+            <div class="text-yellow-300">in <%= frame["function"] %></div>
+          <% end %>
+          <% if frame["context_line"] %>
+            <div class="mt-1 text-gray-300"><%= frame["context_line"].strip %></div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% end %>
+</div>

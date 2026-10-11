@@ -11,6 +11,39 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## Unreleased
+
+### Fixed
+
+- **A chained exception is titled, typed and grouped by the exception
+  raised.** Splat read the root cause, `exception.values[0]`, where the raised
+  exception is the last. So `rescue Net::ReadTimeout; raise PaymentFailed`
+  was filed as a `Net::ReadTimeout`, and every timeout wrapped anywhere landed
+  in one issue. The event page, `get_issue` and `get_event` now show the
+  raised exception and its stack trace. An issue grouped the old way is
+  re-keyed by its next event rather than opened again as new; where one old
+  issue covered several wrappers, the first to arrive keeps it. Rails template
+  errors become `ActionView::Template::Error`, with the same message.
+- **Messages from sentry-java and sentry-dotnet are no longer lost.** Both
+  send `message` as an object, which grouping hashed as a string: the job
+  raised `TypeError`, retried and was buried. They're titled by their
+  formatted text and grouped by their template, so "Payment %s failed" is one
+  issue whatever the payment.
+- **Python logging errors are no longer all one issue.** sentry-python's
+  logging integration sends `logentry` rather than `message`. Splat read no
+  message at all, titled each one "Unknown Error" and grouped them together.
+  New ones are titled and grouped by their message; the existing "Unknown
+  Error" issue stops growing.
+
+### Added
+
+- **An event shows what its exception was caused by.** Each cause in the
+  chain gets a section below the stack trace: its type, its message and its
+  own stack trace, or "Same stack trace as above" where it shares the one
+  just shown, as a template error's cause does. The top of the page links to
+  each cause, so the root cause is visible without scrolling. `get_event`
+  lists the same, and `get_issue` names each cause.
+
 ## 1.19.4 — 2026-10-10
 
 The overview's recent issues now use the issues list's row, and an issue

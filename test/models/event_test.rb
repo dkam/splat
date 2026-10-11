@@ -354,4 +354,158 @@ class EventTest < ActiveSupport::TestCase
 
     assert_in_delta newer.timestamp.to_f, newer.issue.reload.last_seen.to_f, 0.001
   end
+
+  test "a chained exception is titled and typed by the exception raised, not its root cause" do
+    event = Event.create_from_sentry_payload!("chained-1", chained_payload(wrapper: "PaymentFailed", file: "app/models/payment.rb"), @project)
+
+    assert_equal "PaymentFailed", event.issue.exception_type
+    assert_equal "PaymentFailed while talking to the gateway", event.issue.title
+    assert_equal "PaymentFailed", event.exception_type
+    assert_equal "PaymentFailed while talking to the gateway", event.exception_value
+    assert_equal "PaymentFailed", event.exception_details[:type]
+    assert_equal "app/models/payment.rb", event.stacktrace["frames"].last["filename"]
+  end
+
+  test "the same root cause wrapped in two places makes two issues" do
+    payment = Event.create_from_sentry_payload!("chained-2", chained_payload(wrapper: "PaymentFailed", file: "app/models/payment.rb"), @project)
+    shipping = Event.create_from_sentry_payload!("chained-3", chained_payload(wrapper: "QuoteFailed", file: "app/models/shipping.rb"), @project)
+
+    assert_not_equal payment.issue_id, shipping.issue_id
+  end
+
+  # Chained exceptions used to be grouped by their root cause. Such an issue
+  # carries over to the new grouping rather than being opened again as new.
+  test "an issue grouped by root cause takes the next event and is re-keyed" do
+    payload = chained_payload(wrapper: "PaymentFailed", file: "app/models/payment.rb")
+    legacy = Issue.create!(
+      project: @project, fingerprint: "Net::ReadTimeout::net/protocol.rb::229",
+      title: "Net::ReadTimeout with #<TCPSocket:(closed)>", exception_type: "Net::ReadTimeout",
+      first_seen: 1.day.ago, last_seen: 1.day.ago
+    )
+
+    event = assert_no_difference("Issue.count") do
+      Event.create_from_sentry_payload!("chained-4", payload, @project)
+    end
+
+    assert_equal legacy.id, event.issue_id
+    legacy.reload
+    assert_equal Issue.generate_fingerprint(payload), legacy.fingerprint
+    assert_equal "PaymentFailed", legacy.exception_type
+    assert_equal "PaymentFailed while talking to the gateway", legacy.title
+  end
+
+  test "template errors from different templates make different issues" do
+    books = Event.create_from_sentry_payload!("template-1", template_error_payload("app/views/books/show.html.erb", 12), @project)
+    authors = Event.create_from_sentry_payload!("template-2", template_error_payload("app/views/authors/show.html.erb", 3), @project)
+
+    assert_not_equal books.issue_id, authors.issue_id
+  end
+
+  test "a raised exception without a stack trace of its own shows its cause's" do
+    event = Event.create_from_sentry_payload!("template-3", template_error_payload("app/views/books/show.html.erb", 12), @project)
+
+    assert_equal "ActionView::Template::Error", event.exception_type
+    assert_equal "app/views/books/show.html.erb", event.stacktrace["frames"].last["filename"]
+  end
+
+  test "causes lists what the raised exception was caused by, its direct cause first" do
+    payload = chained_payload(wrapper: "PaymentFailed", file: "app/models/payment.rb")
+    payload["exception"]["values"].unshift({"type" => "Errno::ECONNRESET", "value" => "Connection reset by peer"})
+    event = Event.create_from_sentry_payload!("causes-1", payload, @project)
+
+    assert_equal ["Net::ReadTimeout", "Errno::ECONNRESET"], event.causes.map { it["type"] }
+  end
+
+  test "an exception that wasn't chained has no causes" do
+    event = Event.create_from_sentry_payload!("causes-2", {"message" => "boom", "timestamp" => "2026-10-11T08:00:00Z"}, @project)
+
+    assert_equal [], event.causes
+  end
+
+  # sentry-java and sentry-dotnet send `message` as an object: the template and
+  # params of a logging call, and `formatted`, the two put together.
+  test "a message sent as an object is titled by its formatted text" do
+    event = Event.create_from_sentry_payload!("msg-object-1", object_message_payload("P-1"), @project)
+
+    assert_equal "Payment P-1 failed", event.issue.title
+    assert_equal "Payment P-1 failed", event.message
+  end
+
+  test "a message object carrying only formatted text is titled by it" do
+    payload = {"message" => {"formatted" => "Cache warm-up skipped"}, "timestamp" => "2026-10-11T08:00:00Z", "platform" => "java"}
+    event = Event.create_from_sentry_payload!("msg-object-2", payload, @project)
+
+    assert_equal "Cache warm-up skipped", event.issue.title
+  end
+
+  test "object messages from one template group together whatever their params" do
+    first = Event.create_from_sentry_payload!("msg-object-3", object_message_payload("P-1"), @project)
+    second = Event.create_from_sentry_payload!("msg-object-4", object_message_payload("P-2"), @project)
+
+    assert_equal first.issue_id, second.issue_id
+  end
+
+  # sentry-python's logging integration sends `logentry` where other SDKs send
+  # `message`. Read as no message at all, every one was titled "Unknown Error"
+  # and grouped into a single issue.
+  test "logentry events are titled and grouped by their message" do
+    card = Event.create_from_sentry_payload!("logentry-1", logentry_payload("Card %s declined", "4412"), @project)
+    stock = Event.create_from_sentry_payload!("logentry-2", logentry_payload("Stock sync for %s timed out", "AU"), @project)
+
+    assert_equal "Card 4412 declined", card.issue.title
+    assert_equal "Card 4412 declined", card.message
+    assert_equal "Stock sync for AU timed out", stock.issue.title
+    assert_not_equal card.issue_id, stock.issue_id
+  end
+
+  private
+
+  # sentry-ruby's shape for `rescue Net::ReadTimeout; raise PaymentFailed`: the
+  # cause chain reversed, so the root cause comes first and the raised error last.
+  def chained_payload(wrapper:, file:)
+    {
+      "exception" => {"values" => [
+        {"type" => "Net::ReadTimeout", "value" => "Net::ReadTimeout with #<TCPSocket:(closed)>",
+         "stacktrace" => {"frames" => [{"filename" => "net/protocol.rb", "lineno" => 229, "function" => "rbuf_fill"}]}},
+        {"type" => wrapper, "value" => "#{wrapper} while talking to the gateway",
+         "stacktrace" => {"frames" => [{"filename" => file, "lineno" => 42, "function" => "charge", "in_app" => true}]}}
+      ]},
+      "timestamp" => "2026-10-11T08:00:00Z",
+      "platform" => "ruby"
+    }
+  end
+
+  # sentry-ruby sends each backtrace once per chain, on the oldest exception
+  # holding it. ActionView::Template::Error's backtrace *is* its cause's, so
+  # the wrapper — the raised exception — arrives with no stack trace at all.
+  def template_error_payload(file, line)
+    {
+      "exception" => {"values" => [
+        {"type" => "NoMethodError", "value" => "undefined method 'title' for nil",
+         "stacktrace" => {"frames" => [
+           {"filename" => "app/controllers/books_controller.rb", "lineno" => 10, "function" => "show", "in_app" => true},
+           {"filename" => file, "lineno" => line, "function" => "_app_views_show", "in_app" => true}
+         ]}},
+        {"type" => "ActionView::Template::Error", "value" => "undefined method 'title' for nil"}
+      ]},
+      "timestamp" => "2026-10-11T08:00:00Z",
+      "platform" => "ruby"
+    }
+  end
+
+  def object_message_payload(payment)
+    {
+      "message" => {"message" => "Payment %s failed", "params" => [payment], "formatted" => "Payment #{payment} failed"},
+      "timestamp" => "2026-10-11T08:00:00Z",
+      "platform" => "java"
+    }
+  end
+
+  def logentry_payload(template, param)
+    {
+      "logentry" => {"message" => template, "params" => [param], "formatted" => template % param},
+      "timestamp" => "2026-10-11T08:00:00Z",
+      "platform" => "python"
+    }
+  end
 end

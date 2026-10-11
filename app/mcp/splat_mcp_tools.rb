@@ -1327,25 +1327,36 @@ class SplatMcpTools
 
     if recent_event&.payload
       result += "### Most Recent Stack Trace\n\n"
-      frames = recent_event.payload.dig("exception", "values", 0, "stacktrace", "frames")
+      frames = recent_event.stacktrace&.dig("frames")
 
-      if frames.present?
-        result += "```\n"
-        frames.reverse_each do |frame|
-          filename = frame["filename"] || "unknown"
-          lineno = frame["lineno"] || "?"
-          function = frame["function"] || "unknown"
-          result += "  at #{function} (#{filename}:#{lineno})\n"
-        end
-        result += "```\n"
-      else
-        result += "No stack trace available for this event.\n"
+      result += frames.present? ? format_frames(frames) : "No stack trace available for this event.\n"
+
+      # The root cause is often the one that explains the error, so name each
+      # cause here; get_event has their stack traces.
+      causes = recent_event.causes
+      if causes.any?
+        result += "\n"
+        causes.each { |cause| result += "**Caused by:** #{exception_headline(cause)}\n" }
+        result += "_Call `get_event` with event_id #{recent_event.event_id} for each cause's stack trace._\n"
       end
     else
       result += "No events found for this issue.\n"
     end
 
     result
+  end
+
+  # Innermost frame first, the way Ruby prints a backtrace.
+  def format_frames(frames)
+    lines = frames.reverse.map do |frame|
+      "  at #{frame["function"] || "unknown"} (#{frame["filename"] || "unknown"}:#{frame["lineno"] || "?"})\n"
+    end
+    "```\n#{lines.join}```\n"
+  end
+
+  def exception_headline(exception)
+    headline = ExceptionMessage.headline(exception["value"])
+    headline.present? ? "#{exception["type"]}: #{headline}" : exception["type"].to_s
   end
 
   def format_issue_events(issue, events)
@@ -1400,16 +1411,24 @@ class SplatMcpTools
     end
 
     # Stack trace
-    if exception_details[:stacktrace]&.dig("frames")
+    shown_frames = exception_details[:stacktrace]&.dig("frames")
+    if shown_frames.present?
       result += "### Stack Trace\n\n"
-      result += "```\n"
-      exception_details[:stacktrace]["frames"].reverse_each do |frame|
-        filename = frame["filename"] || "unknown"
-        lineno = frame["lineno"] || "?"
-        function = frame["function"] || "unknown"
-        result += "  at #{function} (#{filename}:#{lineno})\n"
+      result += format_frames(shown_frames) + "\n"
+    end
+
+    # What it was caused by, direct cause first. A cause's stack trace is left
+    # out where it's the one just shown: a template error's is its cause's.
+    event.causes.each do |cause|
+      result += "### Caused by #{cause["type"]}\n\n"
+      result += "**Message:** #{cause["value"]}\n\n" if cause["value"].present?
+      frames = cause.dig("stacktrace", "frames")
+      if frames.present? && frames == shown_frames
+        result += "Same stack trace as above.\n\n"
+      elsif frames.present?
+        result += format_frames(frames) + "\n"
+        shown_frames = frames
       end
-      result += "```\n\n"
     end
 
     # Request details

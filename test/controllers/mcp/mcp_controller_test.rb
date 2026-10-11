@@ -730,6 +730,51 @@ module Mcp
       end
     end
 
+    # Chained exceptions arrive root cause first, the raised exception last.
+    test "get_issue and get_event show the exception raised, not its root cause" do
+      payload = {
+        "exception" => {"values" => [
+          {"type" => "Net::ReadTimeout", "value" => "Net::ReadTimeout",
+           "stacktrace" => {"frames" => [{"filename" => "net/protocol.rb", "lineno" => 229, "function" => "rbuf_fill"}]}},
+          {"type" => "PaymentFailed", "value" => "gateway timed out",
+           "stacktrace" => {"frames" => [{"filename" => "app/models/payment.rb", "lineno" => 42, "function" => "charge"}]}}
+        ]},
+        "timestamp" => Time.current.iso8601,
+        "platform" => "ruby"
+      }
+      event = Event.create_from_sentry_payload!(SecureRandom.hex(16), payload, projects(:one))
+
+      call_tool("get_issue", {"issue_id" => event.issue_id})
+      assert_match %r{at charge \(app/models/payment\.rb:42\)}, tool_text
+      assert_match(/\*\*Caused by:\*\* Net::ReadTimeout: Net::ReadTimeout$/, tool_text)
+
+      call_tool("get_event", {"event_id" => event.event_id})
+      assert_match(/\*\*Type:\*\* PaymentFailed/, tool_text)
+      assert_match %r{### Caused by Net::ReadTimeout\n\n\*\*Message:\*\* Net::ReadTimeout\n\n```\n  at rbuf_fill \(net/protocol\.rb:229\)\n```}, tool_text
+    end
+
+    # The wrapper's backtrace is its cause's, which sentry-ruby sends only once,
+    # on the cause.
+    test "get_issue and get_event give a template error its cause's stack trace, once" do
+      payload = {
+        "exception" => {"values" => [
+          {"type" => "NoMethodError", "value" => "undefined method 'title' for nil",
+           "stacktrace" => {"frames" => [{"filename" => "app/views/books/show.html.erb", "lineno" => 12, "function" => "_app_views_show"}]}},
+          {"type" => "ActionView::Template::Error", "value" => "undefined method 'title' for nil"}
+        ]},
+        "timestamp" => Time.current.iso8601,
+        "platform" => "ruby"
+      }
+      event = Event.create_from_sentry_payload!(SecureRandom.hex(16), payload, projects(:one))
+
+      call_tool("get_issue", {"issue_id" => event.issue_id})
+      assert_match %r{at _app_views_show \(app/views/books/show\.html\.erb:12\)}, tool_text
+
+      call_tool("get_event", {"event_id" => event.event_id})
+      assert_equal 1, tool_text.scan("app/views/books/show.html.erb:12").size
+      assert_match(/### Caused by NoMethodError\n\n.*\n\nSame stack trace as above\./, tool_text)
+    end
+
     test "get_issue_events does not crash when an event payload is nil" do
       # Old events can have payload purged by retention while the event row stays.
       # format_issue_events used to dig into event.payload['environment'] and

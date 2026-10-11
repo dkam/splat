@@ -58,6 +58,7 @@ class Issue < IssuesEventsRecord
 
   def self.group_event(event_payload, project, timestamp: Time.current)
     fingerprint = generate_fingerprint(event_payload)
+    rekey_root_cause_issue(event_payload, project, fingerprint)
     attempts = 0
     begin
       find_or_create_by!(project: project, fingerprint: fingerprint) do |issue|
@@ -81,30 +82,52 @@ class Issue < IssuesEventsRecord
     if payload["fingerprint"].present?
       payload["fingerprint"].join("::")
     else
-      # Generate from exception type + location
-      type = payload.dig("exception", "values", 0, "type")
-      file = payload.dig("exception", "values", 0, "stacktrace", "frames", -1, "filename")
-      line = payload.dig("exception", "values", 0, "stacktrace", "frames", -1, "lineno")
-
-      # Fallback to message if no exception
-      if type.blank?
-        message = payload["message"] || "Unknown Error"
-        Digest::MD5.hexdigest(message)
-      else
-        "#{type}::#{file}::#{line}"
-      end
+      exception_fingerprint(SentryProtocol::Payload.raised_exception(payload), SentryProtocol::Payload.stacktrace(payload)) ||
+        # Fallback to message if no exception
+        Digest::MD5.hexdigest(SentryProtocol::Payload.message_template(payload).to_s.presence || "Unknown Error")
     end
   end
 
+  # Exception type + the innermost frame of the stack trace it was raised
+  # with; nil without a type.
+  def self.exception_fingerprint(exception, stacktrace)
+    type = exception&.dig("type")
+    return if type.blank?
+
+    frame = stacktrace&.dig("frames")&.last || {}
+    "#{type}::#{frame["filename"]}::#{frame["lineno"]}"
+  end
+
   def self.extract_title(payload)
-    payload.dig("exception", "values", 0, "value") ||
-      payload["message"] ||
-      payload.dig("exception", "values", 0, "type") ||
+    exception = SentryProtocol::Payload.raised_exception(payload) || {}
+    exception["value"].presence ||
+      SentryProtocol::Payload.message(payload) ||
+      exception["type"].presence ||
       "Unknown Error"
   end
 
   def self.extract_exception_type(payload)
-    payload.dig("exception", "values", 0, "type")
+    SentryProtocol::Payload.raised_exception(payload)&.dig("type")
+  end
+
+  # Splat used to group a chained exception by its root cause, values[0],
+  # rather than the exception raised. An issue keyed that way is re-keyed by
+  # the first event to match it, so the change of grouping doesn't open every
+  # existing wrapped-error issue again as new — and email about each one.
+  def self.rekey_root_cause_issue(payload, project, fingerprint)
+    return if payload["fingerprint"].present?
+
+    root_cause = SentryProtocol::Payload.root_cause(payload)
+    old_fingerprint = exception_fingerprint(root_cause, root_cause&.dig("stacktrace"))
+    return if old_fingerprint.nil? || old_fingerprint == fingerprint
+    return if exists?(project: project, fingerprint: fingerprint)
+
+    where(project: project, fingerprint: old_fingerprint).update_all(
+      fingerprint: fingerprint,
+      title: extract_title(payload),
+      exception_type: extract_exception_type(payload),
+      updated_at: Time.current
+    )
   end
 
   # The title's message line, and the error_highlight snippet after it (nil

@@ -183,16 +183,18 @@ class Event < IssuesEventsRecord
   # ---- Convenience readers backed by the decoded payload. ----
   def exception_details
     return {} unless payload.present?
-    exception_data = payload.dig("exception", "values", 0) || {}
+    exception_data = SentryProtocol::Payload.raised_exception(payload) || {}
     {
       type: exception_data["type"],
       value: exception_data["value"],
       mechanism: exception_data["mechanism"],
-      stacktrace: exception_data["stacktrace"]
+      stacktrace: SentryProtocol::Payload.stacktrace(payload)
     }
   end
 
   def stacktrace = exception_details[:stacktrace]
+  # The exceptions the raised one was caused by, its direct cause first.
+  def causes = payload.present? ? SentryProtocol::Payload.causes(payload) : []
   # Read the promoted column (populated at ingest) so list views don't
   # decompress the payload blob per row; fall back to exception_value.
   def message = self[:message].presence || exception_value
@@ -240,14 +242,12 @@ class Event < IssuesEventsRecord
   def extract_fields_from_payload
     return unless payload.present?
 
-    exception_data = payload.dig("exception", "values", 0) || {}
+    exception_data = SentryProtocol::Payload.raised_exception(payload) || {}
     self.exception_type = exception_data["type"]
     self.exception_value = exception_data["value"]
 
     # Promote the display message so Event#message reads a column, not the blob.
-    # Sentry's "message" is a string or a {message, params, formatted} object.
-    raw_message = payload["message"]
-    self.message = raw_message.is_a?(Hash) ? raw_message["formatted"] : raw_message
+    self.message = SentryProtocol::Payload.message(payload)
 
     if payload["fingerprint"].present?
       self[:fingerprint] = Array.wrap(payload["fingerprint"]).join("::")

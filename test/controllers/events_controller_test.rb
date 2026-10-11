@@ -77,6 +77,29 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
         ^^^"
   MESSAGE = "undefined local variable or method 'job' for main"
 
+  # `rescue Net::ReadTimeout; raise PaymentFailed`, as sentry-ruby sends it:
+  # root cause first, the raised exception last.
+  CHAINED = {
+    "exception" => {"values" => [
+      {"type" => "Net::ReadTimeout", "value" => "Net::ReadTimeout with #<TCPSocket:(closed)>",
+       "stacktrace" => {"frames" => [{"filename" => "net/protocol.rb", "lineno" => 229, "function" => "rbuf_fill"}]}},
+      {"type" => "PaymentFailed", "value" => "gateway timed out",
+       "stacktrace" => {"frames" => [{"filename" => "app/models/payment.rb", "lineno" => 42, "function" => "charge", "in_app" => true}]}}
+    ]},
+    "timestamp" => "2026-10-11T08:00:00Z"
+  }.freeze
+
+  # The wrapper's backtrace is its cause's, which sentry-ruby sends only once,
+  # on the cause.
+  TEMPLATE_ERROR = {
+    "exception" => {"values" => [
+      {"type" => "NoMethodError", "value" => "undefined method 'title' for nil",
+       "stacktrace" => {"frames" => [{"filename" => "app/views/books/show.html.erb", "lineno" => 12, "function" => "_app_views_show", "in_app" => true}]}},
+      {"type" => "ActionView::Template::Error", "value" => "undefined method 'title' for nil"}
+    ]},
+    "timestamp" => "2026-10-11T08:00:00Z"
+  }.freeze
+
   test "show heads the page with the message and sets an error_highlight snippet below it as code" do
     event = Event.create_from_sentry_payload!(
       "evt-highlighted",
@@ -105,6 +128,27 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_select "p", text: MESSAGE
     assert_select "pre#exception-value-detail", text: "job.perform\n^^^"
+  end
+
+  test "show lists what the exception was caused by, with each cause's stack trace" do
+    event = Event.create_from_sentry_payload!("evt-chained", CHAINED, @project)
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select "#caused-by-1 h2", text: /Caused by\s+Net::ReadTimeout/
+    assert_select "#caused-by-1", text: /Net::ReadTimeout with #<TCPSocket:\(closed\)>/
+    assert_select "#caused-by-1 .stack-frame", text: /net\/protocol\.rb/
+    # The root cause is linked from the top of the page, not only at the bottom.
+    assert_select "a[href='#caused-by-1']", text: /Net::ReadTimeout/
+  end
+
+  test "show doesn't repeat a stack trace the cause shares with the exception above it" do
+    event = Event.create_from_sentry_payload!("evt-template", TEMPLATE_ERROR, @project)
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select ".stack-frame", text: /app\/views\/books\/show\.html\.erb/, count: 1
+    assert_select "#caused-by-1", text: /Same stack trace as above/
   end
 
   test "show sets no snippet under a one-line message" do
