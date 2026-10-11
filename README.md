@@ -261,9 +261,9 @@ services:
       - /storage/splat/logs/maintenance:/rails/log
     mem_limit: 512M
 
-  # Fires recurring jobs (config/schedule.yml) onto the maintenance tube. Run
-  # exactly ONE replica — bin/scheduler has no cross-process lock, so a second
-  # instance would double every cron fire.
+  # Fires recurring jobs (config/schedule.yml) onto the maintenance tube. One
+  # replica is enough, and a second is harmless: every entry carries an idp:
+  # key with a cooldown, so Tuber absorbs the duplicate fire.
   scheduler:
     <<: *splat-worker
     command: bin/scheduler

@@ -11,6 +11,26 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## Unreleased
+
+### Fixed
+
+- **A scheduled job held back by a buried earlier run is reported.** A buried
+  job keeps its `idp:` key, so every later run of that entry creates nothing.
+  Tuber said so in its reply (`INSERTED <id> BURIED`) and the scheduler threw
+  the reply away; on 2026-09-09 that hid a dead hourly rollup for three days.
+  Each lost run now logs an error and reaches Sentry, one issue per entry, so
+  the issue's count is the number of runs lost.
+
+### Changed
+
+- **A second scheduler is harmless.** Every schedule entry now carries an
+  `idp:` key with a 30 s cooldown, and the two `every` entries are cron lines,
+  so schedulers fire each entry on the same second and Tuber turns the
+  duplicate into a no-op. `data_retention` and `cleanup_expired_oidc_sessions`
+  gain keys, so a buried retention run now holds back the next night's too —
+  and is reported.
+
 ## 1.20.0 — 2026-10-11
 
 A chained exception is grouped by the exception actually raised, with its
