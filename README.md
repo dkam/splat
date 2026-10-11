@@ -390,31 +390,36 @@ OIDC_REQUIRE_PKCE=<true/false>
 
 ## Performance
 
-Splat has been tested in production handling real-world traffic with excellent results.
+Splat runs in production on one shared instance for Booko and five other apps. These are that instance's numbers, measured in October 2026 on Splat 1.19.4.
 
 ### Production Metrics
 
-**Sustained load: ~1,550 transactions/minute (~26 tx/s)**
-- Web container: 1.07 GB RAM, ~19% CPU
-- Worker container (ingest + scheduler): 340 MB RAM, ~20% CPU
-- Queue depth: 0 (no backlog)
-- No database locks or contention
+**Load:** ~780,000 transactions a day (~9/s on average) from 6 projects, plus their errors, structured logs and cron check-ins. Ingestion keeps up — queue depth sits at 0.
 
-**Total resources: ~1.4 GB RAM, ~0.8 CPU cores** for both containers combined.
+**Data:** 244 GB of SQLite — transactions and spans 160 GB, logs 84 GB, issues and events 18 GB.
 
-**Throughput: ~2.2 million transactions/day**
+**Memory and CPU, by container** (the five services in the [compose file](#docker-compose), measured over the 23 hours after a deploy):
+
+| Container | Resident | Swapped out | `mem_limit` | CPU (average) |
+|---|---:|---:|---:|---:|
+| web | 296 MiB | 107 MiB | — | 0.07 cores |
+| ingest | 328 MiB | 258 MiB | 512 MiB | 0.10 cores |
+| maintenance | 113 MiB | 153 MiB | 512 MiB | 0.05 cores |
+| scheduler | 29 MiB | 102 MiB | 256 MiB | < 0.01 cores |
+| tuber | 17 MiB | 19 MiB | 1500 MiB | 0.01 cores |
+| **Total** | **~780 MiB** | **~640 MiB** | | **~0.23 cores** |
+
+*Resident* is each container's own memory in RAM, not counting the kernel's file cache. *Swapped out* is memory the kernel has paged out because nothing touched it — on that host, mostly what each Rails process loaded at boot and never used again. It costs nothing there, but **on a host without swap, budget for both columns: ~1.4 GB at this load.** RAM beyond that goes to the kernel's file cache for the SQLite files.
+
+For scale, a quiet instance — a few apps, ~16,000 transactions a day — runs the same five containers in ~230 MiB resident, ~680 MiB with its swapped-out memory. Most of that is the fixed cost of booting Rails four times (web, ingest, maintenance, scheduler).
 
 ### SQLite Performance
 
-At 26 transactions/second sustained with **~950k transactions in database (4.7GB)**:
-- ✅ No SQLITE_BUSY errors
-- ✅ No write conflicts
-- ✅ Linear CPU scaling with load
-- ✅ Stable memory usage (plateaus around 1GB for web container)
-- ✅ Memory remains stable as throughput increases (tested 14-26 tx/s)
-- ✅ Database size has no impact on ingestion performance ( so far )
+- **One writer per database is enough.** The ingest worker runs one consumer per data tube, and each tube writes to its own database file, so events, transactions and logs never queue behind each other's write lock.
+- **Ingestion keeps up at 160 GB.** The transactions database is that size and the queue still sits empty.
+- **Lock contention happens, and is expected.** The hourly rollup and retention's vacuum write to the same files ingest does. Both treat `database is locked` as transient: they stop, log it, and pick up the remainder on their next scheduled run.
 
-Rails 8.1's SQLite optimizations (WAL mode, connection pooling) handle write-heavy workloads efficiently.
+WAL mode (see `config/database.yml`) is what lets the UI read while ingest writes.
 
 ### Storage Architecture: All SQLite
 
@@ -491,63 +496,57 @@ Splat ingests structured logs alongside errors and transactions, into their own 
 
 ### Data Retention and Cleanup
 
-Splat automatically cleans up old data to manage database size and maintain performance.
+A daily job (`Maintenance::RetentionJob`) deletes data older than its retention window, then hands the freed space back to the filesystem.
 
-#### Default Retention Periods
-- **Events/Issues**: 90 days (configurable via `SPLAT_MAX_EVENT_LIFE_DAYS`)
-- **Transactions**: 90 days (configurable via `SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS`)
-- **Spans**: 30 days (span volume is far higher than transactions)
-- **Logs**: 14 days (configurable on the Settings page; logs are high-volume)
-- **Files**: 90 days (configurable via `SPLAT_MAX_FILE_LIFE_DAYS`)
+#### Retention windows
 
-#### Cleanup Process
-- **Schedule**: Daily at 2:00 AM UTC via the recurring-job scheduler (`bin/scheduler`)
-- **Actions**:
-  - Deletes events older than retention period
-  - Deletes transactions older than retention period
-  - Removes empty issues (issues with no associated events)
-  - Logs cleanup statistics to Rails logger
+Set on the **Settings** page, each between 1 and 3,650 days. There are no environment variables for these.
 
-#### Configuration
-Override default retention periods with environment variables:
+| Data | Default | What goes |
+|---|---:|---|
+| Events | 30 days | Raw error events. Their issues stay, with counts recalculated from the events that remain. |
+| Transactions | 90 days | Transaction rows, plus any span data still attached to them. |
+| Spans | 30 days | Span trees — the waterfall on the transaction page. Shorter than transactions because spans are far bigger. |
+| Logs | 14 days | Log records and their search-index entries. |
+| Aggregates | 540 days | Latency histograms and hourly endpoint stats. Kept long, so endpoint stats and charts keep working after the raw rows are gone. |
 
-```bash
-# Keep events for 30 days instead of 90
-SPLAT_MAX_EVENT_LIFE_DAYS=30
+Once a weekly deep storage scan has run, the Settings page shows each kind's disk use per day, and a projected size for the window you type in.
 
-# Keep transactions for 60 days
-SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS=60
+#### When it runs
 
-# Keep files for 180 days
-SPLAT_MAX_FILE_LIFE_DAYS=180
-```
+At 02:00 Australia/Melbourne every day — the `data_retention` entry in `config/schedule.yml`, which is where to change the time or zone. A search-index merge for logs follows at 02:40.
 
-#### Manual Cleanup
-To run cleanup manually:
+The job is built to share the databases with live ingest:
+
+- **Deletes go in batches of 500**, with a short sleep between batches, so ingest gets the write lock in between.
+- **Then `incremental_vacuum` on each big database** (issues/events, transactions/spans, logs) returns freed pages to disk, for up to 15 minutes per database. Whatever is left over carries to the next night. After you shorten a window, expect the files to shrink over several nights, not at once.
+- **If it can't get the lock, it stops and leaves the rest.** A busy database ends that night's vacuum; it doesn't fail the job.
+
+#### Running it now
+
+Queue it for the maintenance worker, the same way the scheduler does. `-c 1` shares the concurrency key every maintenance job uses, so it waits for any maintenance job already running:
 
 ```bash
-# Run cleanup with default settings
-bin/rails runner "CleanupEventsJob.new.perform"
-
-# Run cleanup with custom retention periods
-SPLAT_MAX_EVENT_LIFE_DAYS=30 bin/rails runner "CleanupEventsJob.new.perform"
+docker compose exec tuber tuber put -t splat.maintenance -c 1 \
+  '{"class":"Maintenance::RetentionJob","args":[]}'
 ```
 
-#### Monitoring
-Check cleanup activity in Rails logs:
+#### Checking on it
 
 ```bash
-tail -f log/production.log | grep "Cleanup"
+docker compose logs maintenance | grep RetentionJob
 ```
 
-Example log output:
+It logs one line per database for the vacuum — free pages before and after, and why it stopped — then a summary of rows deleted per kind. A night on the production instance described under [Performance](#performance):
+
 ```
-Started cleanup: events=90d, transactions=90d, files=90d
-Deleted 1,234 old events
-Deleted 567 old transactions
-Deleted 89 empty issues
-Cleanup completed successfully
+[Maintenance::RetentionJob] vacuum IssuesEventsRecord: freelist 4787974 -> 3482974 in 1305000 step(s) — hit 900s budget, resuming next run
+[Maintenance::RetentionJob] incremental_vacuum stopped on TransactionsSpansRecord: database locked
+[Maintenance::RetentionJob] vacuum LogsRecord: freelist 2164756 -> 1875842 in 287001 step(s) — no further pages reclaimable after 3 checkpoint(s) — WAL still references them, resuming next run
+[Maintenance::RetentionJob] done in 14115.96s — events:128823, transactions:642357, spans:0, span_trees:642357, logs:463685, histograms:0, hourly_stats:0, facets:1, issue_facets:22
 ```
+
+That run took just under four hours, most of it deleting.
 
 ## Monitoring
 
@@ -875,11 +874,8 @@ MCP_AUTH_TOKEN: Generate with `openssl rand -hex 32`
 ```
 
 ### Data Retention
-```
-SPLAT_MAX_EVENT_LIFE_DAYS=30
-SPLAT_MAX_TRANSACTION_EVENT_LIFE_DAYS=60
-SPLAT_MAX_FILE_LIFE_DAYS=180
-```
+
+None — retention windows are set on the Settings page. See [Data Retention and Cleanup](#data-retention-and-cleanup).
 
 ### Tuber Work Queue
 ```
