@@ -195,8 +195,11 @@ class Transaction
       (total_time > 0) ? total_time.round : nil
     end
 
-    # Rails' own "Views: Xms": the time inside a template render that wasn't
-    # spent on a query. sentry-rails records the queries a template fires as
+    # The time inside a template render that wasn't spent on a query. Close to
+    # Rails' own "Views: Xms" but short of it by the layout: Rails renders the
+    # layout outside the render_template notification and sentry-rails sends
+    # no span for it, so layout time falls to "other" — an undercount, never
+    # an overcount. sentry-rails records the queries a template fires as
     # siblings of its span, not children, so they're taken out by overlap in
     # time rather than by parentage. Both sides are merged first, so a
     # template rendered inside another, or concurrent queries, count once.
