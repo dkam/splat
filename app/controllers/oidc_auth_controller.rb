@@ -7,13 +7,18 @@ class OidcAuthController < ApplicationController
   # Authentik or Keycloak's default) would need the client secret as the key.
   ID_TOKEN_ALGORITHMS = %w[RS256 RS384 RS512 PS256 PS384 PS512 ES256 ES384 ES512].freeze
 
-  # OIDC_DISCOVERY_URL is set both ways in the wild — as the issuer base, which
-  # is what the README asks for, and as the full well-known URL, which is what
-  # .env.example shows — so every reader normalises rather than trusting it. The
-  # underscore spelling is accepted on the way in because Splat's own README
+  # OIDC_ISSUER is the provider's issuer URL and every other endpoint is derived
+  # from it, the discovery document included. It's read two ways on purpose:
+  # verbatim by #expected_issuer, because a trailing slash or a path suffix is
+  # part of the iss claim, and normalised by #issuer_base for building URLs.
+  # The underscore spelling is accepted on the way in because Splat's own README
   # recommended it for four providers; only the hyphenated form is real.
   WELL_KNOWN_PATH = "/.well-known/openid-configuration"
   WELL_KNOWN_SUFFIX = %r{/\.well-known/openid[-_]configuration/?\z}
+
+  # The discovery document declares an issuer other than OIDC_ISSUER. Its
+  # message names both and is meant for whoever set the variable.
+  class IssuerMismatch < StandardError; end
 
   # GET /login - Show login page
   def login
@@ -65,6 +70,13 @@ class OidcAuthController < ApplicationController
 
     # Redirect to OIDC provider
     redirect_to oidc_client.authorization_uri(auth_params), allow_other_host: true
+  rescue IssuerMismatch => e
+    # Stop here rather than send anyone to a provider whose id_token can only
+    # fail the iss check when they come back. The values aren't secret — both
+    # are in the provider's public discovery document — and the person who
+    # tries the first login after setting the variable is the one who can fix it.
+    Rails.logger.error "OIDC #{e.message}"
+    redirect_to login_path, alert: "Sign-in is misconfigured. #{e.message}"
   end
 
   # GET /auth/callback - Handle OIDC provider callback
@@ -180,38 +192,18 @@ class OidcAuthController < ApplicationController
 
   private
 
+  # Built from Splat's own #discovery_document rather than the gem's
+  # Discovery::Provider::Config.discover!, which only speaks HTTPS and reports
+  # an issuer mismatch as "Issuer mismatch" without either value.
   def oidc_client
-    @oidc_client ||= begin
-      # discover! appends the well-known path itself, so it wants the base.
-      issuer_url = extract_issuer_from_discovery
-
-      # Use gem's discovery directly
-      discovery = OpenIDConnect::Discovery::Provider::Config.discover!(issuer_url)
-
-      OpenIDConnect::Client.new(
-        identifier: ENV.fetch("OIDC_CLIENT_ID"),
-        secret: ENV.fetch("OIDC_CLIENT_SECRET"),
-        redirect_uri: "#{request.base_url}/auth/callback",
-        authorization_endpoint: discovery.authorization_endpoint,
-        token_endpoint: discovery.token_endpoint,
-        userinfo_endpoint: discovery.userinfo_endpoint
-      )
-    rescue OpenIDConnect::ValidationFailed, OpenIDConnect::Discovery::DiscoveryFailed => e
-      # If discovery fails with validation, try manual fallback
-      Rails.logger.warn "OIDC discovery validation failed: #{e.message}. Trying manual fallback."
-
-      response = Faraday.get(discovery_url)
-      config = JSON.parse(response.body)
-
-      OpenIDConnect::Client.new(
-        identifier: ENV.fetch("OIDC_CLIENT_ID"),
-        secret: ENV.fetch("OIDC_CLIENT_SECRET"),
-        redirect_uri: "#{request.base_url}/auth/callback",
-        authorization_endpoint: config["authorization_endpoint"],
-        token_endpoint: config["token_endpoint"],
-        userinfo_endpoint: config["userinfo_endpoint"]
-      )
-    end
+    @oidc_client ||= OpenIDConnect::Client.new(
+      identifier: ENV.fetch("OIDC_CLIENT_ID"),
+      secret: ENV.fetch("OIDC_CLIENT_SECRET"),
+      redirect_uri: "#{request.base_url}/auth/callback",
+      authorization_endpoint: discovery_document["authorization_endpoint"],
+      token_endpoint: discovery_document["token_endpoint"],
+      userinfo_endpoint: discovery_document["userinfo_endpoint"]
+    )
   end
 
   def valid_state_token?(state, expected_state)
@@ -260,7 +252,7 @@ class OidcAuthController < ApplicationController
   def oidc_configured?
     ENV["OIDC_CLIENT_ID"].present? &&
       ENV["OIDC_CLIENT_SECRET"].present? &&
-      ENV["OIDC_DISCOVERY_URL"].present?
+      ENV["OIDC_ISSUER"].present?
   end
 
   # Backchannel logout validation methods
@@ -351,18 +343,26 @@ class OidcAuthController < ApplicationController
     nil
   end
 
-  # The provider's discovery document, fetched once per request. Both the JWKS
-  # and the expected issuer come from here.
+  # The provider's discovery document, fetched once per request: the client's
+  # endpoints and the JWKS both come from here. OIDC Discovery 1.0 §4.3 — the
+  # issuer it declares must be identical to the one it was fetched from, and if
+  # it isn't, none of it may be used.
   def discovery_document
-    @discovery_document ||= fetch_json(discovery_url, "OIDC discovery")
+    @discovery_document ||= fetch_json(discovery_url, "OIDC discovery").tap do |document|
+      if document["issuer"] != expected_issuer
+        raise IssuerMismatch, "OIDC_ISSUER is #{expected_issuer.inspect}, but the provider's " \
+          "discovery document (#{discovery_url}) gives its issuer as #{document["issuer"].inspect}. " \
+          "They must match exactly: set OIDC_ISSUER to the document's \"issuer\"."
+      end
+    end
   end
 
-  # The full well-known URL, whichever end of it OIDC_DISCOVERY_URL was set to.
-  # Fetching the issuer base instead lands on the provider's home page, which
-  # for a real IdP is a redirect to a login form — an empty body that surfaces
-  # as a JSON parse error nowhere near the thing that caused it.
+  # The full well-known URL, derived from OIDC_ISSUER. Fetching the issuer base
+  # itself lands on the provider's home page, which for a real IdP is a redirect
+  # to a login form — an empty body that surfaces as a JSON parse error nowhere
+  # near the thing that caused it.
   def discovery_url
-    "#{extract_issuer_from_discovery}#{WELL_KNOWN_PATH}"
+    "#{issuer_base}#{WELL_KNOWN_PATH}"
   end
 
   # Net::HTTP.get hands back the body whatever the status and doesn't follow
@@ -381,16 +381,14 @@ class OidcAuthController < ApplicationController
     raise "#{purpose} returned invalid JSON from #{url}: #{e.message}"
   end
 
-  # Prefer the issuer the provider declares over one guessed from the discovery
-  # URL: they differ often enough (path-suffixed issuers, reverse proxies) that
-  # verify_iss would reject a perfectly good provider. OIDC_ISSUER still wins
-  # when set explicitly, and URL-munging remains the last resort so that a
-  # discovery outage degrades to the old behaviour instead of erroring.
+  # What the id_token's iss claim is verified against — OIDC_ISSUER verbatim,
+  # deliberately unnormalised. Auth0's issuer ends in a slash and Authentik's
+  # and Keycloak's carry a path, and the iss claim holds exactly that, so
+  # chomping either here would reject a perfectly good provider. Configured
+  # rather than read back from the discovery document, which is checked against
+  # it instead (#discovery_document).
   def expected_issuer
-    ENV["OIDC_ISSUER"].presence || discovery_document["issuer"].presence || extract_issuer_from_discovery
-  rescue => e
-    Rails.logger.warn "OIDC issuer lookup failed (#{e.class.name}: #{e.message}); falling back to the discovery URL"
-    extract_issuer_from_discovery
+    ENV.fetch("OIDC_ISSUER").strip
   end
 
   def fetch_jwks
@@ -413,11 +411,12 @@ class OidcAuthController < ApplicationController
     end
   end
 
-  # The issuer base — OIDC_DISCOVERY_URL with any well-known suffix removed.
-  # Used as the issuer of last resort, and as the base every other URL is
-  # built from.
-  def extract_issuer_from_discovery
-    ENV.fetch("OIDC_DISCOVERY_URL").strip.sub(WELL_KNOWN_SUFFIX, "").chomp("/")
+  # The issuer with everything that would break URL construction taken off: a
+  # trailing slash, and the well-known suffix somebody moved across unchanged
+  # from the OIDC_DISCOVERY_URL this variable replaced. The base every derived
+  # URL is built from; #expected_issuer keeps the unnormalised form.
+  def issuer_base
+    ENV.fetch("OIDC_ISSUER").strip.sub(WELL_KNOWN_SUFFIX, "").chomp("/")
   end
 
   def process_backchannel_logout(claims)

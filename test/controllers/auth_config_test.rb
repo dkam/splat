@@ -39,9 +39,9 @@ class AuthConfigTest < ActionDispatch::IntegrationTest
   end
 
   test "a blank OIDC variable counts as missing" do
-    with_oidc_env(full_oidc_env.merge("OIDC_DISCOVERY_URL" => "")) do
+    with_oidc_env(full_oidc_env.merge("OIDC_ISSUER" => "")) do
       assert_equal :misconfigured, SplatAuthorization.oidc_state
-      assert_equal ["OIDC_DISCOVERY_URL"], SplatAuthorization.missing_oidc_vars
+      assert_equal ["OIDC_ISSUER"], SplatAuthorization.missing_oidc_vars
     end
   end
 
@@ -89,7 +89,7 @@ class AuthConfigTest < ActionDispatch::IntegrationTest
   end
 
   test "half-configured keeps serving the health check" do
-    with_oidc_env(full_oidc_env.except("OIDC_DISCOVERY_URL")) do
+    with_oidc_env(full_oidc_env.except("OIDC_ISSUER")) do
       get "/_health"
       assert_response :success
     end
@@ -98,13 +98,13 @@ class AuthConfigTest < ActionDispatch::IntegrationTest
   # ---- the login page ---------------------------------------------------
 
   test "login page 503s and names the missing variables when half-configured" do
-    with_oidc_env(full_oidc_env.except("OIDC_CLIENT_SECRET", "OIDC_DISCOVERY_URL")) do
+    with_oidc_env(full_oidc_env.except("OIDC_CLIENT_SECRET", "OIDC_ISSUER")) do
       get login_path
 
       assert_response :service_unavailable
       assert_match(/Half-Configured/i, @response.body)
       assert_match(/OIDC_CLIENT_SECRET/, @response.body)
-      assert_match(/OIDC_DISCOVERY_URL/, @response.body)
+      assert_match(/OIDC_ISSUER/, @response.body)
     end
   end
 
@@ -147,7 +147,7 @@ class AuthConfigTest < ActionDispatch::IntegrationTest
     {
       "OIDC_CLIENT_ID" => "splat-test",
       "OIDC_CLIENT_SECRET" => "s3cret",
-      "OIDC_DISCOVERY_URL" => "https://idp.example.com/.well-known/openid-configuration"
+      "OIDC_ISSUER" => "https://idp.example.com"
     }
   end
 

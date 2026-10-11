@@ -75,10 +75,11 @@ services:
       RAILS_MAX_THREADS: 5
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
-      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL}
-      # Only needed when the issuer the provider declares isn't the one you want
-      # verified against. Unset, it's read from the discovery document — but it
-      # has to be listed here or setting it in .env silently does nothing.
+      # The provider's issuer URL — everything else is derived from it, the
+      # discovery document at ${OIDC_ISSUER}/.well-known/openid-configuration
+      # included. Set it to exactly the issuer the provider puts in the id_token
+      # (its own discovery document's "issuer"), trailing slash and path and
+      # all: it's what the iss claim is verified against.
       OIDC_ISSUER: ${OIDC_ISSUER}
       OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME}
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}

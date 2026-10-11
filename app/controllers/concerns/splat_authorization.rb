@@ -6,8 +6,10 @@ module SplatAuthorization
   extend ActiveSupport::Concern
 
   # The three variables that together stand up an OIDC provider. All three or
-  # none — see .oidc_state.
-  OIDC_VARS = %w[OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_DISCOVERY_URL].freeze
+  # none — see .oidc_state. OIDC_ISSUER is the provider's issuer URL; the
+  # discovery document is derived from it rather than configured separately
+  # (OidcAuthController#discovery_url).
+  OIDC_VARS = %w[OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_ISSUER].freeze
 
   # Allowlist variables. Set without a provider they express an intent to
   # restrict access that nothing is enforcing, so boot warns about them — but

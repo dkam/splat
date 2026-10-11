@@ -13,6 +13,33 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Changed — breaking
+
+- **`OIDC_DISCOVERY_URL` is replaced by `OIDC_ISSUER`.** The provider is now
+  configured from its issuer URL alone; discovery is fetched from
+  `OIDC_ISSUER` + `/.well-known/openid-configuration`. **Update `.env` before
+  the next `up -d`**: with the old variable set and the new one missing, all
+  three OIDC variables are no longer present, so the instance boots
+  `:misconfigured` and the UI returns `503`. Ingestion, `/mcp` and `/_health`
+  keep serving, as they do for any half-configured deploy.
+
+  Set `OIDC_ISSUER` to the `"issuer"` field of your provider's own discovery
+  document, copied exactly — trailing slash and path included. It is what the
+  `id_token`'s `iss` claim is verified against, and it is no longer read back
+  from discovery: the discovery document's issuer is checked against it, as
+  OIDC Discovery 1.0 §4.3 requires, so a wrong value is reported rather than
+  quietly corrected — on the login page, naming the issuer the provider gave,
+  before anyone is sent off to log in.
+  Moving the old discovery URL across unchanged still builds the right
+  discovery URL (the well-known suffix is stripped) but fails the issuer check.
+
+  One variable instead of two that had to agree.
+
+- **The undocumented manual-endpoint escape hatch is gone from the README.**
+  `OIDC_AUTH_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`, `OIDC_USERINFO_ENDPOINT` and
+  `OIDC_JWKS_ENDPOINT` were documented but never read by any code. Nothing
+  changed in behaviour; the docs stopped claiming otherwise.
+
 ### Fixed
 
 - **A scheduled job held back by a buried earlier run is reported.** A buried

@@ -220,7 +220,7 @@ services:
       # OIDC is only needed by the web tier (see Authentication below).
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
-      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL}
+      OIDC_ISSUER: ${OIDC_ISSUER}
       OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME}
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
@@ -321,7 +321,7 @@ Splat has no login by default — **authentication is off until you configure OI
 
 1. None (default): Anyone can access Splat — ensure it's running internal / within a VPN
 2. Basic Auth: Use your webserver to implement Basic Auth, avoiding protecting /api/ and /mcp/ endpoints as they're already authenticated
-3. OIDC: Set the `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_DISCOVERY_URL` values (see [OIDC](#oidc) below)
+3. OIDC: Set the `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_ISSUER` values (see [OIDC](#oidc) below)
 
 **Setting the OIDC values switches Splat into login-required mode.** As soon as all three `OIDC_*` variables are present, the UI is no longer open: every browser request must be authenticated via your OIDC provider, and the signed-in email must match the allowlist (`SPLAT_ALLOWED_USERS` / `SPLAT_ALLOWED_DOMAINS`). Note:
 
@@ -370,7 +370,7 @@ Splat supports OIDC
 ```
 OIDC_CLIENT_ID=<OIDC CLIENT ID>
 OIDC_CLIENT_SECRET=<OIDC CLIENT SECRET>
-OIDC_DISCOVERY_URL=<OIDC DISCOVERY URL>
+OIDC_ISSUER=<OIDC ISSUER URL>
 
 SPLAT_ALLOWED_USERS="Comma seperated list of email addresses allowed access Splat"
 SPLAT_ALLOWED_DOMAINS="Comma seperated list of email domains allowed access Splat"
@@ -919,24 +919,38 @@ tuber-tui --url <host>:11330   # the host-mapped Tuber port from compose
 
 ## OIDC Authentication Setup
 
-Splat supports OpenID Connect (OIDC) authentication with automatic discovery URL configuration. This replaces the basic auth setup with proper user authentication.
+Splat supports OpenID Connect (OIDC) authentication, configured from the
+provider's issuer URL alone. This replaces the basic auth setup with proper user
+authentication.
 
-### Quick Start with Discovery URLs
+### Quick Start
 
-The preferred method is using OIDC discovery URLs - just set 3 environment variables:
+Set 3 environment variables:
 
 ```bash
 # Required for OIDC authentication
-OIDC_DISCOVERY_URL=https://your-provider.com/.well-known/openid-configuration
+OIDC_ISSUER=https://your-provider.com
 OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 OIDC_PROVIDER_NAME=Your Provider Name  # Optional: Display name for login button
 ```
 
-The full well-known URL is the form to prefer, and the one `.env.example` and
-the provider examples below use. The issuer base on its own
-(`https://your-provider.com`) also works — Splat appends the well-known path
-when it's missing — but say what you mean and the logs stay easier to read.
+`OIDC_ISSUER` is the provider's issuer URL, and everything else is derived from
+it — discovery is fetched from `OIDC_ISSUER` + `/.well-known/openid-configuration`.
+
+Take the value from the `"issuer"` field of your provider's own discovery
+document and copy it **exactly**, trailing slash and path and all. It is what
+the `id_token`'s `iss` claim is checked against, and providers differ: Auth0's
+issuer ends in a slash, Authentik's and Keycloak's carry a path. Splat checks
+it against the discovery document before sending anyone to log in, as the OIDC
+Discovery spec requires; get it wrong and the login page says so, with the
+issuer the provider gave.
+
+> **Upgrading from `OIDC_DISCOVERY_URL`?** That variable is gone; set
+> `OIDC_ISSUER` instead. Moving the old value across unchanged works — a
+> `/.well-known/openid-configuration` suffix is stripped before the discovery URL
+> is built — but the issuer check uses the value verbatim, so a pasted
+> well-known URL fails it. Use the bare issuer.
 
 **Important**: Configure your OIDC provider with the callback URL: `https://your-splat-domain.com/auth/callback`
 
@@ -944,7 +958,7 @@ when it's missing — but say what you mean and the logs stay easier to read.
 
 **Google:**
 ```bash
-OIDC_DISCOVERY_URL=https://accounts.google.com/.well-known/openid-configuration
+OIDC_ISSUER=https://accounts.google.com
 OIDC_CLIENT_ID=your-google-client-id
 OIDC_CLIENT_SECRET=your-google-client-secret
 OIDC_PROVIDER_NAME=Google
@@ -952,7 +966,7 @@ OIDC_PROVIDER_NAME=Google
 
 **Okta:**
 ```bash
-OIDC_DISCOVERY_URL=https://your-domain.okta.com/.well-known/openid-configuration
+OIDC_ISSUER=https://your-domain.okta.com
 OIDC_CLIENT_ID=your-okta-client-id
 OIDC_CLIENT_SECRET=your-okta-client-secret
 OIDC_PROVIDER_NAME=Okta
@@ -960,7 +974,7 @@ OIDC_PROVIDER_NAME=Okta
 
 **Auth0:**
 ```bash
-OIDC_DISCOVERY_URL=https://your-domain.auth0.com/.well-known/openid-configuration
+OIDC_ISSUER=https://your-domain.auth0.com/
 OIDC_CLIENT_ID=your-auth0-client-id
 OIDC_CLIENT_SECRET=your-auth0-client-secret
 OIDC_PROVIDER_NAME=Auth0
@@ -968,31 +982,30 @@ OIDC_PROVIDER_NAME=Auth0
 
 **Microsoft Azure AD:**
 ```bash
-OIDC_DISCOVERY_URL=https://login.microsoftonline.com/your-tenant-id/v2.0/.well-known/openid-configuration
+OIDC_ISSUER=https://login.microsoftonline.com/your-tenant-id/v2.0
 OIDC_CLIENT_ID=your-azure-client-id
 OIDC_CLIENT_SECRET=your-azure-client-secret
 OIDC_PROVIDER_NAME=Microsoft
 ```
 
-### Manual Endpoint Configuration
+Use your tenant's issuer, not `/common` or `/organizations`: their discovery
+documents give the issuer as a `{tenantid}` placeholder, which no configured
+value can match.
 
-If your provider doesn't support discovery URLs, configure endpoints individually:
+### Providers Without Discovery
 
-```bash
-# Required OIDC settings
-OIDC_CLIENT_ID=your-client-id
-OIDC_CLIENT_SECRET=your-client-secret
-OIDC_AUTH_ENDPOINT=https://your-provider.com/oauth/authorize
-OIDC_TOKEN_ENDPOINT=https://your-provider.com/oauth/token
-OIDC_USERINFO_ENDPOINT=https://your-provider.com/oauth/userinfo
-OIDC_JWKS_ENDPOINT=https://your-provider.com/.well-known/jwks.json
-OIDC_PROVIDER_NAME=Your Provider
-```
+There is no manual endpoint configuration. Splat requires a provider that serves
+a discovery document at `OIDC_ISSUER` + `/.well-known/openid-configuration`, and
+reads the authorization, token, userinfo and JWKS endpoints from it. A provider
+without one can't be used.
 
+(Earlier versions of this README documented `OIDC_AUTH_ENDPOINT`,
+`OIDC_TOKEN_ENDPOINT`, `OIDC_USERINFO_ENDPOINT` and `OIDC_JWKS_ENDPOINT`. No
+code has ever read them; setting them does nothing.)
 
 ### How It Works
 
-1. **Discovery**: The app automatically fetches OIDC configuration from your provider's discovery URL
+1. **Discovery**: The app fetches OIDC configuration from `OIDC_ISSUER` + `/.well-known/openid-configuration`
 2. **Authentication**: Users are redirected to your OIDC provider for login
 3. **Token Storage**: JWT tokens are encrypted and stored in secure HTTP-only cookies
 4. **Auto-Refresh**: Tokens are automatically refreshed when needed (5 minutes before expiry)

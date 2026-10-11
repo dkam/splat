@@ -66,50 +66,35 @@ class OidcIdTokenTest < ActiveSupport::TestCase
 
   # ---- issuer resolution ------------------------------------------------
 
-  # Providers whose issuer is path-suffixed (Authentik, Keycloak realms) don't
-  # round-trip through "strip .well-known from the discovery URL" reliably, and
-  # verify_iss would reject a perfectly good provider.
-  test "expected_issuer prefers what the provider declares" do
-    controller = OidcAuthController.new
-    controller.define_singleton_method(:discovery_document) { {"issuer" => ISSUER} }
-
-    with_env("OIDC_DISCOVERY_URL" => "https://idp.example.com/other/.well-known/openid-configuration") do
-      assert_equal ISSUER, controller.send(:expected_issuer)
-    end
+  # OIDC_ISSUER is the issuer verbatim. Providers whose issuer carries a
+  # trailing slash (Auth0) or a path suffix (Authentik, Keycloak realms) put
+  # exactly that in the iss claim, so this is the one reader that normalises
+  # nothing beyond surrounding whitespace — chomping a "/" here would make
+  # verify_iss reject a perfectly good provider.
+  test "expected_issuer is OIDC_ISSUER verbatim" do
+    assert_expected_issuer "https://explicit.example.com/",
+      from: "https://explicit.example.com/"
   end
 
-  test "expected_issuer honours OIDC_ISSUER above discovery" do
-    controller = OidcAuthController.new
-    controller.define_singleton_method(:discovery_document) { {"issuer" => ISSUER} }
-
-    with_env("OIDC_ISSUER" => "https://explicit.example.com/") do
-      assert_equal "https://explicit.example.com/", controller.send(:expected_issuer)
-    end
+  test "expected_issuer keeps a path-suffixed issuer intact" do
+    assert_expected_issuer "https://idp.example.com/application/o/splat/",
+      from: "https://idp.example.com/application/o/splat/"
   end
 
-  test "expected_issuer falls back to the discovery URL when discovery fails" do
-    controller = OidcAuthController.new
-    controller.define_singleton_method(:discovery_document) { raise SocketError, "no route" }
-
-    with_env("OIDC_DISCOVERY_URL" => "https://idp.example.com/o/splat/.well-known/openid-configuration") do
-      assert_equal "https://idp.example.com/o/splat", controller.send(:expected_issuer)
-    end
+  test "expected_issuer trims surrounding whitespace" do
+    assert_expected_issuer "https://idp.example.com",
+      from: "  https://idp.example.com  "
   end
 
-  # ---- discovery URL normalisation --------------------------------------
+  # ---- discovery URL derivation -----------------------------------------
 
-  # OIDC_DISCOVERY_URL is documented as the issuer base in README.md and as the
-  # full well-known URL in .env.example, so both reach real deployments. Fetching
-  # the base lands on the provider's home page — a 302 with an empty body, which
-  # used to surface as "Failed to fetch JWKS: unexpected end of input".
-  test "discovery_url appends the well-known path to an issuer base" do
+  # The well-known URL is built from OIDC_ISSUER rather than configured
+  # separately. Fetching the issuer base itself lands on the provider's home
+  # page — a 302 with an empty body, which used to surface as "Failed to fetch
+  # JWKS: unexpected end of input".
+  test "discovery_url appends the well-known path to the issuer" do
     assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
       from: "https://idp.example.com"
-  end
-
-  test "discovery_url leaves a full well-known URL alone" do
-    assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
-      from: "https://idp.example.com/.well-known/openid-configuration"
   end
 
   test "discovery_url keeps the path of a realm-scoped provider" do
@@ -122,6 +107,14 @@ class OidcIdTokenTest < ActiveSupport::TestCase
       from: "https://idp.example.com/"
   end
 
+  # OIDC_ISSUER replaced OIDC_DISCOVERY_URL, and the obvious migration mistake
+  # is to move the old value across unchanged. Strip the suffix rather than
+  # building ".well-known/openid-configuration/.well-known/openid-configuration".
+  test "discovery_url tolerates a full well-known URL pasted in" do
+    assert_discovery_url "https://idp.example.com/.well-known/openid-configuration",
+      from: "https://idp.example.com/.well-known/openid-configuration"
+  end
+
   # Splat's own README recommended the underscore spelling for Google, Okta,
   # Auth0 and Microsoft. It 404s at every one of them.
   test "discovery_url corrects the underscore spelling" do
@@ -129,20 +122,28 @@ class OidcIdTokenTest < ActiveSupport::TestCase
       from: "https://idp.example.com/.well-known/openid_configuration"
   end
 
-  test "extract_issuer_from_discovery strips the well-known suffix" do
+  test "issuer_base strips a well-known suffix and trailing slash" do
     controller = OidcAuthController.new
 
-    with_env("OIDC_DISCOVERY_URL" => "https://idp.example.com/.well-known/openid-configuration") do
-      assert_equal "https://idp.example.com", controller.send(:extract_issuer_from_discovery)
+    with_env("OIDC_ISSUER" => "https://idp.example.com/.well-known/openid-configuration") do
+      assert_equal "https://idp.example.com", controller.send(:issuer_base)
     end
   end
 
   private
 
+  def assert_expected_issuer(expected, from:)
+    controller = OidcAuthController.new
+
+    with_env("OIDC_ISSUER" => from) do
+      assert_equal expected, controller.send(:expected_issuer)
+    end
+  end
+
   def assert_discovery_url(expected, from:)
     controller = OidcAuthController.new
 
-    with_env("OIDC_DISCOVERY_URL" => from) do
+    with_env("OIDC_ISSUER" => from) do
       assert_equal expected, controller.send(:discovery_url)
     end
   end
