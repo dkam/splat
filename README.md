@@ -877,6 +877,14 @@ MCP_AUTH_TOKEN: Generate with `openssl rand -hex 32`
 
 None — retention windows are set on the Settings page. See [Data Retention and Cleanup](#data-retention-and-cleanup).
 
+### SQLite Page Cache
+```
+SPLAT_SQLITE_CACHE_KB=2000         # page cache per connection, in KB
+SPLAT_SQLITE_CACHE_BOOST_KB=20000  # what an ingest consumer raises its write connection to during a backlog
+```
+
+Every connection gets the small cache. Each ingest consumer raises the cache on the one database it writes while its reserves come back full, then drops it 60 seconds after the last full one. Once a minute each consumer logs its jobs and ms/job at each size, plus process memory, to the container log and to `SENTRY_DSN` as a structured log. Set `SPLAT_SQLITE_CACHE_KB=20000` to go back to the old behaviour: 20 MB on every connection, all the time.
+
 ### Tuber Work Queue
 ```
 TUBER_URL: tuber:11300   # host:port of the Tuber (beanstalkd-compatible) server

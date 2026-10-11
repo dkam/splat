@@ -91,6 +91,41 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     assert_operator job.touches, :>, 0, "the real batch path must hold its reservations"
   end
 
+  # Writes transactions_spans, so it sizes that database's cache to its backlog.
+  class BoostingConsumer < Ingest::TubeConsumer
+    def initialize(jobs)
+      super(tube: "splat.test")
+      @jobs = jobs
+    end
+
+    def process_batch(jobs) = nil
+
+    private
+
+    def reserve_batch = @jobs
+    def cache_record = TransactionsSpansRecord
+  end
+
+  test "process_one_batch sizes the write database's cache to the reserve" do
+    # Covers the wiring: the lease has to be on the thread that writes, and
+    # every reserve — not just the non-empty ones — has to reach CacheBoost.
+    conn = TransactionsSpansRecord.connection_pool.lease_connection
+    consumer = BoostingConsumer.new(Array.new(Ingest::CacheBoost::BOOST_BATCH) { FakeJob.new })
+
+    consumer.send(:start_cache_boost)
+    consumer.send(:process_one_batch)
+
+    assert_equal(-Ingest::CacheBoost.boost_kb, conn.select_value("PRAGMA cache_size").to_i)
+  ensure
+    conn&.execute("PRAGMA cache_size = -#{Ingest::CacheBoost.normal_kb}")
+  end
+
+  test "each ingest consumer sizes the cache of the database it writes" do
+    assert_equal TransactionsSpansRecord, Ingest::TransactionConsumer.new.send(:cache_record)
+    assert_equal LogsRecord, Ingest::LogConsumer.new.send(:cache_record)
+    assert_equal IssuesEventsRecord, Ingest::EventConsumer.new.send(:cache_record)
+  end
+
   test "the heartbeat stops once the batch is done" do
     job = FakeJob.new
     consumer = FastTouchConsumer.new { nil }

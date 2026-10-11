@@ -10,7 +10,12 @@ default: &default
   timeout: 5000
   # WAL with synchronous=NORMAL is the high-throughput SQLite config:
   # readers don't block writers, single fsync per checkpoint instead of per
-  # commit. mmap_size + cache_size reduce IO under burst-write load.
+  # commit.
+  #
+  # cache_size is per connection, and a connection fills it and keeps it, so
+  # it's small by default (SPLAT_SQLITE_CACHE_KB, 2 MB). The ingest consumers
+  # raise it on the database they write while working through a backlog — see
+  # Ingest::CacheBoost.
   #
   # NOTE: auto_vacuum is deliberately NOT set here. A connect-time pragma is
   # silently ineffective — the foreign_keys/journal_mode pragmas above read the
@@ -21,7 +26,7 @@ default: &default
     synchronous: normal
     foreign_keys: "on"
     busy_timeout: 5000
-    cache_size: -20000      # ~20 MB of page cache (negative = KB)
+    cache_size: <%= -Integer(ENV.fetch("SPLAT_SQLITE_CACHE_KB", 2000)) %>   # negative = KB
     mmap_size: 134217728    # 128 MB memory-mapped IO
     temp_store: memory
 

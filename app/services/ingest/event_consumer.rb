@@ -11,6 +11,8 @@ module Ingest
 
     private
 
+    def cache_record = IssuesEventsRecord
+
     def process_batch(jobs)
       outcomes = []
 

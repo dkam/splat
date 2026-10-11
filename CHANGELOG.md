@@ -13,6 +13,20 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Changed
+
+- **SQLite's page cache is 2 MB per connection, not 20 MB, and grows only
+  where it pays.** A connection fills its cache and keeps it, and the ingest
+  worker alone holds ~17 connections, so 20 MB each set a ~340 MB ceiling.
+  Each ingest consumer now raises the cache on the database it writes while
+  its reserves come back full (a backlog), and drops it 60 s after the last
+  full one. In a 2M-row benchmark the small cache cost nothing on reads and
+  ~12% on inserts at random index positions. Each consumer logs jobs and
+  ms/job at each size, plus process memory, once a minute — to the container
+  log and to `SENTRY_DSN` — so the trade can be judged on real traffic.
+  `SPLAT_SQLITE_CACHE_KB` and `SPLAT_SQLITE_CACHE_BOOST_KB` set the two sizes;
+  `SPLAT_SQLITE_CACHE_KB=20000` restores the old behaviour.
+
 ### Fixed
 
 - **A chained exception is titled, typed and grouped by the exception

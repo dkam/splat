@@ -19,6 +19,8 @@ module Ingest
 
     private
 
+    def cache_record = LogsRecord
+
     def process_batch(jobs)
       outcomes = jobs.map do |job|
         args = JSON.parse(job.body)

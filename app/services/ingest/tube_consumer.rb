@@ -69,6 +69,8 @@ module Ingest
       # from `default` (empty) and never drain its tube.
       return unless connect_with_retry
 
+      start_cache_boost
+
       until @stop
         begin
           process_one_batch
@@ -89,12 +91,17 @@ module Ingest
 
     def process_one_batch
       jobs = reserve_batch
-      return if jobs.empty?
+      @cache_boost&.reserved(jobs.size)
 
-      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      keeping_alive(jobs) { process_batch(jobs) }
-      ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round
-      Rails.logger.info "[#{self.class.name}] processed #{jobs.size} in #{ms}ms"
+      unless jobs.empty?
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        keeping_alive(jobs) { process_batch(jobs) }
+        ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round
+        Rails.logger.info "[#{self.class.name}] processed #{jobs.size} in #{ms}ms"
+        @cache_boost&.processed(jobs.size, ms)
+      end
+
+      @cache_boost&.report_if_due
     end
 
     # Run the block with a heartbeat touching `jobs`, so a batch slower than its
@@ -136,6 +143,24 @@ module Ingest
     def touch_interval = TOUCH_INTERVAL
 
     private
+
+    # The database this consumer writes, whose page cache it grows during a
+    # backlog (see CacheBoost). nil leaves every cache at its configured size.
+    def cache_record = nil
+
+    # Must run on the consumer's own thread. Lease, don't borrow: unleased, each
+    # query checks out whichever pooled connection is free and hands it back, so
+    # a cache size set on one would wander off to another thread, and this
+    # consumer's writes would land on connections that never got it.
+    def start_cache_boost
+      return unless cache_record
+
+      @cache_boost = CacheBoost.new(name: self.class.name,
+        connection: cache_record.connection_pool.lease_connection)
+    rescue => e
+      log_exception("[#{self.class.name}] cache boost unavailable", e)
+      @cache_boost = nil
+    end
 
     # Try to connect and WATCH the tube, retrying every CONNECT_RETRY_INTERVAL
     # until it succeeds or @stop is set. Returns true once watching, false if
