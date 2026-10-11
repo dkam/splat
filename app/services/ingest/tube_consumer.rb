@@ -63,7 +63,7 @@ module Ingest
     def run
       # Wait for tuber before entering the loop — a worker may boot before
       # tuber is up (or with tuber briefly gone). connect! opens the connection
-      # and WATCHes on the same thread that reserves: beaneater connections are
+      # and WATCHes on the same thread that reserves: tuber-gem connections are
       # per-thread, so a watch! issued on another thread wouldn't apply to the
       # socket this thread reserves on, and the worker would silently reserve
       # from `default` (empty) and never drain its tube.
@@ -75,8 +75,8 @@ module Ingest
         begin
           process_one_batch
         rescue *Tuber::CONNECTION_ERRORS => e
-          # Tuber went away mid-loop (a restart outlasting beaneater's own
-          # in-command retries). Rebuild the connection — this re-WATCHes the
+          # Tuber went away mid-loop (a restart outlasting the gem's own
+          # in-command retries, or a delete it won't repeat). Rebuild the connection — this re-WATCHes the
           # tube — and carry on; in-flight jobs are re-reserved after their TTR.
           log_exception("[#{self.class.name}] tuber connection lost, reconnecting", e)
           break unless reconnect
@@ -109,7 +109,7 @@ module Ingest
     #
     # The heartbeat shares this consumer's connection deliberately: a
     # reservation belongs to the connection that made it, so a touch from any
-    # other socket is NOT_FOUND. Beaneater serialises commands on that
+    # other socket is NOT_FOUND. The gem serialises commands on that
     # connection's mutex, and nothing reserves while a batch is in flight, so
     # the touch only ever contends with this batch's own deletes.
     def keeping_alive(jobs)
@@ -172,6 +172,7 @@ module Ingest
           @client = Tuber.consumer_client
           @client.tubes.watch!(@tube)
           Rails.logger.info "[#{self.class.name}] watching #{@tube}"
+          after_connect
           return true
         rescue => e
           attempt += 1
@@ -183,6 +184,10 @@ module Ingest
       end
       false
     end
+
+    # Override. Runs after every (re)connect, so after every tuber restart.
+    # Must not raise: the consumer is already watching its tube.
+    def after_connect = nil
 
     def reconnect
       close_client
@@ -223,12 +228,21 @@ module Ingest
 
     # Helpers shared by all subclasses.
 
+    # Runs a `{ "class": ..., "args": [...] }` body. One that names its
+    # config/schedule.yml entry is recorded as run first, so the settings page
+    # and /_health can tell whether anything is running the schedule — tuber or
+    # bin/scheduler, it's the same body either way.
+    def dispatch(body)
+      ScheduleRun.record!(body["schedule"]) if body["schedule"]
+      body["class"].constantize.new.perform(*(body["args"] || []))
+    end
+
     def safe_finalize(job, outcome)
       case outcome
       when :ok then job.delete
       when :retry then bury_or_release(job)
       end
-    rescue Beaneater::NotFoundError
+    rescue ::Tuber::NotFoundError
       # Already gone server-side — nothing to do.
     end
 

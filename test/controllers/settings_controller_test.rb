@@ -9,6 +9,31 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "says so when nothing is running the scheduled jobs" do
+    with_stub(Ingest::ScheduleStatus, :tuber_entries, -> { {} }) do
+      get settings_url
+    end
+
+    assert_response :success
+    assert_select "#scheduled-jobs", text: /Nothing is running these jobs/
+    assert_select "#scheduled-jobs td", text: "Not scheduled", count: Ingest::Schedule.entries.size
+  end
+
+  test "lists each scheduled job with what runs it" do
+    stats = Struct.new(:next_fire, :buried_streak).new(2.minutes.from_now, 0)
+    held = Ingest::Schedule.entries.to_h { |e| [e.name, stats] }
+    ScheduleRun.record!("data_retention", at: 3.hours.ago)
+
+    with_stub(Ingest::ScheduleStatus, :tuber_entries, -> { held }) do
+      get settings_url
+    end
+
+    assert_select "#scheduled-jobs" do |section|
+      refute_match "Nothing is running", section.text
+    end
+    assert_select "#scheduled-jobs tr", text: /data_retention.*tuber.*about 3 hours ago.*in 2 minutes.*OK/m
+  end
+
   test "index renders the compression panel when a snapshot has one" do
     # Regression: the compression branch references StorageStats::COMPRESSION_SAMPLE
     # and only renders when the snapshot carries compression data — an empty-cache

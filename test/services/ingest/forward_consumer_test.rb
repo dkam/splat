@@ -3,7 +3,7 @@
 require "test_helper"
 
 class Ingest::ForwardConsumerTest < ActiveSupport::TestCase
-  # Minimal stand-in for a Beaneater job. process_batch only needs #body plus
+  # Minimal stand-in for a tuber-gem job. process_batch only needs #body plus
   # the finalize verbs; we record which one was called.
   class FakeJob
     attr_reader :body, :finalized

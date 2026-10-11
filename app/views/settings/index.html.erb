@@ -408,6 +408,78 @@
       <% end %>
     </div>
 
+    <div id="scheduled-jobs" class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
+      <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Scheduled jobs</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">The recurring jobs in <code>config/schedule.yml</code>, what puts each one on its tube, and when a worker last ran it. Tuber 0.16 and later runs them itself; with an older tuber, <code>bin/scheduler</code> has to.</p>
+      <% if @schedule.any? { |row| row.state == :unscheduled } %>
+        <div class="mb-4 p-4 rounded bg-red-50 dark:bg-red-900/30 text-sm text-red-800 dark:text-red-300">
+          <strong>Nothing is running these jobs</strong>, so retention, WAL checkpoints and monitor alerts have stopped.
+          On tuber 0.16 or later, hand tuber the schedule with <code>bin/rails splat:schedule:sync</code> (Splat's web container does that when it starts).
+          With an older tuber, run <code>bin/scheduler</code>: the <code>scheduler</code> service in <code>compose.yml</code>, started with <code>--profile old-tuber</code>.
+        </div>
+      <% elsif @schedule.any? { |row| row.runner == :unknown } %>
+        <div class="mb-4 p-4 rounded bg-amber-50 dark:bg-amber-900/30 text-sm text-amber-800 dark:text-amber-300">
+          Tuber is unreachable and <code>bin/scheduler</code> isn't running, so there's no telling what runs these. The last-ran times are still accurate.
+        </div>
+      <% end %>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+              <th class="py-2 pr-4 font-medium">Job</th>
+              <th class="py-2 px-4 font-medium">Schedule</th>
+              <th class="py-2 px-4 font-medium">Run by</th>
+              <th class="py-2 px-4 font-medium">Last ran</th>
+              <th class="py-2 px-4 font-medium">Next</th>
+              <th class="py-2 pl-4 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @schedule.each do |row| %>
+              <tr class="border-b border-gray-100 dark:border-gray-800 align-top">
+                <td class="py-2 pr-4">
+                  <div class="font-mono text-gray-800 dark:text-gray-200"><%= row.entry.name %></div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400"><%= row.entry.job_class %> &rarr; <%= row.entry.tube %></div>
+                </td>
+                <td class="py-2 px-4 font-mono text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap"><%= row.entry.cron %></td>
+                <td class="py-2 px-4 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <%= {tuber: "tuber", scheduler: "bin/scheduler", nobody: "nothing", unknown: "unknown"}.fetch(row.runner) %>
+                </td>
+                <td class="py-2 px-4 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <% if row.last_run_at %>
+                    <span title="<%= row.last_run_at.utc.iso8601 %>"><%= time_ago_in_words(row.last_run_at) %> ago</span>
+                  <% else %>
+                    &mdash;
+                  <% end %>
+                </td>
+                <td class="py-2 px-4 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <% if row.next_fire %>
+                    <span title="<%= row.next_fire.utc.iso8601 %>">in <%= distance_of_time_in_words(Time.current, row.next_fire) %></span>
+                  <% else %>
+                    &mdash;
+                  <% end %>
+                </td>
+                <td class="py-2 pl-4 whitespace-nowrap">
+                  <% case row.state %>
+                  <% when :ok %>
+                    <span class="text-green-700 dark:text-green-400">OK</span>
+                  <% when :pending %>
+                    <span class="text-gray-500 dark:text-gray-400" title="No run recorded since Splat started, and none due yet">Not run yet</span>
+                  <% when :late %>
+                    <span class="font-semibold text-amber-600 dark:text-amber-400" title="A whole cycle has passed without a run. It may be queued behind another maintenance job.">Late</span>
+                  <% when :stuck %>
+                    <span class="font-semibold text-red-600 dark:text-red-400" title="Each fire is deduplicating against a buried job on <%= row.entry.tube %>. Kick or delete it.">Stuck behind a buried job (<%= pluralize(row.buried_streak, "fire") %> skipped)</span>
+                  <% when :unscheduled %>
+                    <span class="font-semibold text-red-600 dark:text-red-400">Not scheduled</span>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="bg-white dark:bg-gray-900 shadow rounded-lg p-6 border border-gray-200 dark:border-gray-800">
       <h2 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Alerting</h2>
       <p class="text-gray-600 dark:text-gray-400 mb-4">

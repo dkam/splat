@@ -3,7 +3,7 @@
 require "test_helper"
 
 class Ingest::TubeConsumerTest < ActiveSupport::TestCase
-  # Beaneater-shaped fake: client.tubes.watch!(name) + client.close.
+  # Tuber-shaped fake: client.tubes.watch!(name) + client.close.
   class FakeClient
     attr_reader :watched, :closed
 
@@ -35,7 +35,7 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
   end
 
   # Counts touches instead of talking to tuber. #touch on a job that's been
-  # deleted (or whose reservation lapsed) raises, exactly as beaneater's
+  # deleted (or whose reservation lapsed) raises, exactly as the tuber gem's
   # with_reserved does — the heartbeat must shrug that off.
   class FakeJob
     attr_reader :touches
@@ -46,7 +46,7 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     end
 
     def touch
-      raise Beaneater::JobNotReserved, "not reserved" if @dead
+      raise ::Tuber::JobNotReserved, "not reserved" if @dead
       @touches += 1
     end
   end
@@ -161,7 +161,7 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     assert_equal settled, job.touches, "a raising batch must still stop its heartbeat"
   end
 
-  # Beaneater-shaped job for the finalize path: stats.releases drives the
+  # Tuber-shaped job for the finalize path: stats.releases drives the
   # release-vs-bury decision, and body/id are what a bury report has to carry.
   class FakeFinalizeJob
     Stats = Struct.new(:releases)
@@ -243,7 +243,7 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     client = FakeClient.new
     stub = -> {
       attempts += 1
-      raise Beaneater::NotConnected, "connection refused" if attempts < 3
+      raise ::Tuber::NotConnected, "connection refused" if attempts < 3
       client
     }
 

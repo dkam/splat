@@ -20,6 +20,19 @@ module Ingest
 
     private
 
+    # A tuber restarted without a binlog comes back with no schedule, and
+    # nothing else would put it back. This consumer reconnects after any tuber
+    # restart and runs monitor_evaluation, so it's the one that checks — the
+    # maintenance worker can be an hour into a deep pass before it notices.
+    def after_connect
+      result = Schedule.restore_if_lost
+      Rails.logger.warn "[#{self.class.name}] tuber held no schedule; synced config/schedule.yml (#{result.added} added)" if result
+    rescue Schedule::Unsupported
+      # tuber < 0.16: bin/scheduler fires the schedule
+    rescue => e
+      log_exception("[#{self.class.name}] couldn't check tuber's schedule", e)
+    end
+
     def process_batch(jobs)
       outcomes = []
 
@@ -27,7 +40,7 @@ module Ingest
         body = JSON.parse(job.body)
 
         if body["class"]
-          body["class"].constantize.new.perform(*(body["args"] || []))
+          dispatch(body)
         else
           project = project_for(body["project_id"])
           if project

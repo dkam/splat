@@ -7,7 +7,7 @@ class Ingest::TuberTest < ActiveSupport::TestCase
   FakeTube = Struct.new(:stats)
 
   test "queue_depths reports per-tube ready/reserved/buried/delayed for every tube" do
-    # Beaneater-shaped fake: producer.tubes[name].stats.current_jobs_*
+    # Tuber-shaped fake: producer.tubes[name].stats.current_jobs_*
     tubes = Hash.new do |_h, name|
       ready = (name == Ingest::Tuber::EVENTS_TUBE) ? 5 : 0
       FakeTube.new(Stats.new(ready, 1, 0, 0))
@@ -37,7 +37,7 @@ class Ingest::TuberTest < ActiveSupport::TestCase
     fresh = Object.new
     producer = -> {
       calls += 1
-      raise Beaneater::NotConnected, "socket closed" if calls == 1
+      raise ::Tuber::NotConnected, "socket closed" if calls == 1
       fresh
     }
 
@@ -53,8 +53,8 @@ class Ingest::TuberTest < ActiveSupport::TestCase
 
   test "with_producer gives up (raises) if the rebuilt connection is also dead" do
     resets = 0
-    assert_raises(Beaneater::NotConnected) do
-      with_stub(Ingest::Tuber, :producer, -> { raise Beaneater::NotConnected, "still down" }) do
+    assert_raises(::Tuber::NotConnected) do
+      with_stub(Ingest::Tuber, :producer, -> { raise ::Tuber::NotConnected, "still down" }) do
         with_stub(Ingest::Tuber, :reset_producer!, -> { resets += 1 }) do
           Ingest::Tuber.with_producer { |conn| conn }
         end

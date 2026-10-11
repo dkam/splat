@@ -30,7 +30,7 @@ bin/setup                 # bundle install + db:prepare, then boots the stack
 
 Open **http://localhost:3030**.
 
-`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the ingest and maintenance workers, the recurring-job scheduler, Tailwind's watcher, and Tuber. Boot it again later with just `bin/dev`.
+`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the ingest and maintenance workers, Tailwind's watcher, and Tuber. Boot it again later with just `bin/dev`.
 
 ### 2. Point an app at it
 
@@ -192,7 +192,7 @@ x-common-variables: &common-variables
   # mapping below is irrelevant inside the compose network.
   TUBER_URL: tuber:11300
 
-# Shared config for the non-web Rails containers (worker + scheduler). They run
+# Shared config for the non-web Rails containers (the workers). They run
 # the same image as web with a different command and no published ports.
 x-splat-worker: &splat-worker
   image: ghcr.io/dkam/splat:latest
@@ -261,16 +261,8 @@ services:
       - /storage/splat/logs/maintenance:/rails/log
     mem_limit: 512M
 
-  # Fires recurring jobs (config/schedule.yml) onto the maintenance tube. One
-  # replica is enough, and a second is harmless: every entry carries an idp:
-  # key with a cooldown, so Tuber absorbs the duplicate fire.
-  scheduler:
-    <<: *splat-worker
-    command: bin/scheduler
-    volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/scheduler:/rails/log
-    mem_limit: 256M
+  # No scheduler service: tuber 0.16+ fires the recurring jobs itself. With an
+  # older tuber, add one running bin/scheduler — see "Recurring jobs" below.
 
   tuber:
     image: ghcr.io/tuberq/tuber:latest
@@ -443,7 +435,7 @@ Raw rows and aggregates have separate retention windows, so you can prune the hi
 
 ### Ingestion Queue: Tuber
 
-Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. The **ingest** worker (`bin/worker ingest`) drains the data tubes through per-type consumers (events, transactions, logs, forward, and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. A separate **maintenance** worker (`bin/worker maintenance`) drains `splat.maintenance` (retention, aggregation, dictionary training, storage stats) in its own process, so a heavy background job can't freeze ingestion. A `bin/scheduler` process fires the recurring jobs onto the maintenance tube.
+Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. The **ingest** worker (`bin/worker ingest`) drains the data tubes through per-type consumers (events, transactions, logs, forward, and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. A separate **maintenance** worker (`bin/worker maintenance`) drains `splat.maintenance` (retention, aggregation, dictionary training, storage stats) in its own process, so a heavy background job can't freeze ingestion. Tuber fires the recurring jobs onto their tubes itself (0.16 and later; `bin/scheduler` does it on an older tuber) — see [Recurring jobs](#recurring-jobs).
 
 [Tuber](https://github.com/tuberq/tuber) is a single Rust binary — a Beanstalkd rewrite — that keeps job *metadata* in RAM with a write-ahead log for durability, and offloads larger job *bodies* to disk (a TOAST-style scheme), so memory stays bounded by job *count* rather than payload size. That gives Splat a durable, RAM-speed ingest buffer with no extra database to tune. See the [Tuber project](https://github.com/tuberq/tuber) for the server.
 
@@ -493,6 +485,32 @@ Splat ingests structured logs alongside errors and transactions, into their own 
 **Trace correlation.** Because logs carry `trace_id`, the log detail page links to its transaction and the transaction detail page links back to "View N logs for this trace." The two directions are deliberately lopsided: logs are ingested at ~100% while transactions are typically sampled (e.g. 1–10%), so the log→transaction link only appears when that trace happened to be sampled, while transaction→logs almost always resolves. Each link only renders when the other side actually exists, so you never land on an empty page.
 
 ## Maintenance
+
+### Recurring jobs
+
+`config/schedule.yml` lists the jobs Splat runs on a timetable: retention, the logs search-index merge, the WAL checkpoint, hourly rollups, storage stats, dictionary training, and the minute sweep that raises missed-check-in alerts. If nothing fires them, nothing complains on its own — the disk fills, the logs WAL runs away, and monitors stop alerting — so Splat checks for you.
+
+#### What fires them
+
+- **Tuber 0.16 or later fires them itself.** When the web container starts, Splat hands tuber the whole schedule (`bin/rails splat:schedule:sync`, run by `bin/docker-entrypoint`). Tuber keeps it across restarts with its binlog, and puts each job on its tube at its time. No Splat process needs to be running for that.
+- **If tuber loses it**, the ingest worker puts it back. A tuber running without a binlog (`-b`) comes back from a restart with no schedule; the ingest worker reconnects after every restart, and syncs the schedule if tuber holds none of it. It never replaces a schedule tuber already holds, since during a rolling deploy that may be a newer release's.
+- **On a tuber older than 0.16, `bin/scheduler` fires them.** It's the `scheduler` service in `compose.yml`, off unless you start it with `--profile old-tuber`. Run on 0.16 or later it checks that tuber holds the schedule (syncing it if not) and sits idle; started on an older tuber that's upgraded later, it hands the schedule over to tuber and goes idle.
+
+Either way a run is the same job — same tube, body, priority, TTR and tags — and an entry's `idp:` key with its 30-second cooldown turns a duplicate fire into a no-op, so tuber and `bin/scheduler` overlapping during a changeover runs nothing twice.
+
+The schedule is replaced as a whole: an entry removed from the file is removed from tuber at the next sync, and an unchanged one keeps its next fire. Every schedule must be a `cron` line — five fields, with an optional timezone last — which tuber and `bin/scheduler` both read; a line tuber refuses fails the sync, and tuber keeps running the schedule it had.
+
+#### Upgrading to tuber's scheduler
+
+1. **Upgrade tuber to 0.16.** Its first start on an older binlog needs `--migrate-wal` (as in the compose example above); without it tuber refuses to start rather than rewrite the files. Back up its binlog directory first: older tubers can't read the migrated one. Once it has started, the flag can come out.
+2. **Upgrade Splat.** The web container syncs the schedule as it starts. Check the **Scheduled jobs** panel on the Settings page: every job should say *tuber*.
+3. **Remove the `scheduler` service** (or leave its profile off). Once tuber is on 0.16 it only sits idle.
+
+#### Checking on it
+
+- **Settings → Scheduled jobs** lists every entry: what fires it (*tuber*, *bin/scheduler*, or *nothing*), when a worker last ran it, when it fires next, and its status — *Late* once a whole cycle has passed without a run, or *Stuck* when tuber's fires are deduplicating against a buried job (kick or delete it). A red banner says so when nothing fires them.
+- **`/_health`** reports `"scheduler": {"status": "late"}` and an overall `degraded` when `monitor_evaluation`, which runs every minute, hasn't run for five minutes. That's what catches a stopped schedule nobody is looking at — see [Uptime Kuma Setup](#uptime-kuma-setup).
+- **Tuber's own view:** `tuber schedules -a <host>:11330` lists each entry with its next and last fire.
 
 ### Data Retention and Cleanup
 
@@ -564,6 +582,7 @@ Response:
   "timestamp": "2025-10-23T12:34:56Z",
   "queue_depth": 0,
   "queue_status": "healthy",
+  "scheduler": {"status": "ok", "entry": "monitor_evaluation", "last_run_at": "2025-10-23T12:34:00Z"},
   "event_count": 1234,
   "issue_count": 56,
   "transaction_count": 5678,
@@ -573,8 +592,9 @@ Response:
 ```
 
 **Response Fields:**
-- `status`: Overall system health (`ok` or `degraded`)
+- `status`: Overall system health — `degraded` when the queue is critical or the recurring jobs have stopped, `ok` otherwise
 - `queue_status`: Queue health (`healthy`, `warning`, or `critical`)
+- `scheduler.status`: `late` when `monitor_evaluation` (every minute) hasn't run for five minutes, counted from boot if it never has — nothing is firing the [recurring jobs](#recurring-jobs), or the ingest worker that runs it is down. `ok` otherwise
 - `queue_depth`: Number of pending background jobs
 - `timestamp`: Current server time (ISO 8601)
 - `event_count`: Total error events tracked
@@ -608,7 +628,7 @@ QUEUE_CRITICAL_THRESHOLD=100 # queue_status becomes "critical", status becomes "
 - **JSON Path**: `$.status`
 - **Expected Value**: `ok`
 - **Alert When**: Value is not equal to expected value
-- **Result**: Alerts only when system is "degraded" (critical queue depth)
+- **Result**: Alerts when the system is "degraded": critical queue depth, or the recurring jobs have stopped. The second has no other alert — Splat's own monitor alerts are one of the jobs that stopped — so watch `$.status` (or `$.scheduler.status`) even if you also watch the queue.
 
 **Notification Settings:**
 Configure Uptime Kuma to send alerts via:
@@ -1003,7 +1023,7 @@ OIDC_PROVIDER_NAME=Your Provider
 ### Development
 
 #### Services
-- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/worker ingest` (data tubes) and `bin/worker maintenance` (background); recurring jobs scheduled by `bin/scheduler`
+- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/worker ingest` (data tubes) and `bin/worker maintenance` (background); recurring jobs fired by Tuber itself (0.16+) or by `bin/scheduler`
 - **Solid Cache**: In-memory caching
 - **Solid Cable**: Real-time updates (optional)
 

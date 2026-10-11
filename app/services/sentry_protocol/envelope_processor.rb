@@ -291,7 +291,7 @@ module SentryProtocol
     def enqueue(tube, payload, kind:)
       Ingest::Tuber.put(tube, payload)
       true
-    rescue Beaneater::JobTooBigError
+    rescue ::Tuber::JobTooBigError
       handle_undeliverable(
         tube, payload, kind,
         category: "job_too_big",

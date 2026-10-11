@@ -16,10 +16,9 @@ module Ingest
         klass_name = nil
         body = JSON.parse(job.body)
         klass_name = body["class"]
-        args = body["args"] || []
-        klass_name.constantize.new.perform(*args)
+        dispatch(body)
         job.delete
-      rescue Beaneater::NotFoundError
+      rescue ::Tuber::NotFoundError
         nil
       rescue => e
         log_exception("[#{self.class.name}] #{klass_name || "?"} failed", e)

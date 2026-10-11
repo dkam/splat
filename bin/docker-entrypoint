@@ -6,9 +6,13 @@
 # baseline compression dictionaries never get seeded. db:seed is idempotent
 # (CompressionDictionarySeeder skips any segment already at v1), so running it
 # every boot guarantees the events/logs dicts are present from the get-go.
+#
+# Then hand config/schedule.yml to tuber, which runs the recurring jobs on 0.16
+# and later. The task never fails the boot; see lib/tasks/schedule.rake.
 if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
   ./bin/rails db:prepare
   ./bin/rails db:seed
+  ./bin/rails splat:schedule:sync
 fi
 
 exec "${@}"

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_11_000001) do
   create_table "cron_monitors", force: :cascade do |t|
     t.integer "checkin_margin"
     t.json "config"
@@ -98,6 +98,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_000001) do
     t.index ["project_id", "first_seen_at"], name: "index_releases_on_project_id_and_first_seen_at"
     t.index ["project_id", "version"], name: "index_releases_on_project_id_and_version", unique: true
     t.index ["project_id"], name: "index_releases_on_project_id"
+  end
+
+  create_table "schedule_runs", force: :cascade do |t|
+    t.datetime "last_run_at", null: false
+    t.string "name", null: false
+    t.index ["name"], name: "index_schedule_runs_on_name", unique: true
   end
 
   create_table "settings", force: :cascade do |t|

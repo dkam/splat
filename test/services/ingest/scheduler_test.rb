@@ -89,10 +89,8 @@ class Ingest::SchedulerTest < ActiveSupport::TestCase
   # Registers one real entry and fires it the way rufus would, with tuber's
   # reply stubbed. Returns what was put and anything reported to Sentry.
   def fire(name, reply)
-    entry = schedule.fetch(name)
     scheduler = Ingest::Scheduler.new
-    scheduler.send(:register, name, entry["class"], entry["tube"], entry["schedule"],
-      entry["con"], entry["idp"], entry["args"] || [])
+    scheduler.send(:register, Ingest::Schedule.entry(name))
     puts_made = []
     reports = []
     with_stub(Ingest::Tuber, :put, ->(tube, payload, **opts) { puts_made << [tube, payload, opts] and reply }) do
@@ -148,6 +146,14 @@ class Ingest::SchedulerTest < ActiveSupport::TestCase
     assert_equal ["monitor_evaluation", Ingest::Scheduler::IDP_COOLDOWN], puts_made.first.last[:idp]
   end
 
+  test "each put names its entry, so the worker that runs it can record the run" do
+    puts_made, _reports = fire("storage_stats_deep", {status: "INSERTED", id: "1"})
+
+    tube, payload, _opts = puts_made.first
+    assert_equal "splat.maintenance", tube
+    assert_equal({class: "Maintenance::StorageStatsJob", args: ["deep"], schedule: "storage_stats_deep"}, payload)
+  end
+
   test "every entry is a cron line, so every scheduler fires it on the same second" do
     # rufus's `every 60s` counts from when each scheduler started, so two of
     # them fire at different offsets and no short cooldown can merge them.
@@ -172,5 +178,141 @@ class Ingest::SchedulerTest < ActiveSupport::TestCase
       refute_includes expr, ZONE,
         "#{name} fires on an interval or hourly — a timezone would only add noise"
     end
+  end
+
+  # --- Tuber's scheduler, or this process's -----------------------------------
+
+  SYNCED = Tuber::Schedules::SyncResult.new(9, 0, 0, 0)
+  HELD = [["splat", "data_retention"], ["splat", "monitor_evaluation"]].freeze
+  OLD_TUBER = Tuber::UnknownCommandError.new("UNKNOWN_COMMAND", "schedule-list splat")
+
+  # A stand-in producer whose tuber answers schedule-list with whatever
+  # +answers+ yields next: a list, or an error to raise.
+  def producer_answering(answers)
+    schedules = Object.new
+    schedules.define_singleton_method(:list) do |_owner|
+      answer = answers.call
+      answer.is_a?(Exception) ? raise(answer) : answer
+    end
+    conn = Object.new
+    conn.define_singleton_method(:schedules) { schedules }
+    conn
+  end
+
+  # Runs +block+ against a tuber holding +held+ (or raising it), with
+  # Schedule.sync answering +sync+. Returns the block's result, the syncs made
+  # and what reached Sentry.
+  def against_tuber(held, sync: -> { SYNCED })
+    syncs = 0
+    reports = []
+    answers = held.respond_to?(:call) ? held : -> { held }
+    conn = producer_answering(answers)
+    result = with_stub(Ingest::Tuber, :with_producer, ->(&blk) { blk.call(conn) }) do
+      with_stub(Ingest::Schedule, :sync, -> { syncs += 1 and sync.call }) do
+        with_stub(Sentry, :capture_exception, ->(e, **opts) { reports << e }) { yield }
+      end
+    end
+    [result, syncs, reports]
+  end
+
+  def choose(held, sync: -> { SYNCED })
+    scheduler = Ingest::Scheduler.new
+    scheduler.define_singleton_method(:sleep) { |*| nil }
+    against_tuber(held, sync:) { scheduler.choose_mode }
+  ensure
+    scheduler&.stop!
+  end
+
+  test "on a tuber already holding the schedule, it leaves it alone and idles" do
+    mode, syncs, reports = choose(HELD)
+
+    assert_equal :idle, mode
+    assert_equal 0, syncs, "the web container syncs on boot; a scheduler mustn't overwrite that"
+    assert_empty reports
+  end
+
+  test "on a tuber with schedules but none of Splat's, it puts them there, then idles" do
+    mode, syncs, _reports = choose([])
+
+    assert_equal :idle, mode
+    assert_equal 1, syncs
+  end
+
+  test "on a tuber without schedules it fires them itself" do
+    mode, syncs, _reports = choose(OLD_TUBER)
+
+    assert_equal :rufus, mode
+    assert_equal 0, syncs
+  end
+
+  test "a set tuber refuses is reported, and fired from here so this release's schedule runs" do
+    refused = Tuber::ScheduleSyncError.new("BAD_SCHEDULE", "schedule-put x", owner: "splat", entry: "x")
+    mode, _syncs, reports = choose([], sync: -> { raise refused })
+
+    assert_equal :rufus, mode
+    assert_equal [refused], reports
+  end
+
+  test "it waits for an unreachable tuber rather than guessing" do
+    attempts = 0
+    mode, _syncs, _reports = choose(-> {
+      attempts += 1
+      raise Tuber::NotConnected, "refused" if attempts < 3
+      HELD
+    })
+
+    assert_equal :idle, mode
+    assert_equal 3, attempts
+  end
+
+  # A scheduler firing the schedule itself, as on an old tuber.
+  def firing_scheduler
+    scheduler = Ingest::Scheduler.new
+    scheduler.instance_variable_set(:@mode, :rufus)
+    scheduler.send(:register_jobs)
+    scheduler
+  end
+
+  test "firing the schedule itself on an old tuber, it says so every tick" do
+    scheduler = firing_scheduler
+    Rails.cache.delete(Ingest::Scheduler::HEARTBEAT_KEY)
+
+    against_tuber(OLD_TUBER) { scheduler.tick }
+
+    assert_equal :rufus, scheduler.mode
+    refute_empty scheduler.instance_variable_get(:@rufus).jobs
+    assert Ingest::ScheduleStatus.fallback_running?
+  ensure
+    Rails.cache.delete(Ingest::Scheduler::HEARTBEAT_KEY)
+    scheduler&.stop!
+  end
+
+  test "once tuber is upgraded underneath it, it hands the schedule over and idles" do
+    scheduler = firing_scheduler
+    Rails.cache.write(Ingest::Scheduler::HEARTBEAT_KEY, Time.current)
+
+    _result, syncs, _reports = against_tuber([]) { scheduler.tick }
+
+    assert_equal :idle, scheduler.mode
+    assert_equal 1, syncs, "the upgraded tuber came up empty; it needs the schedule"
+    assert_empty scheduler.instance_variable_get(:@rufus).jobs, "tuber fires them now"
+    refute Ingest::ScheduleStatus.fallback_running?, "the settings page must say tuber runs them"
+  ensure
+    Rails.cache.delete(Ingest::Scheduler::HEARTBEAT_KEY)
+    scheduler&.stop!
+  end
+
+  test "an idle scheduler's tick touches nothing" do
+    scheduler = Ingest::Scheduler.new
+    scheduler.instance_variable_set(:@mode, :idle)
+    asked = 0
+
+    _result, syncs, _reports = against_tuber(-> { asked += 1 and [] }) { scheduler.tick }
+
+    assert_equal 0, asked
+    assert_equal 0, syncs
+    refute Rails.cache.read(Ingest::Scheduler::HEARTBEAT_KEY), "tuber runs the schedule; this process mustn't claim to"
+  ensure
+    scheduler&.stop!
   end
 end

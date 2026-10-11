@@ -77,7 +77,7 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
   test "reports undeliverable records as rejected instead of 500ing, and alerts the operator" do
     Setting.instance.update!(store_logs: true)
     captured = []
-    raiser = ->(*, **) { raise Beaneater::JobTooBigError.new("JOB_TOO_BIG", "put") }
+    raiser = ->(*, **) { raise ::Tuber::JobTooBigError.new("JOB_TOO_BIG", "put") }
     with_stub(Ingest::Tuber, :put, raiser) do
       with_stub(Sentry, :capture_message, ->(msg, **kw) { captured << [msg, kw] }) do
         post "/v1/logs", params: @payload.to_json,

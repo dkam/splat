@@ -24,13 +24,15 @@ module Ingest
     DEFAULT_TTR = 120
     DEFAULT_PRI = 1024
 
-    # A dead socket: tuber was restarted or bounced under us. Beaneater retries
-    # these a few times inside a single command and then gives up with
-    # NotConnected — at which point the cached connection is holding a closed
-    # socket that never heals on its own. Consumers (TubeConsumer) and the
+    # A dead socket: tuber was restarted or bounced under us. The tuber gem
+    # reconnects inside the command, then retries it if it's safe to repeat
+    # (stats, reserve) or re-raises the socket error if it isn't (put, delete,
+    # release, bury, touch: the first send's fate is unknown). It gives up with
+    # NotConnected when tuber stays down — at which point the cached connection
+    # is holding a closed socket that never heals on its own. Consumers (TubeConsumer) and the
     # producer helper below both key off this list to rebuild the connection.
     CONNECTION_ERRORS = [
-      ::Beaneater::NotConnected, Errno::ECONNREFUSED, Errno::ECONNRESET,
+      ::Tuber::NotConnected, Errno::ECONNREFUSED, Errno::ECONNRESET,
       Errno::EPIPE, EOFError, IOError, SocketError
     ].freeze
 
@@ -39,11 +41,11 @@ module Ingest
         ENV.fetch("TUBER_URL", "localhost:11330")
       end
 
-      # One producer client per thread. Beaneater serialises commands through
+      # One producer client per thread. The gem serialises commands through
       # an internal mutex, but a per-thread connection avoids contending Puma
       # workers on the same socket.
       def producer
-        Thread.current[:ingest_tuber_producer] ||= ::Beaneater.new(address)
+        Thread.current[:ingest_tuber_producer] ||= ::Tuber.new(address)
       end
 
       # Throw the per-thread connection away so the next #producer rebuilds it.
@@ -88,7 +90,7 @@ module Ingest
       # Consumers WATCH tubes; producers USE them. Keeping the consumer on its
       # own connection avoids leaking watched-tube state into web threads.
       def consumer_client
-        ::Beaneater.new(address)
+        ::Tuber.new(address)
       end
 
       # Cheap liveness probe for the web chrome: distinguishes "tuber is up with
@@ -99,7 +101,7 @@ module Ingest
       def reachable?
         with_producer { |conn| conn.tubes[EVENTS_TUBE].stats }
         true
-      rescue ::Beaneater::NotFoundError
+      rescue ::Tuber::NotFoundError
         true
       rescue
         false
@@ -116,7 +118,7 @@ module Ingest
         with_producer do |conn|
           INGEST_TUBES.sum do |name|
             conn.tubes[name].stats.current_jobs_ready.to_i
-          rescue ::Beaneater::NotFoundError
+          rescue ::Tuber::NotFoundError
             0
           end
         end
@@ -134,7 +136,7 @@ module Ingest
             s = conn.tubes[name].stats
             [name, {ready: s.current_jobs_ready.to_i, reserved: s.current_jobs_reserved.to_i,
                     buried: s.current_jobs_buried.to_i, delayed: s.current_jobs_delayed.to_i}]
-          rescue ::Beaneater::NotFoundError
+          rescue ::Tuber::NotFoundError
             [name, {ready: 0, reserved: 0, buried: 0, delayed: 0}]
           end
         end

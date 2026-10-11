@@ -1,7 +1,8 @@
 web: bin/rails server -b 0.0.0.0 -p 3304
 ingest: bin/worker ingest
 maintenance: bin/worker maintenance
-scheduler: bin/scheduler
+# Only with a tuber older than 0.16, which can't fire config/schedule.yml itself:
+#   scheduler: bin/scheduler
 css: bin/rails tailwindcss:watch
 # Tuber (the ingestion work queue) runs in Docker so there's nothing to install.
 # Prefer a native binary? `brew install tuberq/tuber/tuber`, then comment out the

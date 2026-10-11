@@ -1,11 +1,15 @@
-# Recurring jobs read by bin/scheduler. Each entry pushes a body of
-#   { "class": "<class_name>", "args": [] }
+# Recurring jobs. Tuber 0.16+ fires them itself: the web container syncs this
+# file into tuber as it starts (Ingest::Schedule.sync), and the ingest worker
+# puts it back if tuber loses it. On an older tuber, bin/scheduler fires them. Either way each entry puts a body of
+#   { "class": "<class_name>", "args": [], "schedule": "<entry name>" }
 # onto the named tube on the given schedule. The maintenance worker
-# (bin/worker maintenance) drains splat.maintenance and dispatches by class name.
+# (bin/worker maintenance) drains splat.maintenance and dispatches by class name,
+# recording the run (ScheduleRun) for the settings page and /_health.
 #
-# Every schedule is a cron string. rufus also takes "every 10m", but that counts
-# from when the scheduler started, so two schedulers would fire it at different
-# moments; a cron line fires on the same wall-clock second wherever it runs.
+# Every schedule is a cron line, which is all tuber takes. rufus also takes
+# "every 10m", but that counts from when the scheduler started, so two
+# schedulers would fire it at different moments; a cron line fires on the same
+# wall-clock second wherever it runs.
 #
 # A cron string may name a timezone as its last field, and every job pinned to
 # an hour of the night does. Without one the hour means UTC — the scheduler runs
@@ -25,11 +29,11 @@
 # `idp:` adds a tuber idempotency key, and every entry has one. While a job
 # with that key is in the tube — ready, reserved, delayed or buried — further
 # puts with the same key create nothing, so a run that outlasts its interval
-# doesn't stack duplicates. The scheduler adds a cooldown
-# (Ingest::Scheduler::IDP_COOLDOWN) so the key also outlives the job briefly,
+# doesn't stack duplicates. Each put adds a cooldown
+# (Ingest::Schedule::IDP_COOLDOWN) so the key also outlives the job briefly,
 # which absorbs a second scheduler firing the same tick. A buried job holds its
-# key until someone kicks or deletes it; the scheduler reports each run that
-# loses to one.
+# key until someone kicks or deletes it; bin/scheduler reports each run that
+# loses to one, and the settings page shows tuber's count of them.
 
 # Minute sweep of check-in monitors: opens an Issue when a monitor misses its
 # expected check-in (interval + margin), reports an error, or overruns

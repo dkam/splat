@@ -51,6 +51,36 @@ Go, Java, .NET, Rust and PHP — actually send, now recorded in
 
 ### Changed
 
+- **Tuber runs the recurring jobs, from tuber 0.16.** The web container hands
+  `config/schedule.yml` to tuber as it starts (`bin/rails
+  splat:schedule:sync`), and tuber puts each job on its tube at its time, with
+  no Splat process involved. If tuber comes back from a restart without it
+  (no binlog), the ingest worker puts it back. **The `scheduler` service is
+  only needed with a tuber older than 0.16**, and `compose.yml` now starts it
+  only under `--profile old-tuber`. Run on 0.16, `bin/scheduler` checks
+  tuber holds the schedule and idles; on an older tuber it fires the jobs
+  itself, as before, and hands them to tuber if tuber is upgraded under it.
+  **Upgrade tuber first**: 0.16's first start on an older binlog needs
+  `--migrate-wal`, and older tubers can't read the result, so back the binlog
+  up. "Recurring jobs" in the README has the steps.
+- **Settings lists the scheduled jobs**: what fires each one (tuber,
+  `bin/scheduler`, or nothing), when a worker last ran it, when it fires
+  next, and whether it's late or stuck behind a buried job. A red banner says
+  when nothing fires them. Workers record each run in a new `schedule_runs`
+  table, whichever of the two put it.
+- **`/_health` is `degraded` when the recurring jobs have stopped.** Its new
+  `scheduler` field goes `late` when `monitor_evaluation`, which runs every
+  minute, hasn't run for five minutes, counted from boot if it never has.
+  Monitor evaluation is what raises Splat's own alerts, so this had no other
+  way to be noticed. An Uptime Kuma check on `$.queue_status` alone won't see
+  it; check `$.status` too.
+- **Splat talks to tuber through the `tuber` gem (0.7)** rather than a fork of
+  beaneater. Two behaviours change. A put refused because tuber's storage
+  budget is spent (`OUT_OF_STORAGE`) now raises, where before it looked
+  accepted and the data was lost without a word. And a delete, release or
+  bury cut off by a tuber restart isn't re-sent: the gem can't know whether
+  the first one landed. The worker reconnects as before, and jobs from the
+  batch it was finishing can be processed a second time.
 - **A second scheduler is harmless.** Every schedule entry now carries an
   `idp:` key with a 30 s cooldown, and the two `every` entries are cron lines,
 - **An envelope with a header that is JSON but not an object is logged as an

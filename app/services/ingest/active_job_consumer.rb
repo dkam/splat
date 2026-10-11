@@ -16,7 +16,7 @@ module Ingest
         body = JSON.parse(job.body)
         ActiveJob::Base.execute(body["activejob"])
         job.delete
-      rescue Beaneater::NotFoundError
+      rescue ::Tuber::NotFoundError
         nil
       rescue => e
         log_exception("[#{self.class.name}] job failed", e)

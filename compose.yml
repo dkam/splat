@@ -1,5 +1,6 @@
 # Production docker-compose for Splat (SQLite — the only flavour) — web +
-# tuber + two worker sidecars (ingest, scheduler).
+# tuber + two worker sidecars (ingest, maintenance). Tuber fires the recurring
+# jobs itself; a tuber older than 0.16 also needs the scheduler (see below).
 #
 # compose.yml is Compose's default filename, so -f is optional:
 #
@@ -118,8 +119,16 @@ services:
       - ./storage/logs/maintenance:/rails/log
     mem_limit: 512M
 
+  # Only for a tuber older than 0.16, which can't fire config/schedule.yml
+  # itself: this process fires it instead. On 0.16+ tuber does, and this would
+  # only check that and sit idle, so it's off unless asked for:
+  #
+  #   docker compose -p splat --profile old-tuber up -d
+  #
+  # Settings → Scheduled jobs (and /_health) say if nothing is firing them.
   scheduler:
     <<: *splat-worker
+    profiles: [old-tuber]
     command: bin/scheduler
     volumes:
       - ./storage:/rails/storage

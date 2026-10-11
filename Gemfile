@@ -30,9 +30,9 @@ gem "tzinfo-data", platforms: %i[windows jruby]
 gem "solid_cache"
 gem "solid_cable"
 
-# Tuber/beanstalkd client for batched ingest. Fork adds reserve_batch on top of
-# upstream beaneater 1.1.4, so we pin to the branch rather than rubygems.
-gem "beaneater", git: "https://github.com/dkam/beaneater.git", branch: "tuber"
+# Tuber client (beaneater's successor): batched reserves, put tags, and the
+# recurring schedules that config/schedule.yml is synced into.
+gem "tuber", "~> 0.7"
 
 # Drives the recurring scheduler (config/schedule.yml → tuber).
 gem "rufus-scheduler", "~> 3.9"

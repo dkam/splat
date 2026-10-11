@@ -20,11 +20,14 @@ class HealthController < ApplicationController
       }
     end
 
+    scheduler = Ingest::ScheduleStatus.health
+
     render json: {
-      status: overall_status(queue_depth),
+      status: overall_status(queue_depth, scheduler),
       timestamp: Time.current.iso8601,
       queue_depth: queue_depth,
       queue_status: queue_status(queue_depth),
+      scheduler: scheduler,
       event_count: counts[:events_24h],
       event_count_window: "24h",
       issue_count: counts[:open_issues],
@@ -47,8 +50,12 @@ class HealthController < ApplicationController
     end
   end
 
-  def overall_status(queue_depth)
-    # Overall status is "ok" unless queue is critical
-    (queue_depth >= QUEUE_CRITICAL_THRESHOLD) ? "degraded" : "ok"
+  # "ok" unless the queue is critical or nothing is running the recurring jobs
+  # (retention, WAL checkpoints, monitor alerts). The second can't alert any
+  # other way: alerting is one of the jobs that stopped.
+  def overall_status(queue_depth, scheduler)
+    return "degraded" if queue_depth >= QUEUE_CRITICAL_THRESHOLD
+    return "degraded" if scheduler[:status] != "ok"
+    "ok"
   end
 end

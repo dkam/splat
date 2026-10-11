@@ -17,6 +17,9 @@ class SettingsController < ApplicationController
     # dbstat snapshot, no point caching them. Degrades to {} if tuber is down.
     @queues = Ingest::Tuber.queue_depths
 
+    # Live too: who runs each recurring job, and whether it's keeping up.
+    @schedule = Ingest::ScheduleStatus.entries
+
     # Exactly one of these is ever set — see #mcp_token_for_current_user.
     @mcp_token = mcp_token_for_current_user
     @instance_mcp_token = @setting.mcp_token! if instance_mcp_token?

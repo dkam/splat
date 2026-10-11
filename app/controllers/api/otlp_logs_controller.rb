@@ -40,7 +40,7 @@ class Api::OtlpLogsController < ApplicationController
         Ingest::Tuber::LOGS_TUBE,
         {format: "otlp", payload: chunk, project_id: project.id}
       )
-    rescue Beaneater::JobTooBigError
+    rescue ::Tuber::JobTooBigError
       dropped = Logs::OtlpChunker.record_count(chunk)
       rejected += dropped
       report_undeliverable_chunk(chunk, dropped, project)
