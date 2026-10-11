@@ -594,7 +594,81 @@ class SentryProtocol::EnvelopeProcessorTest < ActiveSupport::TestCase
     assert_not processor.process
   end
 
+  # ---- The wire format: a payload with a `length` is exactly that many bytes.
+  # Tests marked (spec) use docs/reference/envelopes.md's own examples.
+
+  test "an event survives a text attachment with a JSON-looking line in it" do
+    log = "a long first line of a text log attachment\nshort\n{\"k\":1}\nend"
+    body = envelope_header + event_item("hello") +
+      %({"type":"attachment","length":#{log.bytesize},"filename":"app.log"}\n) + log + "\n"
+
+    assert_equal ["hello"], queued_events(body).map { it["message"] }
+  end
+
+  test "a length-prefixed payload is read whole, newlines and all" do
+    payload = JSON.pretty_generate({"message" => "pretty printed, so it spans lines", "level" => "error"})
+    body = envelope_header + %({"type":"event","length":#{payload.bytesize}}\n) + payload + "\n"
+
+    assert_equal ["pretty printed, so it spans lines"], queued_events(body).map { it["message"] }
+  end
+
+  test "an attachment with a Windows newline, then an event (spec)" do
+    body = envelope_header +
+      %({"type":"attachment","length":10,"content_type":"text/plain","filename":"hello.txt"}\n) +
+      "\xef\xbb\xbfHello\r\n\n" +
+      %({"type":"event","length":41,"content_type":"application/json","filename":"application.log"}\n) +
+      %({"message":"hello world","level":"error"}\n)
+
+    assert_equal ["hello world"], queued_events(body).map { it["message"] }
+  end
+
+  test "zero-length items are empty, not malformed (spec)" do
+    body = envelope_header + event_item("hello") +
+      %({"type":"attachment","length":0}\n\n{"type":"attachment","length":0}\n)
+
+    assert_equal ["hello"], queued_events(body).map { it["message"] }
+  end
+
+  test "a payload running past its length is malformed (spec)" do
+    body = envelope_header + %({"type":"event","length":10}\n{"message":"hello world"}\n)
+
+    assert_equal [], queued_events(body)
+    assert_not SentryProtocol::EnvelopeProcessor.new(body, @project).process
+  end
+
+  test "a payload cut short of its length is malformed (spec)" do
+    body = envelope_header + %({"type":"event","length":100}\n{"message":"hello world"}\n)
+
+    assert_equal [], queued_events(body)
+    assert_not SentryProtocol::EnvelopeProcessor.new(body, @project).process
+  end
+
+  # Queued, it fails in the consumer on every retry until tuber buries it.
+  test "an event payload that isn't JSON is dropped, not queued" do
+    body = envelope_header + %({"type":"event"}\nnot json at all\n)
+
+    assert_equal [], queued_events(body)
+  end
+
   private
+
+  EVENT_ID = "9ec79c33ec9942ab8353589fcb2e04dc"
+
+  def envelope_header = %({"event_id":"#{EVENT_ID}"}\n)
+
+  def event_item(message)
+    payload = %({"message":"#{message}","level":"error"})
+    %({"type":"event","length":#{payload.bytesize}}\n#{payload}\n)
+  end
+
+  # The payloads processing `body` puts on the events tube.
+  def queued_events(body)
+    jobs = []
+    with_stub(Ingest::Tuber, :put, ->(tube, job, **) { jobs << job[:payload] if tube == Ingest::Tuber::EVENTS_TUBE }) do
+      SentryProtocol::EnvelopeProcessor.new(body, @project).process
+    end
+    jobs
+  end
 
   # Collect only what the block logs at error level, so a test can assert on the
   # absence of an error without depending on everything else Rails logs.

@@ -13,9 +13,12 @@ Two things trip people up, and they're worth stating before the diagrams:
 
 ## 1. The wire format
 
-Newline-delimited. Line 1 is the envelope header; then each item is a header line
-followed by a payload line. The `length` in an item header is the payload's byte
-count, which is how a reader finds the next item without parsing the payload.
+Line 1 is the envelope header; then each item is a header line followed by its
+payload. The `length` in an item header is the payload's byte count, which is how
+a reader finds the next item without parsing the payload. A payload with a
+`length` can hold newlines — an attachment, pretty-printed JSON — so it has to be
+read as that many bytes, not as a line; one without runs to the next newline.
+sentry-ruby sets `length` on attachments but not on events.
 
 ```
 {"event_id":"9ec79c33ec9942ab8353589fcb2e04dc","sent_at":"2026-07-17T10:00:00Z"}  ← envelope header
@@ -28,7 +31,7 @@ count, which is how a reader finds the next item without parsing the payload.
 The envelope header carries `event_id` and `sent_at`; items carry their own type
 and length. Note the `event_id` appears in **both** the envelope header and the
 event payload — Splat prefers the payload's and falls back to the envelope's
-(`envelope_processor.rb:208`), following GlitchTip.
+(`EnvelopeProcessor#process_item`), following GlitchTip.
 
 ## 2. What Splat does with each item
 
@@ -38,7 +41,7 @@ consumer into its own database.
 
 ```mermaid
 flowchart LR
-  POST["POST /api/:project_id/envelope/"] --> PARSE["parse_envelope\nsplit on newlines"]
+  POST["POST /api/:project_id/envelope/"] --> PARSE["parse_envelope\nread by byte offset"]
   PARSE --> TYPE{"item header\ntype"}
 
   TYPE -->|"event"| EV["splat.events"]

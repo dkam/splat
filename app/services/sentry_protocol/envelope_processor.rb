@@ -69,101 +69,64 @@ module SentryProtocol
       @setting ||= Setting.instance
     end
 
+    # The wire format (docs/reference/envelopes.md): a header line, then items,
+    # each a header line and a payload. A payload with a `length` is exactly
+    # that many bytes, newlines included, followed by "\n" or EOF. One without
+    # runs to the next "\n" or EOF. Read by byte offset, so nothing inside a
+    # payload — a binary attachment, a log file, pretty-printed JSON — can be
+    # mistaken for the lines around it.
     def parse_envelope
-      lines = raw_body.split("\n")
-      raise InvalidEnvelope, "Empty envelope body" if lines.empty?
+      body = raw_body.b
+      raise InvalidEnvelope, "Empty envelope body" if body.strip.empty?
 
-      # First line is envelope headers
-      envelope_headers = JSON.parse(lines[0]).with_indifferent_access
-
+      header_line, pos = read_line(body, 0)
+      envelope_headers = JSON.parse(header_line).with_indifferent_access
       items = []
-      current_item = nil
-      payload_lines = []
 
-      # Process remaining lines
-      lines[1..].each_with_index do |line, index|
-        if line.start_with?("{") && line.end_with?("}") && !current_item
-          # This is an item header
-          current_item = JSON.parse(line).with_indifferent_access
+      while pos < body.bytesize
+        line, pos = read_line(body, pos)
+        next if line.strip.empty? # tolerate blank lines between items
 
-          # Validate length field immediately if present (before using it)
-          if current_item["length"].present?
-            unless current_item["length"].is_a?(Integer) && current_item["length"] > 0
-              raise InvalidEnvelope, "Invalid length field: #{current_item["length"]}"
-            end
-          end
-
-          payload_lines = []
-        elsif current_item
-          # This is part of the payload
-          if current_item["length"]
-            # Length-prefixed payload
-            payload_lines << line
-            if payload_lines.join("\n").bytesize + line.bytesize + 1 >= current_item["length"]
-              # Last line of payload
-              payload = payload_lines.join("\n")
-
-              # Parse payload if it's JSON
-              begin
-                parsed_payload = JSON.parse(payload).with_indifferent_access
-              rescue JSON::ParserError
-                parsed_payload = payload
-              end
-
-              items << {
-                headers: current_item,
-                payload: parsed_payload
-              }
-
-              current_item = nil
-              payload_lines = []
-            end
-          elsif index == lines[1..].length - 1 || lines[1..][index + 1]&.start_with?("{")
-            # Implicit length (terminated by newline or EOF)
-            payload_lines << line
-            payload = payload_lines.join("\n")
-
-            # Parse payload if it's JSON
-            begin
-              parsed_payload = JSON.parse(payload).with_indifferent_access
-            rescue JSON::ParserError
-              parsed_payload = payload
-            end
-
-            items << {
-              headers: current_item,
-              payload: parsed_payload
-            }
-
-            current_item = nil
-            payload_lines = []
-          # Last line of this payload
-          else
-            payload_lines << line
-          end
-        end
+        item_headers = JSON.parse(line).with_indifferent_access
+        payload, pos = read_payload(body, pos, item_headers[:length])
+        items << {headers: item_headers, payload: parse_payload(payload)}
       end
 
-      # Handle case where payload goes to EOF without newline
-      if current_item && payload_lines.any?
-        payload = payload_lines.join("\n")
+      {headers: envelope_headers, items: items}
+    end
 
-        begin
-          parsed_payload = JSON.parse(payload).with_indifferent_access
-        rescue JSON::ParserError
-          parsed_payload = payload
-        end
+    # The bytes up to the next "\n" or EOF, and the offset past the "\n".
+    def read_line(body, pos)
+      newline = body.byteindex("\n", pos)
+      newline ? [body.byteslice(pos...newline), newline + 1] : [body.byteslice(pos..), body.bytesize]
+    end
 
-        items << {
-          headers: current_item,
-          payload: parsed_payload
-        }
+    def read_payload(body, pos, length)
+      if length.nil?
+        raise InvalidEnvelope, "Item header with no payload after it" if pos >= body.bytesize
+        return read_line(body, pos)
       end
 
-      {
-        headers: envelope_headers,
-        items: items
-      }
+      unless length.is_a?(Integer) && length >= 0
+        raise InvalidEnvelope, "Invalid length field: #{length}"
+      end
+      raise InvalidEnvelope, "Payload shorter than its length (#{length})" if pos + length > body.bytesize
+
+      payload = body.byteslice(pos, length)
+      pos += length
+      return [payload, pos] if pos == body.bytesize
+      raise InvalidEnvelope, "Payload longer than its length (#{length})" unless body.getbyte(pos) == 10 # "\n"
+
+      [payload, pos + 1]
+    end
+
+    # JSON items (events, transactions, logs, check-ins) as hashes; anything
+    # else — an attachment, or JSON that doesn't parse — as the raw bytes.
+    def parse_payload(payload)
+      parsed = JSON.parse(payload)
+      parsed.is_a?(Hash) ? parsed.with_indifferent_access : parsed
+    rescue JSON::ParserError
+      payload
     end
 
     def validate_envelope!(envelope)
@@ -181,22 +144,11 @@ module SentryProtocol
         raise InvalidEnvelope, "Envelope must contain at least one item"
       end
 
-      # Validate each item
+      # Validate each item. Lengths and payloads were checked as they were read;
+      # an empty payload is a valid zero-length item.
       envelope[:items].each_with_index do |item, index|
         unless item.dig(:headers, :type).present?
           raise InvalidEnvelope, "Item #{index} missing required field: type"
-        end
-
-        unless item[:payload].present?
-          raise InvalidEnvelope, "Item #{index} missing payload"
-        end
-
-        # Validate length field if present
-        if item.dig(:headers, :length).present?
-          length = item.dig(:headers, :length)
-          unless length.is_a?(Integer) && length > 0
-            raise InvalidEnvelope, "Item #{index} has invalid length: #{length}"
-          end
         end
       end
 
@@ -248,6 +200,13 @@ module SentryProtocol
 
       if IGNORED_ITEM_TYPES.include?(item_type)
         Rails.logger.debug "Skipping #{item_type} item — not stored by Splat"
+        return
+      end
+
+      # Queued, a payload that isn't a JSON object fails in the consumer on
+      # every retry until tuber buries it.
+      if %w[event transaction].include?(item_type) && !item[:payload].is_a?(Hash)
+        Rails.logger.warn "#{item_type} item payload isn't a JSON object — dropping"
         return
       end
 

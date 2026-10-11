@@ -34,6 +34,20 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   message at all, titled each one "Unknown Error" and grouped them together.
   New ones are titled and grouped by their message; the existing "Unknown
   Error" issue stops growing.
+- **Envelopes are read by byte count, not by line.** The parser split the
+  body on newlines and guessed where a payload ended. It counted each new line
+  twice, so it often guessed early, and a payload holding newlines came apart:
+  - an attachment with a line that looked like JSON cost the whole envelope,
+    including the event sent with it;
+  - pretty-printed JSON was cut off partway and queued as a string.
+
+  Each payload is now read as exactly its `length` in bytes, as the envelope
+  spec requires. Zero-length items, which the spec allows, are accepted
+  rather than rejecting the envelope. A payload that runs past its `length`,
+  or ends short of it, is rejected as malformed, as Sentry's own ingest does.
+- **An event or transaction payload that isn't a JSON object is dropped at
+  the door.** It used to be queued, then fail in the consumer on every retry
+  until tuber buried it.
 
 ### Added
 
