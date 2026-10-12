@@ -11,6 +11,19 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## Unreleased
+
+### Fixed
+
+- **A long attribute no longer floods the logs search index.** Only the first
+  512 characters of each attribute value are indexed for search. sentry-rails'
+  query logs carry their whole SQL statement as an attribute, and a bulk
+  upsert's runs to ~400 KB of near-unique numbers: in production three such
+  query types were 0.6% of logs but two-thirds of all indexed attribute text.
+  The full value is still kept and shown on the log page; only searching past
+  the first 512 characters stops matching. Applies to new logs; the existing
+  index shrinks as old logs age out.
+
 ## 1.20.0 — 2026-10-12
 
 Tuber runs Splat's recurring jobs, from tuber 0.16, and Settings and

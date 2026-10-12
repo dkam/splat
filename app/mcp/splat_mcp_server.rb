@@ -817,7 +817,7 @@ class SplatMcpServer
           properties: {
             query: {
               type: "string",
-              description: "Full-text query over the log message body and its attributes. Whole-word tokens, not substrings: 'timeout' matches 'timeout' but not 'timeouts'. Multiple words are ANDed. Use key:value (e.g. method:POST, dbname:booko_production) to match an attribute. Note that fractional values such as durations are not indexed and cannot be searched."
+              description: "Full-text query over the log message body and its attributes. Whole-word tokens, not substrings: 'timeout' matches 'timeout' but not 'timeouts'. Multiple words are ANDed. Use key:value (e.g. method:POST, dbname:booko_production) to match an attribute. Note that fractional values such as durations are not indexed and cannot be searched, and only the first #{Logs::AttrsText::MAX_VALUE_CHARS} characters of a long attribute value (such as a SQL statement) are indexed."
             },
             level: {
               type: "string",
