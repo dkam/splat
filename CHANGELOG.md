@@ -11,6 +11,20 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## 1.21.1 — 2026-10-13
+
+New-issue emails are sent again, and ntfy alerts for new and reopened issues
+are no longer dropped.
+
+### Fixed
+
+- **New-issue emails are sent again.** An issue's alerts were put on tuber
+  inside the transaction creating it, and the worker picked the mail job up
+  before that committed, so every new-issue email failed with "Couldn't find
+  Issue". Since 1.21.0 it lost that race on every new issue. ntfy's
+  new-issue and reopened alerts were dropped the same way, without an error.
+  Jobs are now queued only once the transaction that queued them commits.
+
 ## 1.21.0 — 2026-10-12
 
 Ingest and maintenance run in one `worker` container, forked from one boot of
