@@ -1,6 +1,5 @@
 web: bin/rails server -b 0.0.0.0 -p 3304
-ingest: bin/worker ingest
-maintenance: bin/worker maintenance
+worker: bin/worker all
 # Only with a tuber older than 0.16, which can't fire config/schedule.yml itself:
 #   scheduler: bin/scheduler
 css: bin/rails tailwindcss:watch

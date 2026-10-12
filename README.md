@@ -30,7 +30,7 @@ bin/setup                 # bundle install + db:prepare, then boots the stack
 
 Open **http://localhost:3030**.
 
-`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the ingest and maintenance workers, Tailwind's watcher, and Tuber. Boot it again later with just `bin/dev`.
+`bin/setup` installs gems, prepares the SQLite databases, and starts everything via `bin/dev` — the web server (port 3030), the worker (ingest and maintenance), Tailwind's watcher, and Tuber. Boot it again later with just `bin/dev`.
 
 ### 2. Point an app at it
 
@@ -238,28 +238,17 @@ services:
         max-size: "100m"
         max-file: "5"
 
-  # Real-time ingestion: the data tubes (events/transactions/logs/forward/
-  # activejob). Safe to scale to multiple replicas — though SQLite serialises
-  # writes per DB, so extra replicas help only when per-job CPU (zstd) is the
-  # bottleneck, not the write.
-  ingest:
+  # Ingestion (the data tubes) and background jobs (splat.maintenance:
+  # retention, rollups, dictionary training, storage stats). `all` boots Rails
+  # once and forks a process per role — see "Workers" below.
+  worker:
     <<: *splat-worker
-    command: bin/worker ingest
+    command: bin/worker all
     volumes:
       - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/ingest:/rails/log
-    mem_limit: 512M
-
-  # Background jobs (splat.maintenance: retention, histogram rollups, dictionary
-  # training, storage stats). Its own process so a heavy scan or training run
-  # can never freeze ingestion.
-  maintenance:
-    <<: *splat-worker
-    command: bin/worker maintenance
-    volumes:
-      - /storage/splat/storage:/rails/storage
-      - /storage/splat/logs/maintenance:/rails/log
-    mem_limit: 512M
+      - /storage/splat/logs/worker:/rails/log
+    mem_limit: 1G
+    stop_grace_period: 30s
 
   # No scheduler service: tuber 0.16+ fires the recurring jobs itself. With an
   # older tuber, add one running bin/scheduler — see "Recurring jobs" below.
@@ -405,6 +394,8 @@ Splat runs in production on one shared instance for Booko and five other apps. T
 
 For scale, a quiet instance — a few apps, ~16,000 transactions a day — runs the same five containers in ~230 MiB resident, ~680 MiB with its swapped-out memory. Most of that is the fixed cost of booting Rails four times (web, ingest, maintenance, scheduler).
 
+These figures predate two changes that each save a Rails boot: tuber 0.16 fires the recurring jobs, so the scheduler is gone, and ingest and maintenance now run in one `worker` container that boots once and forks (see [Workers](#workers)). Measured locally, the two worker processes take about half the memory forked that they do booted separately.
+
 ### SQLite Performance
 
 - **One writer per database is enough.** The ingest worker runs one consumer per data tube, and each tube writes to its own database file, so events, transactions and logs never queue behind each other's write lock.
@@ -435,7 +426,7 @@ Raw rows and aggregates have separate retention windows, so you can prune the hi
 
 ### Ingestion Queue: Tuber
 
-Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. The **ingest** worker (`bin/worker ingest`) drains the data tubes through per-type consumers (events, transactions, logs, forward, and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. A separate **maintenance** worker (`bin/worker maintenance`) drains `splat.maintenance` (retention, aggregation, dictionary training, storage stats) in its own process, so a heavy background job can't freeze ingestion. Tuber fires the recurring jobs onto their tubes itself (0.16 and later; `bin/scheduler` does it on an older tuber) — see [Recurring jobs](#recurring-jobs).
+Splat doesn't write incoming events to SQLite on the request path. The ingest endpoints (`/api/...`, `/v1/logs`) validate each envelope, enqueue it onto [Tuber](https://github.com/tuberq/tuber) — a fast beanstalkd-compatible job queue — and return immediately, so a client never waits on parsing or disk. The **ingest** role drains the data tubes through per-type consumers (events, transactions, logs, forward, and an Active Job bridge) and does the parsing, fingerprinting, compression, and inserts off the hot path. The **maintenance** role drains `splat.maintenance` (retention, aggregation, dictionary training, storage stats) in a process of its own, so a heavy background job can't freeze ingestion. Both run in the one `worker` container — see [Workers](#workers). Tuber fires the recurring jobs onto their tubes itself (0.16 and later; `bin/scheduler` does it on an older tuber) — see [Recurring jobs](#recurring-jobs).
 
 [Tuber](https://github.com/tuberq/tuber) is a single Rust binary — a Beanstalkd rewrite — that keeps job *metadata* in RAM with a write-ahead log for durability, and offloads larger job *bodies* to disk (a TOAST-style scheme), so memory stays bounded by job *count* rather than payload size. That gives Splat a durable, RAM-speed ingest buffer with no extra database to tune. See the [Tuber project](https://github.com/tuberq/tuber) for the server.
 
@@ -485,6 +476,18 @@ Splat ingests structured logs alongside errors and transactions, into their own 
 **Trace correlation.** Because logs carry `trace_id`, the log detail page links to its transaction and the transaction detail page links back to "View N logs for this trace." The two directions are deliberately lopsided: logs are ingested at ~100% while transactions are typically sampled (e.g. 1–10%), so the log→transaction link only appears when that trace happened to be sampled, while transaction→logs almost always resolves. Each link only renders when the other side actually exists, so you never land on an empty page.
 
 ## Maintenance
+
+### Workers
+
+`bin/worker` runs the consumers that drain tuber, in two roles: **ingest** (the data tubes and check-ins) and **maintenance** (`splat.maintenance`: retention, rollups, dictionary training, storage stats). `bin/worker all`, which the compose file runs, boots Rails once and forks a process per role:
+
+- **Why separate processes:** the sqlite3 gem holds Ruby's global lock for the whole of a query, so a long maintenance query — the storage scan, a retention delete — would stop every ingest thread sharing its process.
+- **Why forked:** the processes share the memory Rails loaded at boot until they write to it. Measured locally, the pair take about half what two separately booted processes do (124 MiB against 252 MiB, idle).
+- **A process that dies is restarted** after a pause: 1 second, doubling while it keeps dying, up to 30. Each death is reported to Sentry, one issue per role.
+- **Out of memory:** the maintenance process raises its own `oom_score_adj`, so if the container hits its `mem_limit` the kernel kills it rather than ingest. It's restarted, and tuber hands the job it was running out again once its reservation times out.
+- **On TERM** every process finishes its batch and exits; one still running after 25 seconds is killed. `ps` and `docker top` show them as `splat-worker ingest` and `splat-worker maintenance`.
+
+`bin/worker ingest` and `bin/worker maintenance` each run one role in a single process, if you'd rather run two services, each with its own `mem_limit`.
 
 ### Recurring jobs
 
@@ -645,8 +648,8 @@ Configure Uptime Kuma to send alerts via:
 
 **When queue_status is "warning":**
 - Jobs are processing but slower than ingestion rate
-- Check the ingest worker status (`bin/worker ingest`) and Tuber
-- Consider scaling the ingest worker (replicas) if sustained
+- Check the worker (`docker compose logs worker`) and Tuber
+- Consider a second ingest process if sustained: a service running `bin/worker ingest` alongside the worker. SQLite serialises writes per database, so it helps only when per-job CPU (zstd) is the bottleneck, not the write
 
 **When queue_status is "critical":**
 - Significant backlog, data delayed
@@ -1036,7 +1039,7 @@ code has ever read them; setting them does nothing.)
 ### Development
 
 #### Services
-- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/worker ingest` (data tubes) and `bin/worker maintenance` (background); recurring jobs fired by Tuber itself (0.16+) or by `bin/scheduler`
+- **Tuber**: Work queue for ingestion + recurring jobs, drained by `bin/worker all` (the ingest and maintenance roles, a process each); recurring jobs fired by Tuber itself (0.16+) or by `bin/scheduler`
 - **Solid Cache**: In-memory caching
 - **Solid Cable**: Real-time updates (optional)
 

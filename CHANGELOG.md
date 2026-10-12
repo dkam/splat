@@ -13,6 +13,24 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Changed
+
+- **Ingest and maintenance run in one `worker` container.** `bin/worker all`
+  boots Rails once and forks a process per role, so a heavy maintenance job
+  still can't freeze ingestion, but the two share the memory Rails loaded:
+  measured locally, about half of what the two separately booted processes
+  take. The worker restarts a process that dies, with a growing pause while it
+  keeps dying, and reports each death to Sentry. If the container runs out of
+  memory, the kernel kills the maintenance process first. To switch, replace
+  the `ingest` and `maintenance` services with the `worker` service from
+  `compose.yml` and run `docker compose up -d --remove-orphans`, which removes
+  the old two. `bin/worker ingest` and `bin/worker maintenance` work as before,
+  for anyone who'd rather keep them separate.
+- **Workers stop within a few seconds of TERM.** An idle consumer waited up to
+  30 seconds for tuber before noticing it had been asked to stop, longer than
+  Docker's 10-second grace, so every deploy ended with the workers killed
+  rather than stopped. It now asks tuber every 5 seconds.
+
 ### Fixed
 
 - **A long attribute no longer floods the logs search index.** Only the first

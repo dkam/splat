@@ -11,8 +11,11 @@ module Ingest
     # When the tubes are empty, long-poll the batch reserve for this many
     # seconds (the server parks the waiter) rather than hot-looping. The
     # timeout bounds the park so the loop still wakes periodically to honour the
-    # @stop flag for graceful shutdown.
-    RESERVE_TIMEOUT = 30
+    # @stop flag for graceful shutdown — so it's also how long an idle consumer
+    # takes to stop. Keep it well under Docker's 10s grace after TERM: at 30s,
+    # every deploy ended with idle consumers killed rather than stopped. An
+    # empty reserve every 5s per consumer is nothing to tuber.
+    RESERVE_TIMEOUT = 5
 
     # Bury rather than release once a job has been re-tried this many times,
     # so a poison-pill body doesn't cycle on the tube forever.

@@ -238,6 +238,15 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
     assert job.buried
   end
 
+  # A consumer only sees @stop between reserves, so an idle one takes up to
+  # RESERVE_TIMEOUT to stop. Docker kills a container 10s (its default) after
+  # TERM, and Ingest::Supervisor kills a child after SHUTDOWN_TIMEOUT: at 30s,
+  # every deploy ended with idle consumers killed rather than stopped.
+  test "an idle consumer stops well inside Docker's default grace period" do
+    assert_operator Ingest::TubeConsumer::RESERVE_TIMEOUT, :<=, 5
+    assert_operator Ingest::TubeConsumer::RESERVE_TIMEOUT, :<, Ingest::Supervisor::SHUTDOWN_TIMEOUT
+  end
+
   test "connect_with_retry waits for tuber to come up, then watches the tube" do
     attempts = 0
     client = FakeClient.new

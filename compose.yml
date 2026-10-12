@@ -1,6 +1,7 @@
 # Production docker-compose for Splat (SQLite — the only flavour) — web +
-# tuber + two worker sidecars (ingest, maintenance). Tuber fires the recurring
-# jobs itself; a tuber older than 0.16 also needs the scheduler (see below).
+# tuber + one worker (ingest and maintenance, each in a process of its own).
+# Tuber fires the recurring jobs itself; a tuber older than 0.16 also needs the
+# scheduler (see below).
 #
 # compose.yml is Compose's default filename, so -f is optional:
 #
@@ -98,27 +99,26 @@ services:
         max-size: "100m"
         max-file: "5"
 
-  # Real-time ingestion: the data tubes (events, transactions, logs, forward,
-  # activejob). Kept separate from maintenance so a heavy background job can
-  # never freeze ingestion.
-  ingest:
+  # Drains tuber: ingestion (events, transactions, logs, forward, activejob,
+  # check-ins) and the background jobs on splat.maintenance (retention,
+  # rollups, storage stats, dictionary training). `all` boots Rails once and
+  # forks a process per role, so a heavy maintenance job can't freeze
+  # ingestion (SQLite holds Ruby's lock for the length of a query), while the
+  # two share the memory Rails loaded. If the limit is hit, the kernel kills
+  # the maintenance process first, and it's restarted.
+  #
+  # Prefer a memory limit per role? Run two services instead, with
+  # `command: bin/worker ingest` and `command: bin/worker maintenance`.
+  worker:
     <<: *splat-worker
-    command: bin/worker ingest
+    command: bin/worker all
     volumes:
       - ./storage:/rails/storage
-      - ./storage/logs/ingest:/rails/log
-    mem_limit: 512M
-
-  # Background jobs (splat.maintenance: storage stats, retention, dict
-  # training). Its own process + mem_limit so its heavy DB scans / training
-  # runs can't starve the ingest worker.
-  maintenance:
-    <<: *splat-worker
-    command: bin/worker maintenance
-    volumes:
-      - ./storage:/rails/storage
-      - ./storage/logs/maintenance:/rails/log
-    mem_limit: 512M
+      - ./storage/logs/worker:/rails/log
+    mem_limit: 1G
+    # Room for the processes to finish their batches after TERM; the worker
+    # kills any still going after 25s.
+    stop_grace_period: 30s
 
   # Only for a tuber older than 0.16, which can't fire config/schedule.yml
   # itself: this process fires it instead. On 0.16+ tuber does, and this would

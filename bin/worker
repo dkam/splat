@@ -10,21 +10,14 @@ STDERR.sync = true
 
 require_relative "../config/environment"
 
-# Role selects which tube consumers this process runs (see Ingest::Worker):
-# "ingest" (default) = the real-time data tubes; "maintenance" = splat.maintenance.
-role = ARGV[0] || ENV["WORKER_ROLE"] || "ingest"
-consumers = Ingest::Worker.consumers_for(role)
+# Which tube consumers to run (see Ingest::Worker): "ingest" (default) = the
+# real-time data tubes; "maintenance" = splat.maintenance; "all", or several
+# names, = each role in a process of its own, forked from this one after boot
+# and watched by it (see Ingest::Supervisor). One role runs in this process.
+roles = Ingest::Worker.roles_for(ARGV.empty? ? ENV.fetch("WORKER_ROLE", "ingest") : ARGV)
 
-shutdown = lambda do |signal|
-  # STDERR.puts (not Rails.logger) — Logger uses a mutex which can't be
-  # acquired from a Ruby signal-trap context.
-  STDERR.puts "[Worker:#{role}] received #{signal}, draining and exiting"
-  consumers.each(&:stop!)
+if roles.size == 1
+  Ingest::Worker.run(roles.first, Ingest::Worker.consumers_for(roles.first))
+else
+  Ingest::Supervisor.new(roles).run
 end
-
-trap("INT")  { shutdown.call("SIGINT") }
-trap("TERM") { shutdown.call("SIGTERM") }
-
-Rails.logger.info "[Worker:#{role}] starting #{consumers.size} consumer(s)"
-threads = consumers.map { |c| Thread.new { c.run } }
-threads.each(&:join)

@@ -39,4 +39,21 @@ class Ingest::WorkerTest < ActiveSupport::TestCase
     err = assert_raises(ArgumentError) { Ingest::Worker.consumers_for("nope") }
     assert_match(/unknown worker role/, err.message)
   end
+
+  # --- What bin/worker is asked to run -----------------------------------------
+
+  test "all is every role" do
+    assert_equal %w[ingest maintenance], Ingest::Worker.roles_for(["all"])
+  end
+
+  test "roles can be given as separate arguments or comma-separated, once each" do
+    assert_equal %w[ingest maintenance], Ingest::Worker.roles_for(%w[ingest maintenance])
+    assert_equal %w[ingest maintenance], Ingest::Worker.roles_for(["ingest,maintenance"])
+    assert_equal %w[maintenance], Ingest::Worker.roles_for(%w[maintenance maintenance])
+  end
+
+  test "an unknown role is refused before anything starts" do
+    err = assert_raises(ArgumentError) { Ingest::Worker.roles_for(%w[ingest nope]) }
+    assert_match(/unknown worker role "nope"/, err.message)
+  end
 end
