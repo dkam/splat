@@ -11,7 +11,18 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
-## Unreleased
+## 1.21.0 — 2026-10-12
+
+Ingest and maintenance run in one `worker` container, forked from one boot of
+Rails, at about half the memory of two. Workers stop within seconds of TERM
+instead of being killed at the end of Docker's grace period. And a log
+attribute is indexed for search only up to its first 512 characters, so
+sentry-rails' query logs no longer swamp the logs search index.
+
+**Upgrading:** to run the single worker, replace the `ingest` and
+`maintenance` services in your compose file with `compose.yml`'s `worker`
+service, then `docker compose up -d --remove-orphans`. A compose file left
+as it is keeps working.
 
 ### Changed
 
