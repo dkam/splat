@@ -211,6 +211,23 @@ class IssueTest < ActiveSupport::TestCase
     end
   end
 
+  test "new-issue alerts reach the queue only after the issue commits" do
+    ENV["SPLAT_EMAIL_NOTIFICATIONS"] = "true"
+    Setting.instance.update!(ntfy_url: "https://ntfy.sh/splat-test")
+
+    issue = nil
+    Issue.transaction do
+      issue = create_open_issue("enqueue::after-commit")
+      # A worker reserving either job now would find no committed issue.
+      assert_no_enqueued_jobs
+    end
+
+    assert_enqueued_with(job: ActionMailer::MailDeliveryJob)
+    assert_enqueued_with(job: NtfyNotificationJob, args: [issue.id, "new_issue"])
+  ensure
+    ENV.delete("SPLAT_EMAIL_NOTIFICATIONS")
+  end
+
   test "matching_text treats LIKE wildcards as literals" do
     literal = create_open_issue("underscore")
     literal.update!(title: "undefined method `_dump'")
