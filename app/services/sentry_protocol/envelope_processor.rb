@@ -40,6 +40,12 @@ module SentryProtocol
       @project = project
     end
 
+    # True once an item couldn't be queued because tuber didn't answer: the
+    # SDK should hear that the envelope was lost, not that it arrived.
+    def tuber_unreachable?
+      @tuber_unreachable == true
+    end
+
     def process
       envelope = parse_envelope
       validate_envelope!(envelope)
@@ -300,6 +306,7 @@ module SentryProtocol
       )
       false
     rescue *Ingest::Tuber::CONNECTION_ERRORS => e
+      @tuber_unreachable = true
       handle_undeliverable(
         tube, payload, kind,
         category: "tuber_unreachable",

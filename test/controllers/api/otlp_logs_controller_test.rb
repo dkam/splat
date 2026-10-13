@@ -98,6 +98,17 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # A collector retries a 503 but drops a batch after a 500.
+  test "answers 503 when tuber can't be reached, so the collector tries again" do
+    Setting.instance.update!(store_logs: true)
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
+      post "/v1/logs", params: @payload.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@project.public_key}"}
+    end
+
+    assert_response :service_unavailable
+  end
+
   test "accepts but discards when logs are disabled" do
     Setting.instance.update!(store_logs: false)
     with_tuber_stub do |calls|

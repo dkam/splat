@@ -9,22 +9,28 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "successfully processes envelope with query parameter authentication" do
-    post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
-      headers: {"Content-Type" => "application/octet-stream"},
-      params: @valid_envelope
+    queued = capture_tuber_puts do
+      post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
+        headers: {"Content-Type" => "application/octet-stream"},
+        params: @valid_envelope
+    end
 
     assert_response :success
+    assert_equal [Ingest::Tuber::EVENTS_TUBE], queued.map(&:first)
   end
 
   test "successfully processes envelope with header authentication" do
-    post "/api/#{@project.id}/envelope?sentry_key=#{@project.public_key}",
-      headers: {
-        "Content-Type" => "application/octet-stream",
-        "X-Sentry-Auth" => "Sentry sentry_key=#{@project.public_key}, sentry_version=7"
-      },
-      params: @valid_envelope
+    queued = capture_tuber_puts do
+      post "/api/#{@project.id}/envelope?sentry_key=#{@project.public_key}",
+        headers: {
+          "Content-Type" => "application/octet-stream",
+          "X-Sentry-Auth" => "Sentry sentry_key=#{@project.public_key}, sentry_version=7"
+        },
+        params: @valid_envelope
+    end
 
     assert_response :success
+    assert_equal [Ingest::Tuber::EVENTS_TUBE], queued.map(&:first)
   end
 
   test "rejects envelope with invalid public key in query params" do
@@ -63,14 +69,17 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "handles Bearer token authentication" do
-    post "/api/#{@project.slug}/envelope",
-      headers: {
-        "Content-Type" => "application/octet-stream",
-        "Authorization" => "Bearer #{@project.public_key}"
-      },
-      params: @valid_envelope
+    queued = capture_tuber_puts do
+      post "/api/#{@project.slug}/envelope",
+        headers: {
+          "Content-Type" => "application/octet-stream",
+          "Authorization" => "Bearer #{@project.public_key}"
+        },
+        params: @valid_envelope
+    end
 
     assert_response :success
+    assert_equal [Ingest::Tuber::EVENTS_TUBE], queued.map(&:first)
   end
 
   test "enqueues a forward job when the project has forward DSNs" do
@@ -100,7 +109,57 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
     assert_empty forward_puts
   end
 
+  # An SDK told 200 counts the envelope as delivered. It wasn't.
+  test "answers 503 when tuber can't be reached" do
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
+      post_envelope
+    end
+
+    assert_response :service_unavailable
+  end
+
+  # Tuber is up and said no; the same envelope sent again would be refused again.
+  test "answers 200 to an item too big for tuber" do
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise ::Tuber::JobTooBigError }) do
+      post_envelope
+    end
+
+    assert_response :success
+  end
+
+  test "says which streams are switched off, as Sentry rate limits" do
+    Setting.instance.update!(store_events: false, store_transactions: false, store_logs: false)
+    capture_tuber_puts { post_envelope }
+
+    assert_response :success
+    assert_equal "60:error;transaction;log_item:organization:disabled", response.headers["X-Sentry-Rate-Limits"]
+  end
+
+  test "says nothing of rate limits with every stream on" do
+    Setting.instance.update!(store_events: true, store_transactions: true, store_logs: true)
+    capture_tuber_puts { post_envelope }
+
+    assert_response :success
+    assert_nil response.headers["X-Sentry-Rate-Limits"]
+  end
+
+  # The envelope goes on whole to the forward targets, which may store it all.
+  test "doesn't rate-limit a project that forwards" do
+    Setting.instance.update!(store_logs: false)
+    @project.update!(forward_dsns: ["https://k@downstream.example/9"])
+    capture_tuber_puts { post_envelope }
+
+    assert_response :success
+    assert_nil response.headers["X-Sentry-Rate-Limits"]
+  end
+
   private
+
+  def post_envelope
+    post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
+      headers: {"Content-Type" => "application/octet-stream"},
+      params: @valid_envelope
+  end
 
   def capture_tuber_puts
     calls = []
@@ -118,16 +177,16 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
       "sent_at" => timestamp
     }.to_json
 
-    item_headers = {
-      "type" => "event",
-      "length" => 100
-    }.to_json
-
     item_payload = {
       "timestamp" => timestamp,
       "message" => "Test error message",
       "level" => "error",
       "platform" => "ruby"
+    }.to_json
+
+    item_headers = {
+      "type" => "event",
+      "length" => item_payload.bytesize
     }.to_json
 
     [envelope_headers, item_headers, item_payload].join("\n")

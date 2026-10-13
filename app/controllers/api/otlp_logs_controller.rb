@@ -55,6 +55,12 @@ class Api::OtlpLogsController < ApplicationController
   rescue JSON::ParserError => e
     Rails.logger.warn "[OtlpLogs] bad JSON: #{e.message}"
     render json: {error: "invalid JSON"}, status: :bad_request
+  rescue *Ingest::Tuber::CONNECTION_ERRORS => e
+    # A collector sends a batch again after a 503, and drops it after a 500.
+    # Chunks queued before tuber went away arrive twice.
+    Ingest::Health.record_failure(kind: "log", reason: "Tuber unreachable")
+    Rails.logger.warn "[OtlpLogs] could not reach tuber (#{e.class}); answered 503 for the collector to retry"
+    head :service_unavailable
   end
 
   private

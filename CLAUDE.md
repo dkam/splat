@@ -164,7 +164,8 @@ end
 ```ruby
 # POST /api/:project_id/envelope/
 # Accepts Sentry envelope format
-# Returns: 200 OK (always, to avoid client retries)
+# Returns: 200 OK, or 503 when tuber can't be reached (SDKs don't retry
+# either way). Streams switched off in Settings go out as X-Sentry-Rate-Limits.
 
 class Api::EnvelopesController < ApplicationController
   skip_before_action :verify_authenticity_token

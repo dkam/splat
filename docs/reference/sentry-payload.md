@@ -63,12 +63,34 @@ flowchart LR
 Three gates sit in front of storage, all in `process_item`:
 
 - **`setting.store_events?` / `store_transactions?` / `store_logs?`** — each type
-  can be switched off; the item is dropped at ingest, before the tube.
+  can be switched off; the item is dropped at ingest, before the tube. Every
+  response also tells the SDK, as a rate limit (below), unless the project
+  forwards.
 - **`housekeeping_transaction?(name)`** — drops Splat's own noise transactions so
   the instance doesn't fill up watching itself.
 - **Missing `event_id`** — events and transactions are dropped and logged. Logs
   are handled *before* this guard, because a log item is a batch (`items: [...]`)
   with no single id.
+
+### What the SDK is told
+
+A server SDK doesn't send an envelope again, whatever the answer; a non-2xx
+response only means it records the envelope as lost. (Mobile SDKs keep
+envelopes on disk while offline; whether they send one again after a `503`
+hasn't been checked.) While it's rate limited,
+it throws new items in the limited categories away before sending them.
+
+| Response | When | What the SDK does |
+|---|---|---|
+| `200` | Everything else, an envelope Splat couldn't read included | Counts it as delivered |
+| `503` | An item couldn't be queued because tuber didn't answer. The envelope isn't forwarded either. | Counts it as lost |
+| `X-Sentry-Rate-Limits: 60:<categories>:organization:disabled`, on any response | A stream is switched off in Settings: `error` for events, `transaction`, `log_item` for logs | Stops sending those for 60 s, then sends again and gets the header again while the stream is still off |
+
+The header follows the [rate-limiting spec](https://develop.sentry.dev/sdk/expected-features/rate-limiting/).
+SDKs read it on a `200` as well as on a `429`. Splat never sends a `429`: an
+SDK given one with no header stops sending every category, errors included.
+The OTLP logs endpoint answers `503` too when tuber is down, and an OTLP
+collector does send the batch again after a `503`.
 
 ## 3. The event payload
 

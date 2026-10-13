@@ -11,6 +11,24 @@ change stays in its commit message.
 
 Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
+## Unreleased
+
+### Changed
+
+- **SDKs stop sending what Splat would throw away.** With a stream switched
+  off in Settings, every ingest response now carries Sentry's
+  `X-Sentry-Rate-Limits` header for it: `error` for events, `transaction`,
+  `log_item` for logs. An SDK then stops sending those for a minute at a time,
+  rather than building, compressing and posting them for Splat to drop. Logs
+  are off by default, so this mostly stops log batches from SDKs with logs
+  turned on. A stream switched back on is sent again within a minute. A
+  project that forwards gets no header, because its envelopes go on whole.
+- **Ingest answers `503` when it can't reach tuber.** It used to answer `200`,
+  so the SDK counted an envelope as delivered while Splat dropped it. Server
+  SDKs still don't send it again, but they now record it as lost. The OTLP
+  logs endpoint answered `500` instead, after which a collector drops the
+  batch. It now answers `503` too, and a collector sends the batch again.
+
 ## 1.21.1 — 2026-10-13
 
 New-issue emails are sent again, and ntfy alerts for new and reopened issues
