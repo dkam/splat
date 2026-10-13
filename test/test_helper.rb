@@ -42,5 +42,40 @@ module ActiveSupport
     ensure
       owner.singleton_class.define_method(name, original)
     end
+
+    # A request body in one of the Content-Encodings ingest reads.
+    def compress(encoding, text)
+      compressed(encoding) { |write| write.call(text) }
+    end
+
+    # bytes of zeros, compressed a megabyte at a time: a body that's small as
+    # sent and enormous once decompressed, built without holding it all.
+    def compressed_zeros(encoding, bytes)
+      megabyte = "\0" * 1.megabyte
+      compressed(encoding) { |write| (bytes / megabyte.bytesize).times { write.call(megabyte) } }
+    end
+
+    def compressed(encoding)
+      io = StringIO.new(+"".b)
+      case encoding
+      when "gzip"
+        gz = Zlib::GzipWriter.new(io)
+        yield ->(data) { gz.write(data) }
+        gz.finish
+      when "deflate"
+        zd = Zlib::Deflate.new
+        yield ->(data) { io.write(zd.deflate(data)) }
+        io.write(zd.finish)
+      when "br"
+        br = Brotli::Writer.new(io, quality: 1)
+        yield ->(data) { br.write(data) }
+        br.finish
+      when "zstd"
+        zs = Zstd::StreamingCompress.new
+        yield ->(data) { io.write(zs.compress(data)) }
+        io.write(zs.finish)
+      end
+      io.string
+    end
   end
 end

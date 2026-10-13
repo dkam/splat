@@ -82,8 +82,9 @@ it throws new items in the limited categories away before sending them.
 
 | Response | When | What the SDK does |
 |---|---|---|
-| `200` | Everything else, an envelope Splat couldn't read included | Counts it as delivered |
+| `200` | Everything else, an envelope Splat couldn't read or decompress included | Counts it as delivered |
 | `503` | An item couldn't be queued because tuber didn't answer. The envelope isn't forwarded either. | Counts it as lost |
+| `413` | The body is over 20 MB as sent, or over 100 MB decompressed (Sentry's own limits). Decompression stops at the limit. | Counts it as lost |
 | `X-Sentry-Rate-Limits: 60:<categories>:organization:disabled`, on any response | A stream is switched off in Settings: `error` for events, `transaction`, `log_item` for logs | Stops sending those for 60 s, then sends again and gets the header again while the stream is still off |
 
 The header follows the [rate-limiting spec](https://develop.sentry.dev/sdk/expected-features/rate-limiting/).

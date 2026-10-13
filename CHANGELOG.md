@@ -28,6 +28,21 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   SDKs still don't send it again, but they now record it as lost. The OTLP
   logs endpoint answered `500` instead, after which a collector drops the
   batch. It now answers `503` too, and a collector sends the batch again.
+- **Ingest has a size limit: Sentry's own.** A request body over 20 MB as
+  sent, or over 100 MB once decompressed, is answered `413` on both the
+  envelope and OTLP logs endpoints. Decompression stops at the limit, so a
+  few kilobytes of gzip, deflate, Brotli or Zstandard that would expand to
+  gigabytes no longer get the chance to fill a web process's memory. An SDK
+  stays under these limits for Sentry, so nothing it sends is refused.
+- **An envelope whose gzip or deflate is corrupt is dropped with a `200`**,
+  logged, as Brotli and Zstandard already were. It used to raise, for a
+  `500`. On the OTLP endpoint a corrupt gzip body is a `400`.
+
+### Fixed
+
+- **Envelopes compressed with Zstandard are read.** The controller required
+  a file the zstd gem doesn't have, so every one was dropped with "Zstd gem
+  not available".
 
 ## 1.21.1 — 2026-10-13
 

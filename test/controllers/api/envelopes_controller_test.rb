@@ -153,12 +153,43 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
     assert_nil response.headers["X-Sentry-Rate-Limits"]
   end
 
+  %w[gzip deflate br zstd].each do |encoding|
+    test "reads an envelope sent with Content-Encoding: #{encoding}" do
+      queued = capture_tuber_puts { post_envelope(compress(encoding, @valid_envelope), encoding) }
+
+      assert_response :success
+      assert_equal [Ingest::Tuber::EVENTS_TUBE], queued.map(&:first)
+    end
+
+    # Sentry's own limit, so nothing an SDK would send to Sentry is refused.
+    test "answers 413 to an envelope over 100 MB once decompressed from #{encoding}" do
+      queued = capture_tuber_puts { post_envelope(compressed_zeros(encoding, 101.megabytes), encoding) }
+
+      assert_response :content_too_large
+      assert_empty queued
+    end
+
+    # Sent again, it still couldn't be read.
+    test "drops with a 200 a body Content-Encoding: #{encoding} can't undo" do
+      queued = capture_tuber_puts { post_envelope("not #{encoding} at all", encoding) }
+
+      assert_response :success
+      assert_empty queued
+    end
+  end
+
+  test "answers 413 to a body over 20 MB as sent" do
+    queued = capture_tuber_puts { post_envelope(@valid_envelope + "\n" + (" " * 20.megabytes)) }
+
+    assert_response :content_too_large
+    assert_empty queued
+  end
+
   private
 
-  def post_envelope
-    post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
-      headers: {"Content-Type" => "application/octet-stream"},
-      params: @valid_envelope
+  def post_envelope(body = @valid_envelope, encoding = nil)
+    headers = {"Content-Type" => "application/octet-stream", "Content-Encoding" => encoding}.compact
+    post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}", headers: headers, params: body
   end
 
   def capture_tuber_puts

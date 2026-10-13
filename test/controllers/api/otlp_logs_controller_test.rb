@@ -109,6 +109,28 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
     assert_response :service_unavailable
   end
 
+  test "answers 413 to a batch over 100 MB once decompressed" do
+    Setting.instance.update!(store_logs: true)
+    with_tuber_stub do |calls|
+      post "/v1/logs", params: compressed_zeros("gzip", 101.megabytes),
+        headers: {"Content-Type" => "application/json", "Content-Encoding" => "gzip", "Authorization" => "Bearer #{@project.public_key}"}
+
+      assert_response :content_too_large
+      assert_empty calls
+    end
+  end
+
+  test "answers 413 to a body over 20 MB as sent" do
+    Setting.instance.update!(store_logs: true)
+    with_tuber_stub do |calls|
+      post "/v1/logs", params: @payload.to_json + (" " * 20.megabytes),
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@project.public_key}"}
+
+      assert_response :content_too_large
+      assert_empty calls
+    end
+  end
+
   test "accepts but discards when logs are disabled" do
     Setting.instance.update!(store_logs: false)
     with_tuber_stub do |calls|

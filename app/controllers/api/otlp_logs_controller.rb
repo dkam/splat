@@ -55,6 +55,12 @@ class Api::OtlpLogsController < ApplicationController
   rescue JSON::ParserError => e
     Rails.logger.warn "[OtlpLogs] bad JSON: #{e.message}"
     render json: {error: "invalid JSON"}, status: :bad_request
+  rescue Ingest::Decompression::TooLarge => e
+    Rails.logger.warn "[OtlpLogs] refused: #{e.message}"
+    head :content_too_large
+  rescue Ingest::Decompression::Unreadable => e
+    Rails.logger.warn "[OtlpLogs] bad gzip: #{e.message}"
+    render json: {error: "invalid gzip"}, status: :bad_request
   rescue *Ingest::Tuber::CONNECTION_ERRORS => e
     # A collector sends a batch again after a 503, and drops it after a 500.
     # Chunks queued before tuber went away arrive twice.
@@ -77,7 +83,7 @@ class Api::OtlpLogsController < ApplicationController
   end
 
   def decompressed_body
-    Ingest::Decompression.maybe_gunzip(request.body.read, request.headers["Content-Encoding"])
+    Ingest::Decompression.maybe_gunzip(Ingest::Decompression.read(request.body), request.headers["Content-Encoding"])
   end
 
   # A chunk that still exceeds the tuber server's max job size is a single
