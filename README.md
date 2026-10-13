@@ -371,7 +371,7 @@ OIDC_REQUIRE_PKCE=<true/false>
 
 ## Performance
 
-Splat runs in production on one shared instance for Booko and five other apps. These are that instance's numbers, measured in October 2026 on Splat 1.19.4.
+Splat runs in production on one shared instance for Booko and five other apps. These are that instance's numbers, measured in October 2026: load and data on Splat 1.19.4, memory and CPU on 1.21.1.
 
 ### Production Metrics
 
@@ -379,22 +379,20 @@ Splat runs in production on one shared instance for Booko and five other apps. T
 
 **Data:** 244 GB of SQLite — transactions and spans 160 GB, logs 84 GB, issues and events 18 GB.
 
-**Memory and CPU, by container** (the five services in the [compose file](#docker-compose), measured over the 23 hours after a deploy):
+**Memory and CPU, by container** (the three services in the [compose file](#docker-compose), measured over the 15 hours after a deploy):
 
 | Container | Resident | Swapped out | `mem_limit` | CPU (average) |
 |---|---:|---:|---:|---:|
-| web | 296 MiB | 107 MiB | — | 0.07 cores |
-| ingest | 328 MiB | 258 MiB | 512 MiB | 0.10 cores |
-| maintenance | 113 MiB | 153 MiB | 512 MiB | 0.05 cores |
-| scheduler | 29 MiB | 102 MiB | 256 MiB | < 0.01 cores |
-| tuber | 17 MiB | 19 MiB | 1500 MiB | 0.01 cores |
-| **Total** | **~780 MiB** | **~640 MiB** | | **~0.23 cores** |
+| web | 298 MiB | 112 MiB | — | 0.06 cores |
+| worker | 333 MiB | 192 MiB | 1024 MiB | 0.11 cores |
+| tuber | 23 MiB | 9 MiB | 1500 MiB | 0.01 cores |
+| **Total** | **~650 MiB** | **~310 MiB** | | **~0.18 cores** |
 
-*Resident* is each container's own memory in RAM, not counting the kernel's file cache. *Swapped out* is memory the kernel has paged out because nothing touched it — on that host, mostly what each Rails process loaded at boot and never used again. It costs nothing there, but **on a host without swap, budget for both columns: ~1.4 GB at this load.** RAM beyond that goes to the kernel's file cache for the SQLite files.
+*Resident* is each container's own memory in RAM, not counting the kernel's file cache. *Swapped out* is memory the kernel has paged out because nothing touched it — on that host, mostly what each Rails process loaded at boot and never used again. It costs nothing there, but **on a host without swap, budget for both columns: ~1 GB at this load.** RAM beyond that goes to the kernel's file cache for the SQLite files.
 
-For scale, a quiet instance — a few apps, ~16,000 transactions a day — runs the same five containers in ~230 MiB resident, ~680 MiB with its swapped-out memory. Most of that is the fixed cost of booting Rails four times (web, ingest, maintenance, scheduler).
+For scale, a quiet instance — a few apps, ~16,000 transactions a day — runs the same three containers in ~165 MiB resident, ~440 MiB with its swapped-out memory. Most of that is the fixed cost of booting Rails twice (web and worker).
 
-These figures predate two changes that each save a Rails boot: tuber 0.16 fires the recurring jobs, so the scheduler is gone, and ingest and maintenance now run in one `worker` container that boots once and forks (see [Workers](#workers)). Measured locally, the two worker processes take about half the memory forked that they do booted separately.
+Both are down from 1.19.4, which booted Rails four times — web, ingest, maintenance and a scheduler. Tuber 0.16 now fires the recurring jobs, and ingest and maintenance share one `worker` container that boots once and forks (see [Workers](#workers)). Counting resident and swapped-out together, the busy instance went from ~1.4 GB to ~1 GB, and the quiet one from ~680 MiB to ~440 MiB.
 
 ### SQLite Performance
 
@@ -555,7 +553,7 @@ docker compose exec tuber tuber put -t splat.maintenance -c 1 \
 #### Checking on it
 
 ```bash
-docker compose logs maintenance | grep RetentionJob
+docker compose logs worker | grep RetentionJob
 ```
 
 It logs one line per database for the vacuum — free pages before and after, and why it stopped — then a summary of rows deleted per kind. A night on the production instance described under [Performance](#performance):
