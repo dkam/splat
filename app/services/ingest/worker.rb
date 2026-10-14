@@ -19,7 +19,10 @@ module Ingest
           LogConsumer.new,
           CheckInConsumer.new,
           ForwardConsumer.new,
-          ActiveJobConsumer.new
+          ActiveJobConsumer.new,
+          # Not a tube consumer: puts what the web spooled while tuber was
+          # down back on the tubes above.
+          SpoolReplayer.new
         ]
       },
       # Background/maintenance: drains splat.maintenance (the recurring jobs the

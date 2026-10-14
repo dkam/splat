@@ -22,8 +22,9 @@ class Api::EnvelopesController < ApplicationController
 
     processor = SentryProtocol::EnvelopeProcessor.new(raw_body, project)
     processor.process
-    # The envelope is lost, and a forward would go through the same tuber.
-    return head :service_unavailable if processor.tuber_unreachable?
+    # Tuber unreachable and the spool full: the envelope is lost, and a
+    # forward would be too.
+    return head :service_unavailable if processor.lost?
 
     EnvelopeForwarder.forward(raw_body, project: project, content_type: envelope_content_type)
 

@@ -41,7 +41,7 @@ class EnvelopeForwarder
 
       encoded = Base64.strict_encode64(raw_body)
 
-      Ingest::Tuber.put(
+      Ingest::Spool.put(
         Ingest::Tuber::FORWARD_TUBE,
         {
           project_id: project.id,

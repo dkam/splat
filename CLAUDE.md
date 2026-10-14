@@ -164,7 +164,8 @@ end
 ```ruby
 # POST /api/:project_id/envelope/
 # Accepts Sentry envelope format
-# Returns: 200 OK; 503 when tuber can't be reached; 413 over Sentry's size
+# Returns: 200 OK, the envelope spooled to disk if tuber can't be reached
+# (Ingest::Spool); 503 when the spool is full too; 413 over Sentry's size
 # limits (SDKs don't retry either way). Streams switched off in Settings go
 # out as X-Sentry-Rate-Limits.
 

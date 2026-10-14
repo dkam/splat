@@ -424,14 +424,23 @@ class SplatMcpTools
   end
 
   def format_queues(queues)
-    return "### Queues\n\n_Tuber unreachable._\n\n" if queues.blank?
+    return "### Queues\n\n_Tuber unreachable._\n\n" + format_spool if queues.blank?
 
     result = "### Queues (live)\n\n"
     result += "| Tube | Ready | Reserved | Buried |\n|---|---:|---:|---:|\n"
     queues.each do |name, d|
       result += "| #{name} | #{d[:ready]} | #{d[:reserved]} | #{d[:buried]} |\n"
     end
-    result + "\n"
+    result + "\n" + format_spool
+  end
+
+  # Jobs kept on disk while tuber couldn't be reached (Ingest::Spool).
+  def format_spool
+    spool = Ingest::Spool.stats
+    return "- **Spool:** empty\n\n" if spool[:jobs].zero?
+
+    "- **Spool:** #{spool[:jobs]} job(s), #{human_size(spool[:bytes])} waiting for tuber " \
+      "(cap #{human_size(Ingest::Spool.max_bytes)})\n\n"
   end
 
   def human_size(bytes)

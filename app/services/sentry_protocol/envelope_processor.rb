@@ -40,10 +40,10 @@ module SentryProtocol
       @project = project
     end
 
-    # True once an item couldn't be queued because tuber didn't answer: the
-    # SDK should hear that the envelope was lost, not that it arrived.
-    def tuber_unreachable?
-      @tuber_unreachable == true
+    # True once an item could be neither queued nor spooled (Ingest::Spool):
+    # the SDK should hear that the envelope was lost, not that it arrived.
+    def lost?
+      @lost == true
     end
 
     def process
@@ -287,15 +287,15 @@ module SentryProtocol
       HOUSEKEEPING_TRANSACTION_PREFIXES.any? { |prefix| name.start_with?(prefix) }
     end
 
-    # Enqueue an ingest job, self-reporting instead of silently dropping when the
-    # put fails — either tuber rejected the job (too big) or tuber was
-    # unreachable. Every failure lights up the local "ingestion degraded"
+    # Enqueue an ingest job, or spool it while tuber is unreachable
+    # (Ingest::Spool) — self-reporting either way instead of silently
+    # dropping. Every failure lights up the local "ingestion degraded"
     # indicator (Ingest::Health, read by the web chrome) so the operator on THIS
     # instance sees it, and — mirroring the OTLP logs path — raises a
     # fingerprint-stable issue on the *upstream* monitoring Splat/Sentry
     # (ntfy/email) rather than the data vanishing with only a log line.
     def enqueue(tube, payload, kind:)
-      Ingest::Tuber.put(tube, payload)
+      spooled(kind) if Ingest::Spool.put(tube, payload) == :spooled
       true
     rescue ::Tuber::JobTooBigError
       handle_undeliverable(
@@ -305,15 +305,29 @@ module SentryProtocol
         detail: "exceeds tuber's max job size — raise TUBER_MAX_JOB_SIZE or shrink the payload"
       )
       false
-    rescue *Ingest::Tuber::CONNECTION_ERRORS => e
-      @tuber_unreachable = true
+    rescue Ingest::Spool::Full => e
+      @lost = true
       handle_undeliverable(
         tube, payload, kind,
         category: "tuber_unreachable",
-        reason: "Tuber unreachable",
-        detail: "could not reach tuber (#{e.class})"
+        reason: "Tuber unreachable, spool full",
+        detail: "could not reach tuber, and the #{e.message}"
       )
       false
+    end
+
+    # Nothing's lost yet, but nothing is being processed either: the worker
+    # reads from the tuber that's down.
+    def spooled(kind)
+      Ingest::Health.record_failure(kind: kind, reason: "Tuber unreachable; spooling to disk")
+      return unless report_throttle_ok?("ingest_spooling_report")
+
+      Sentry.capture_message(
+        "Ingest spooling to disk: tuber unreachable",
+        level: :warning,
+        fingerprint: ["ingest", "spooling"],
+        extra: {spool: Ingest::Spool.stats, project: project.slug}
+      )
     end
 
     def handle_undeliverable(tube, payload, kind, category:, reason:, detail:)
@@ -328,7 +342,7 @@ module SentryProtocol
       # the unreachable case to one upstream report per minute to avoid a storm /
       # feedback loop. A too-big rejection is per-payload (tuber is up), so it
       # reports every time.
-      return if category == "tuber_unreachable" && !report_throttle_ok?
+      return if category == "tuber_unreachable" && !report_throttle_ok?("ingest_unreachable_report")
 
       Sentry.capture_message(
         "Ingest #{kind} dropped: #{detail}",
@@ -339,8 +353,8 @@ module SentryProtocol
     end
 
     # True at most once per minute across processes (Solid Cache marker).
-    def report_throttle_ok?
-      Rails.cache.write("ingest_unreachable_report", true, expires_in: 60, unless_exist: true)
+    def report_throttle_ok?(key)
+      Rails.cache.write(key, true, expires_in: 60, unless_exist: true)
     rescue
       true
     end

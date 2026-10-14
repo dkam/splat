@@ -466,6 +466,7 @@ module Mcp
       assert_match(/9\.8×/, text)
       assert_match(/### Queues/, text)
       assert_match(/splat\.events/, text)
+      assert_match(/\*\*Spool:\*\* empty/, text)
     end
 
     test "get_status splits data from index bytes, ranks indexes, and flags uncompressed tables" do

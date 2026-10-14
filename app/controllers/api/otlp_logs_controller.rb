@@ -36,10 +36,11 @@ class Api::OtlpLogsController < ApplicationController
     # than 500ing, so the collector drops it instead of retrying it forever.
     rejected = 0
     Logs::OtlpChunker.chunks(payload).each do |chunk|
-      Ingest::Tuber.put(
+      spooled = Ingest::Spool.put(
         Ingest::Tuber::LOGS_TUBE,
         {format: "otlp", payload: chunk, project_id: project.id}
-      )
+      ) == :spooled
+      Ingest::Health.record_failure(kind: "log", reason: "Tuber unreachable; spooling to disk") if spooled
     rescue ::Tuber::JobTooBigError
       dropped = Logs::OtlpChunker.record_count(chunk)
       rejected += dropped
@@ -61,11 +62,12 @@ class Api::OtlpLogsController < ApplicationController
   rescue Ingest::Decompression::Unreadable => e
     Rails.logger.warn "[OtlpLogs] bad gzip: #{e.message}"
     render json: {error: "invalid gzip"}, status: :bad_request
-  rescue *Ingest::Tuber::CONNECTION_ERRORS => e
-    # A collector sends a batch again after a 503, and drops it after a 500.
-    # Chunks queued before tuber went away arrive twice.
-    Ingest::Health.record_failure(kind: "log", reason: "Tuber unreachable")
-    Rails.logger.warn "[OtlpLogs] could not reach tuber (#{e.class}); answered 503 for the collector to retry"
+  rescue Ingest::Spool::Full => e
+    # Tuber unreachable and nowhere to keep the batch. A collector sends a
+    # batch again after a 503, and drops it after a 500. Chunks queued or
+    # spooled before this one arrive twice.
+    Ingest::Health.record_failure(kind: "log", reason: "Tuber unreachable, spool full")
+    Rails.logger.warn "[OtlpLogs] could not reach tuber, and the #{e.message}; answered 503 for the collector to retry"
     head :service_unavailable
   end
 

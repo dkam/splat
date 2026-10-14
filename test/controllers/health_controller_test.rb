@@ -23,4 +23,18 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     assert_equal "late", body.dig("scheduler", "status")
     assert_equal "monitor_evaluation", body.dig("scheduler", "entry")
   end
+
+  test "reports the spool, and is degraded while it holds jobs" do
+    ScheduleRun.record!("monitor_evaluation", at: 1.minute.ago)
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
+      Ingest::Spool.put(Ingest::Tuber::EVENTS_TUBE, {"n" => 1})
+    end
+
+    get "/_health"
+
+    body = response.parsed_body
+    assert_equal "degraded", body["status"]
+    assert_equal 1, body.dig("spool", "jobs")
+    assert_operator body.dig("spool", "bytes"), :>, 0
+  end
 end

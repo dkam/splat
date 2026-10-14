@@ -28,6 +28,15 @@ module ActiveSupport
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
+    # Jobs spooled while tuber is down go to a directory of the test's own, so
+    # parallel workers never replay each other's.
+    setup { Ingest::Spool.dir = Dir.mktmpdir("spool") }
+    teardown do
+      FileUtils.rm_rf(Ingest::Spool.dir)
+      Ingest::Spool.dir = nil
+      Ingest::Spool.max_bytes = nil
+    end
+
     # Temporarily replace a singleton (class) method, restoring the *real* one
     # afterward. Minitest 6 dropped #stub, and the obvious
     # `singleton_class.define_method` + `remove_method` dance deletes the

@@ -24,6 +24,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   names a branch instead of `{sha}`. Library frames stay unlinked, since
   their paths aren't in your repository.
 
+### Changed
+
+- **Nothing is lost while Tuber is down.** What ingest can't enqueue is kept
+  on disk in `storage/spool/`, answered with a `200`, and put back on its
+  tube by the worker once Tuber answers. It used to be a `503`, after which
+  SDKs drop the envelope. The spool is capped at 1 GB (`SPLAT_SPOOL_MAX_MB`);
+  past it, ingest answers `503` as before. `/_health` reports `degraded`
+  while anything is spooled, and `get_status` shows the spool.
+
 ## 1.22.0 — 2026-10-14
 
 MCP queries are stopped after 15 seconds, so one wide search can no longer

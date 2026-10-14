@@ -434,6 +434,8 @@ Splat doesn't write incoming events to SQLite on the request path. The ingest en
 
 [Tuber](https://github.com/tuberq/tuber) is a single Rust binary — a Beanstalkd rewrite — that keeps job *metadata* in RAM with a write-ahead log for durability, and offloads larger job *bodies* to disk (a TOAST-style scheme), so memory stays bounded by job *count* rather than payload size. That gives Splat a durable, RAM-speed ingest buffer with no extra database to tune. See the [Tuber project](https://github.com/tuberq/tuber) for the server.
 
+**When Tuber is down**, the web service keeps what it can't enqueue on disk, in `storage/spool/`, and still answers `200`: SDKs drop an envelope after a `5xx` rather than sending it again, so answering `503` would lose it. The ingest worker puts the spooled jobs back on their tubes, oldest first, once Tuber answers again. The spool is capped at 1 GB (`SPLAT_SPOOL_MAX_MB`) so a long outage can't fill the disk the databases share; past the cap, ingest answers `503`. While anything is spooled, `/_health` reports `degraded` with the count, and `get_status` shows it. A job can arrive twice if the worker dies mid-replay — harmless for events, which are unique on `event_id`.
+
 #### Endpoint Impact Ranking
 
 The performance dashboard ranks endpoints by **time spent** (`avg_duration × count`) rather than average duration. A 50ms endpoint hit 10,000×/day costs more total time than a 2s endpoint hit 5×/day — sorting by impact tells you where optimisation actually pays back. The same table also surfaces P95 alongside, so a tail-heavy endpoint isn't hidden by a low average.
@@ -917,6 +919,7 @@ Every connection gets the small cache. Each ingest consumer raises the cache on 
 ### Tuber Work Queue
 ```
 TUBER_URL: tuber:11300   # host:port of the Tuber (beanstalkd-compatible) server
+SPLAT_SPOOL_MAX_MB: 1024 # what ingest keeps on disk while Tuber is down, before answering 503; 0 turns spooling off
 ```
 
 Ingestion is enqueued on Tuber. To watch the tubes live — pending/ready/reserved

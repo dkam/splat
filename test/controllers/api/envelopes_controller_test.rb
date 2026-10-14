@@ -109,8 +109,29 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
     assert_empty forward_puts
   end
 
+  # Kept on disk until tuber is back, so the envelope isn't lost.
+  test "spools the envelope when tuber can't be reached, and answers 200" do
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
+      post_envelope
+    end
+
+    assert_response :success
+    assert_equal 1, Ingest::Spool.stats[:jobs]
+  end
+
+  test "spools the forward too when tuber can't be reached" do
+    @project.update!(forward_dsns: ["https://k@downstream.example/9"])
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
+      post_envelope
+    end
+
+    assert_response :success
+    assert_equal 2, Ingest::Spool.stats[:jobs]
+  end
+
   # An SDK told 200 counts the envelope as delivered. It wasn't.
-  test "answers 503 when tuber can't be reached" do
+  test "answers 503 when tuber can't be reached and the spool is full" do
+    Ingest::Spool.max_bytes = 0
     with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
       post_envelope
     end
@@ -120,11 +141,15 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
 
   # Tuber is up and said no; the same envelope sent again would be refused again.
   test "answers 200 to an item too big for tuber" do
-    with_stub(Ingest::Tuber, :put, ->(*, **) { raise ::Tuber::JobTooBigError }) do
-      post_envelope
+    reports = []
+    with_stub(Sentry, :capture_message, ->(*, **kw) { reports << kw[:fingerprint] }) do
+      with_stub(Ingest::Tuber, :put, ->(*, **) { raise ::Tuber::JobTooBigError.new("JOB_TOO_BIG", "put") }) do
+        post_envelope
+      end
     end
 
     assert_response :success
+    assert_equal [["ingest", "job_too_big", "event"]], reports
   end
 
   test "says which streams are switched off, as Sentry rate limits" do

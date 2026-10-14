@@ -21,13 +21,15 @@ class HealthController < ApplicationController
     end
 
     scheduler = Ingest::ScheduleStatus.health
+    spool = Ingest::Spool.stats
 
     render json: {
-      status: overall_status(queue_depth, scheduler),
+      status: overall_status(queue_depth, scheduler, spool),
       timestamp: Time.current.iso8601,
       queue_depth: queue_depth,
       queue_status: queue_status(queue_depth),
       scheduler: scheduler,
+      spool: spool,
       event_count: counts[:events_24h],
       event_count_window: "24h",
       issue_count: counts[:open_issues],
@@ -50,12 +52,14 @@ class HealthController < ApplicationController
     end
   end
 
-  # "ok" unless the queue is critical or nothing is running the recurring jobs
-  # (retention, WAL checkpoints, monitor alerts). The second can't alert any
-  # other way: alerting is one of the jobs that stopped.
-  def overall_status(queue_depth, scheduler)
+  # "ok" unless the queue is critical, nothing is running the recurring jobs
+  # (retention, WAL checkpoints, monitor alerts), or ingest is spooling to disk
+  # because tuber can't be reached. The second can't alert any other way:
+  # alerting is one of the jobs that stopped.
+  def overall_status(queue_depth, scheduler, spool)
     return "degraded" if queue_depth >= QUEUE_CRITICAL_THRESHOLD
     return "degraded" if scheduler[:status] != "ok"
+    return "degraded" if spool[:jobs].positive?
     "ok"
   end
 end

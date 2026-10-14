@@ -98,9 +98,21 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # A collector retries a 503 but drops a batch after a 500.
-  test "answers 503 when tuber can't be reached, so the collector tries again" do
+  test "spools the batch when tuber can't be reached" do
     Setting.instance.update!(store_logs: true)
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
+      post "/v1/logs", params: @payload.to_json,
+        headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@project.public_key}"}
+    end
+
+    assert_response :success
+    assert_equal 1, Ingest::Spool.stats[:jobs]
+  end
+
+  # A collector retries a 503 but drops a batch after a 500.
+  test "answers 503 when tuber can't be reached and the spool is full, so the collector tries again" do
+    Setting.instance.update!(store_logs: true)
+    Ingest::Spool.max_bytes = 0
     with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) do
       post "/v1/logs", params: @payload.to_json,
         headers: {"Content-Type" => "application/json", "Authorization" => "Bearer #{@project.public_key}"}

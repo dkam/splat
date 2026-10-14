@@ -60,7 +60,16 @@ class Api::StoreControllerTest < ActionDispatch::IntegrationTest
     assert_equal [Ingest::Tuber::TRANSACTIONS_TUBE], queued.map(&:first)
   end
 
-  test "answers 503 when tuber can't be reached" do
+  test "spools the event when tuber can't be reached" do
+    with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) { post_store(@event.to_json) }
+
+    assert_response :success
+    assert_equal({"id" => "a" * 32}, response.parsed_body)
+    assert_equal 1, Ingest::Spool.stats[:jobs]
+  end
+
+  test "answers 503 when tuber can't be reached and the spool is full" do
+    Ingest::Spool.max_bytes = 0
     with_stub(Ingest::Tuber, :put, ->(*, **) { raise Errno::ECONNREFUSED }) { post_store(@event.to_json) }
 
     assert_response :service_unavailable
