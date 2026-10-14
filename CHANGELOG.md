@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.22.0 — 2026-10-14
+
+MCP queries are stopped after 15 seconds, so one wide search can no longer
+hold Splat for minutes, and the web service runs as two processes. Ingest
+answers SDKs the way Sentry does: a `503` when it can't take an envelope, a
+`413` over Sentry's size limits, rate limits for streams switched off, and
+the old `/store/` endpoint.
+
 ### Added
 
 - **The `/api/:project_id/store/` endpoint**, where Sentry's clients posted
