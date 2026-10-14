@@ -65,6 +65,11 @@ class Event < IssuesEventsRecord
     Issue.where(id: issue.id)
       .where("last_seen < ?", event.timestamp)
       .update_all(last_seen: event.timestamp, updated_at: Time.current)
+    issue.record_release!(event.release, at: event.timestamp)
+    Release.record_sighting!(project: project, version: event.release, timestamp: event.timestamp, kind: :event)
+
+    # A resolved issue that happens again is open again, and alerts as such.
+    issue.open! if issue.resolved?
 
     # Best-effort side effects; both throttled, and neither raises into ingest.
     issue.harvest_facets!(environment: event.environment, release: event.release, seen_at: event.timestamp)

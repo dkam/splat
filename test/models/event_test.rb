@@ -1,6 +1,8 @@
 require "test_helper"
 
 class EventTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
   def setup
     @project = Project.create!(name: "Test Project", slug: "test", public_key: "test-key")
   end
@@ -17,6 +19,47 @@ class EventTest < ActiveSupport::TestCase
     assert_equal %w[staging], IssueFacet.values_for(@project.id, :environment)
     assert_equal %w[v1.2.3], IssueFacet.values_for(@project.id, :release)
     assert_includes Issue.seen_in_environment("staging", project_id: @project.id), event.issue
+  end
+
+  # Lost with ProcessEventJob in 9a993e3, when ingest moved to tuber: the
+  # consumer that replaced it never reopened, recorded or stamped anything.
+  test "an event reopens a resolved issue, and says so" do
+    first = Event.create_from_sentry_payload!("evt-before", {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z"}, @project)
+    first.issue.resolved!
+
+    Setting.instance.update!(webhook_url: "https://hooks.example/splat")
+    assert_enqueued_with(job: WebhookNotificationJob, args: [first.issue_id, "issue_reopened"]) do
+      Event.create_from_sentry_payload!("evt-again", {"message" => "boom", "timestamp" => "2026-07-17T09:00:00Z"}, @project)
+    end
+    assert first.issue.reload.open?
+  end
+
+  test "an event leaves an ignored issue ignored" do
+    first = Event.create_from_sentry_payload!("evt-before", {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z"}, @project)
+    first.issue.ignored!
+
+    Event.create_from_sentry_payload!("evt-again", {"message" => "boom", "timestamp" => "2026-07-17T09:00:00Z"}, @project)
+
+    assert first.issue.reload.ignored?
+  end
+
+  test "an event's release is recorded" do
+    Event.create_from_sentry_payload!("evt-release", {"message" => "boom", "timestamp" => "2026-07-17T08:00:00Z", "release" => "19.11.0"}, @project)
+
+    release = Release.find_by!(project: @project, version: "19.11.0")
+    assert_equal 1, release.event_count
+    assert_equal Time.utc(2026, 7, 17, 8), release.first_seen_at
+  end
+
+  test "an issue keeps the first release it was seen in and the latest" do
+    base = {"message" => "boom"}
+    Event.create_from_sentry_payload!("evt-1", base.merge("timestamp" => "2026-07-17T08:00:00Z", "release" => "19.10.0"), @project)
+    event = Event.create_from_sentry_payload!("evt-2", base.merge("timestamp" => "2026-07-18T08:00:00Z", "release" => "19.11.0"), @project)
+    Event.create_from_sentry_payload!("evt-3", base.merge("timestamp" => "2026-07-18T09:00:00Z"), @project)
+
+    issue = event.issue.reload
+    assert_equal "19.10.0", issue.first_seen_release
+    assert_equal "19.11.0", issue.last_seen_release
   end
 
   test "a second event in another environment adds to the issue's environments" do

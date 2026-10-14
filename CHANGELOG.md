@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Fixed
+
+- **A resolved issue reopens when it happens again**, and alerts as
+  reopened. It had stayed resolved since ingest moved to Tuber in May 2026,
+  whatever the events. The same change stopped events recording
+  their release, so the Releases list only had what transactions reported,
+  and an issue's first and last release, shown on its page, stopped being
+  set. All three are back.
+
 ## 1.24.0 — 2026-10-14
 
 Alerts can go to a webhook, as Splat's JSON or as a Slack or Discord

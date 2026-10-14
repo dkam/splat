@@ -135,6 +135,15 @@ class Issue < IssuesEventsRecord
     )
   end
 
+  # The first release this issue was seen in, and the latest. Out of order,
+  # an older event doesn't take the latest back.
+  def record_release!(release, at:)
+    return if release.blank?
+
+    Issue.where(id: id, first_seen_release: [nil, ""]).update_all(first_seen_release: release)
+    Issue.where(id: id).where("last_seen <= ?", at).update_all(last_seen_release: release)
+  end
+
   # Denormalise an event's environment/release onto this issue so the "seen in"
   # filters don't have to DISTINCT over events. Throttled per (issue, name,
   # value). Called from Event.create_from_sentry_payload! after the event is
