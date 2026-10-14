@@ -45,6 +45,12 @@ if web_concurrency == "auto" || web_concurrency.to_i > 0
   end
 end
 
+# Sentry's 20 MB limit on a request as sent (Ingest::Decompression::MAX_SENT;
+# the app isn't loaded yet to read it), answered with a 413 before Rails sees
+# the request. The ingest endpoints check it themselves too, but Rails parses a
+# body typed as JSON for its request log before any controller runs.
+http_content_length_limit 20 * 1024 * 1024
+
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart
 

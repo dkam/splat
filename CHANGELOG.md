@@ -13,6 +13,13 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Fixed
+
+- **A JSON body over 20 MB is refused before Rails reads it.** Puma answers
+  `413` from the `Content-Length`. The ingest endpoints already refused one,
+  but Rails parsed a JSON-typed body (OTLP logs, `/store/`) in full for its
+  request log first, however large.
+
 ## 1.23.0 — 2026-10-14
 
 Stack frames link to their line in the project's repository, at the commit
