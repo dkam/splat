@@ -592,6 +592,7 @@ Response:
   "queue_depth": 0,
   "queue_status": "healthy",
   "scheduler": {"status": "ok", "entry": "monitor_evaluation", "last_run_at": "2025-10-23T12:34:00Z"},
+  "spool": {"jobs": 0, "bytes": 0},
   "event_count": 1234,
   "issue_count": 56,
   "transaction_count": 5678,
@@ -601,9 +602,10 @@ Response:
 ```
 
 **Response Fields:**
-- `status`: Overall system health — `degraded` when the queue is critical or the recurring jobs have stopped, `ok` otherwise
+- `status`: Overall system health — `degraded` when the queue is critical, the recurring jobs have stopped, or ingest is spooling to disk because Tuber can't be reached; `ok` otherwise
 - `queue_status`: Queue health (`healthy`, `warning`, or `critical`)
 - `scheduler.status`: `late` when `monitor_evaluation` (every minute) hasn't run for five minutes, counted from boot if it never has — nothing is firing the [recurring jobs](#recurring-jobs), or the ingest worker that runs it is down. `ok` otherwise
+- `spool`: Jobs ingest kept on disk while Tuber was unreachable, waiting to be queued (see [Ingestion Queue](#ingestion-queue-tuber))
 - `queue_depth`: Number of pending background jobs
 - `timestamp`: Current server time (ISO 8601)
 - `event_count`: Total error events tracked
@@ -637,7 +639,7 @@ QUEUE_CRITICAL_THRESHOLD=100 # queue_status becomes "critical", status becomes "
 - **JSON Path**: `$.status`
 - **Expected Value**: `ok`
 - **Alert When**: Value is not equal to expected value
-- **Result**: Alerts when the system is "degraded": critical queue depth, or the recurring jobs have stopped. The second has no other alert — Splat's own monitor alerts are one of the jobs that stopped — so watch `$.status` (or `$.scheduler.status`) even if you also watch the queue.
+- **Result**: Alerts when the system is "degraded": critical queue depth, ingest spooling to disk, or the recurring jobs have stopped. The second has no other alert — Splat's own monitor alerts are one of the jobs that stopped — so watch `$.status` (or `$.scheduler.status`) even if you also watch the queue.
 
 **Notification Settings:**
 Configure Uptime Kuma to send alerts via:
