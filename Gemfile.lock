@@ -229,7 +229,7 @@ GEM
       tzinfo
       validate_url
       webfinger (~> 2.0)
-    pagy (43.6.3)
+    pagy (43.7.0)
       json
       uri
       yaml
@@ -407,7 +407,7 @@ GEM
     unicode-display_width (3.2.0)
       unicode-emoji (~> 4.1)
     unicode-emoji (4.2.0)
-    uri (1.1.1)
+    uri (1.1.2)
     useragent (0.16.11)
     validate_url (1.0.15)
       activemodel (>= 3.0.0)
@@ -457,7 +457,7 @@ DEPENDENCIES
   letter_opener
   mcp (~> 1.6)
   openid_connect
-  pagy (~> 43.6)
+  pagy (~> 43.7)
   propshaft
   puma (>= 5.0)
   rails (~> 8.1.4)
