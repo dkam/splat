@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_14_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_000002) do
   create_table "cron_monitors", force: :cascade do |t|
     t.integer "checkin_margin"
     t.json "config"
@@ -125,6 +125,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_000001) do
     t.boolean "store_transactions", default: true, null: false
     t.integer "transactions_data_retention_days", default: 90, null: false
     t.datetime "updated_at", null: false
+    t.string "webhook_format", default: "json", null: false
+    t.string "webhook_secret"
+    t.string "webhook_url"
   end
   add_foreign_key "cron_monitors", "projects"
   add_foreign_key "facets", "projects"

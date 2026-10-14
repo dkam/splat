@@ -30,6 +30,10 @@ class Setting < ApplicationRecord
     ntfy_url.present?
   end
 
+  def webhook_configured?
+    webhook_url.present?
+  end
+
   # --- Instance MCP token -----------------------------------------------------
   #
   # Only meaningful without OIDC: with users present, /mcp authenticates per user
@@ -80,6 +84,8 @@ class Setting < ApplicationRecord
   validates :mcp_token_ttl_days, numericality: {greater_than_or_equal_to: 0, less_than_or_equal_to: 3650}
   validates :ntfy_priority, inclusion: {in: NtfyNotifier::VALID_PRIORITIES}, allow_blank: true
   validate :ntfy_url_parseable
+  validates :webhook_format, inclusion: {in: WebhookNotifier::FORMATS}
+  validate :webhook_url_parseable
 
   private
 
@@ -89,5 +95,13 @@ class Setting < ApplicationRecord
     NtfyNotifier.parse_url(ntfy_url)
   rescue NtfyNotifier::InvalidUrl => e
     errors.add(:ntfy_url, e.message)
+  end
+
+  def webhook_url_parseable
+    return if webhook_url.blank?
+
+    WebhookNotifier.parse_url(webhook_url)
+  rescue WebhookNotifier::InvalidUrl => e
+    errors.add(:webhook_url, e.message)
   end
 end

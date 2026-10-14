@@ -211,6 +211,26 @@ class IssueTest < ActiveSupport::TestCase
     end
   end
 
+  test "a new issue, a reopened one and a burst each queue a webhook when one is set" do
+    Setting.instance.update!(burst_threshold: 3, webhook_url: "https://hooks.example/splat")
+
+    issue = nil
+    assert_enqueued_with(job: WebhookNotificationJob) { issue = create_open_issue("webhook::events") }
+    assert_enqueued_with(job: WebhookNotificationJob, args: [issue.id, "new_issue"])
+
+    issue.resolved!
+    assert_enqueued_with(job: WebhookNotificationJob, args: [issue.id, "issue_reopened"]) { issue.open! }
+
+    3.times { |i| create_event(issue, i) }
+    assert_enqueued_with(job: WebhookNotificationJob, args: [issue.id, "issue_burst"]) { issue.maybe_alert_burst! }
+  end
+
+  test "no webhook is queued without a URL" do
+    Setting.instance.update!(webhook_url: nil)
+
+    assert_no_enqueued_jobs(only: WebhookNotificationJob) { create_open_issue("webhook::none") }
+  end
+
   test "new-issue alerts reach the queue only after the issue commits" do
     ENV["SPLAT_EMAIL_NOTIFICATIONS"] = "true"
     Setting.instance.update!(ntfy_url: "https://ntfy.sh/splat-test")

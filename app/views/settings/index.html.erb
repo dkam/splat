@@ -521,6 +521,30 @@
           <%= form.select :ntfy_priority, NtfyNotifier::VALID_PRIORITIES.map { |p| [p, p] }, {}, class: "block w-48 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
         </div>
       </div>
+
+      <h3 class="text-base font-semibold mt-6 mb-2 text-gray-800 dark:text-gray-100">Webhook</h3>
+      <p class="text-gray-600 dark:text-gray-400 mb-4 text-sm">
+        The same alerts, POSTed to a URL: as Splat's JSON for anything that takes a webhook, or as a
+        Slack or Discord message. Leave the URL blank to disable.
+      </p>
+
+      <div class="space-y-4">
+        <div>
+          <%= form.label :webhook_url, "URL", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.url_field :webhook_url, placeholder: "https://hooks.slack.com/services/…", class: "block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+        </div>
+
+        <div>
+          <%= form.label :webhook_format, "Format", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.select :webhook_format, [["JSON", "json"], ["Slack", "slack"], ["Discord", "discord"]], {}, class: "block w-48 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+        </div>
+
+        <div>
+          <%= form.label :webhook_secret, "Signing secret (optional, JSON only)", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
+          <%= form.password_field :webhook_secret, value: @setting.webhook_secret, autocomplete: "off", class: "block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" %>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Sent as <code>X-Splat-Signature: sha256=&lt;HMAC-SHA256 of the body&gt;</code>.</p>
+        </div>
+      </div>
     </div>
 
     <div class="flex justify-end">

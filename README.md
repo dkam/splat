@@ -49,7 +49,7 @@ See [Deployment](#deployment) for running it for real, and [Authentication](#aut
 - ✅ **Issue Lifecycle** - Open / resolved / ignored, with resolved issues auto-reopening on new events
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
 - ✅ **Stack Traces & Context** - Full event detail: stack trace, request data, breadcrumbs, user context
-- ✅ **Burst Alerting** - Spike detection with a configurable threshold, plus email and [ntfy.sh](https://ntfy.sh) notifications on new and reopened issues
+- ✅ **Burst Alerting** - Spike detection with a configurable threshold, plus email, [ntfy.sh](https://ntfy.sh) and webhook notifications (JSON, Slack or Discord) on new and reopened issues
 - ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance
 
 **Performance Monitoring**

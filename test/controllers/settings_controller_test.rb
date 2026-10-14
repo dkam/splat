@@ -110,6 +110,22 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 2500, Setting.instance.reload.burst_threshold
   end
 
+  test "update saves the webhook" do
+    put settings_url, params: {setting: {webhook_url: "https://hooks.slack.com/services/T/B/x", webhook_format: "slack", webhook_secret: "s3cret"}}
+
+    assert_redirected_to settings_path
+    setting = Setting.instance.reload
+    assert_equal ["https://hooks.slack.com/services/T/B/x", "slack", "s3cret"], [setting.webhook_url, setting.webhook_format, setting.webhook_secret]
+  end
+
+  test "the settings page has the webhook fields" do
+    get settings_url
+
+    assert_select "input[name='setting[webhook_url]']"
+    assert_select "select[name='setting[webhook_format]'] option", 3
+    assert_select "input[name='setting[webhook_secret]']"
+  end
+
   test "update rejects an invalid ntfy_url" do
     put settings_url, params: {setting: {ntfy_url: "not a url"}}
     assert_redirected_to settings_path

@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **Webhook alerts.** New issues, reopened issues and bursts can be POSTed to
+  a URL set on the Settings page, as Splat's own JSON or as a Slack or
+  Discord message. The JSON is signed when a secret is set:
+  `X-Splat-Signature: sha256=<HMAC-SHA256 of the body>`. Discord messages
+  mention no one, whatever the error says.
+
 ### Fixed
 
 - **A JSON body over 20 MB is refused before Rails reads it.** Puma answers

@@ -61,7 +61,7 @@ class NtfyNotifier
         "Priority" => setting.ntfy_priority.presence || "default",
         "Tags" => meta[:tags].join(",")
       }
-      click = issue_url(issue)
+      click = IssueLink.url(issue)
       headers["Click"] = click if click.present?
       headers["Authorization"] = "Bearer #{setting.ntfy_token}" if setting.ntfy_token.present?
 
@@ -113,20 +113,6 @@ class NtfyNotifier
         "Type: #{issue.exception_type || "n/a"}",
         issue.title.to_s
       ].compact_blank.join("\n")
-    end
-
-    def issue_url(issue)
-      return nil unless issue.persisted? && issue.project&.persisted?
-
-      host = ENV.fetch("SPLAT_HOST", "localhost:3000")
-      scheme = host.include?("localhost") ? "http" : "https"
-      # Routes nest issues under projects with `param: :slug`, and Project doesn't
-      # override to_param — pass the slug explicitly so the URL is routable.
-      Rails.application.routes.url_helpers.project_issue_url(
-        issue.project.slug, issue, host: host, protocol: scheme
-      )
-    rescue
-      nil
     end
   end
 end

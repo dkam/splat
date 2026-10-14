@@ -7,6 +7,27 @@ class SettingTest < ActiveSupport::TestCase
     @setting ||= Setting.instance
   end
 
+  test "a webhook is off without a URL, and on with one" do
+    setting.webhook_url = ""
+    assert setting.valid?
+    refute setting.webhook_configured?
+
+    setting.webhook_url = "https://hooks.example/splat"
+    assert setting.webhook_configured?
+  end
+
+  test "rejects a webhook URL that isn't http(s)" do
+    setting.webhook_url = "ftp://hooks.example/splat"
+    refute setting.valid?
+    assert setting.errors[:webhook_url].present?
+  end
+
+  test "rejects a webhook format it can't send" do
+    setting.webhook_format = "teams"
+    refute setting.valid?
+    assert setting.errors[:webhook_format].present?
+  end
+
   test "valid with a blank ntfy_url (ntfy disabled)" do
     setting.ntfy_url = ""
     assert setting.valid?

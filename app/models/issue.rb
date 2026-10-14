@@ -191,20 +191,23 @@ class Issue < IssuesEventsRecord
     update_columns(last_burst_at: Time.current, last_burst_rate: rate)
     IssueMailer.burst_detected(self, rate).deliver_later if email_notifications_enabled?
     NtfyNotificationJob.perform_later(id, "issue_burst") if setting.ntfy_configured?
+    WebhookNotificationJob.perform_later(id, "issue_burst") if setting.webhook_configured?
   end
 
   def notify_new_issue
     IssueMailer.new_issue(self).deliver_later if email_notifications_enabled?
     NtfyNotificationJob.perform_later(id, "new_issue") if Setting.instance.ntfy_configured?
+    WebhookNotificationJob.perform_later(id, "new_issue") if Setting.instance.webhook_configured?
   end
 
   def notify_issue_reopened
     IssueMailer.issue_reopened(self).deliver_later
     NtfyNotificationJob.perform_later(id, "issue_reopened") if Setting.instance.ntfy_configured?
+    WebhookNotificationJob.perform_later(id, "issue_reopened") if Setting.instance.webhook_configured?
   end
 
   def should_notify_new_issue?
-    email_notifications_enabled? || Setting.instance.ntfy_configured?
+    email_notifications_enabled? || Setting.instance.ntfy_configured? || Setting.instance.webhook_configured?
   end
 
   def email_notifications_enabled?

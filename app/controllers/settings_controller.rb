@@ -99,7 +99,10 @@ class SettingsController < ApplicationController
       :mcp_token_ttl_days,
       :ntfy_url,
       :ntfy_token,
-      :ntfy_priority
+      :ntfy_priority,
+      :webhook_url,
+      :webhook_format,
+      :webhook_secret
     )
   end
 end
