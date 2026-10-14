@@ -207,7 +207,7 @@
   <% if shown_frames.present? %>
     <div class="mt-6">
       <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Stack Trace</h2>
-      <%= render "events/stack_trace", frames: shown_frames %>
+      <%= render "events/stack_trace", frames: shown_frames, project: @project, release: @event.release %>
     </div>
   <% end %>
 
@@ -229,7 +229,7 @@
       <% if frames.present? && frames == shown_frames %>
         <p class="text-sm text-gray-600 dark:text-gray-400">Same stack trace as above.</p>
       <% elsif frames.present? %>
-        <%= render "events/stack_trace", frames: frames %>
+        <%= render "events/stack_trace", frames: frames, project: @project, release: @event.release %>
         <% shown_frames = frames %>
       <% end %>
     </div>

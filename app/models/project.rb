@@ -12,6 +12,9 @@ class Project < ApplicationRecord
   validates :slug, presence: true, uniqueness: true
   validates :public_key, presence: true, uniqueness: true
   validate :forward_dsns_parseable
+  validates :source_url_template,
+    format: {with: %r{\Ahttps?://\S*\{path\}\S*\z}, message: "must be an http(s) URL with {path} in it"},
+    allow_nil: true
 
   scope :by_slug, ->(slug) { where(slug: slug) }
   scope :by_public_key, ->(key) { where(public_key: key) }
@@ -43,6 +46,30 @@ class Project < ApplicationRecord
 
   def forward_dsns_text=(value)
     self.forward_dsns = value.to_s.split("\n").map(&:strip).reject(&:blank?).uniq
+  end
+
+  def source_url_template=(value)
+    super(value.to_s.strip.presence)
+  end
+
+  # Where an in-app frame's line lives in the project's repository, from
+  # source_url_template — "https://github.com/org/app/blob/{sha}/{path}#L{line}",
+  # or Gitea's ".../src/commit/{sha}/...". nil for a library frame, whose path
+  # isn't in this repository, and when the template wants a commit the release
+  # doesn't name.
+  def source_url(frame, release:)
+    return if source_url_template.nil? || !frame["in_app"]
+
+    path = frame["filename"].to_s
+    return if path.blank? || frame["lineno"].blank? || path.start_with?("/") || path.include?("://")
+
+    sha = Release.commit_sha(release)
+    return if sha.nil? && source_url_template.include?("{sha}")
+
+    source_url_template.gsub(/\{(?:sha|path|line)\}/,
+      "{sha}" => sha.to_s,
+      "{path}" => path.split("/").map { |segment| ERB::Util.url_encode(segment) }.join("/"),
+      "{line}" => frame["lineno"].to_s)
   end
 
   def broadcast_issues_refresh

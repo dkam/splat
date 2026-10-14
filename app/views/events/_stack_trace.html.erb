@@ -6,7 +6,12 @@
         <span class="text-gray-500 min-w-[2rem] text-right"><%= index + 1 %></span>
         <div class="flex-1">
           <div>
-            <span class="text-blue-300"><%= SentryProtocol::Payload.frame_file(frame) || "unknown" %></span>
+            <% file = SentryProtocol::Payload.frame_file(frame) || "unknown" %>
+            <% if (source_url = project.source_url(frame, release: release)) %>
+              <%= link_to file, source_url, class: "text-blue-300 underline decoration-dotted hover:decoration-solid", target: "_blank", rel: "noopener" %>
+            <% else %>
+              <span class="text-blue-300"><%= file %></span>
+            <% end %>
             <% if frame["lineno"] %>
               <span class="text-gray-500">:<%= frame["lineno"] %></span>
               <% if frame["colno"] %>

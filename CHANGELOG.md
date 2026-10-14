@@ -13,6 +13,17 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **Stack frames link to their line in your repository.** Give a project a
+  source link template on its edit page, such as
+  `https://github.com/org/app/blob/{sha}/{path}#L{line}`, and each of the
+  app's own frames links to its line at the commit the event's release names.
+  The release has to carry the full SHA, alone or as build metadata
+  (`1.4.0+<sha>`); a release without one gets no links, unless the template
+  names a branch instead of `{sha}`. Library frames stay unlinked, since
+  their paths aren't in your repository.
+
 ## 1.22.0 — 2026-10-14
 
 MCP queries are stopped after 15 seconds, so one wide search can no longer

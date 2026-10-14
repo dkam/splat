@@ -230,6 +230,6 @@ class ProjectsController < ApplicationController
   end
 
   def project_params
-    params.require(:project).permit(:name, :forward_dsns_text)
+    params.require(:project).permit(:name, :forward_dsns_text, :source_url_template)
   end
 end

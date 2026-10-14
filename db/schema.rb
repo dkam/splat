@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_11_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_000001) do
   create_table "cron_monitors", force: :cascade do |t|
     t.integer "checkin_margin"
     t.json "config"
@@ -81,6 +81,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_11_000001) do
     t.integer "position", default: 0, null: false
     t.string "public_key", null: false
     t.string "slug", null: false
+    t.string "source_url_template"
     t.datetime "updated_at", null: false
     t.index ["public_key"], name: "index_projects_on_public_key", unique: true
     t.index ["slug"], name: "index_projects_on_slug", unique: true

@@ -197,4 +197,19 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "div", text: "new (24h)"
     assert_match "req", response.body
   end
+
+  test "update saves the source link template" do
+    template = "https://git.example/booko/booko/src/commit/{sha}/{path}#L{line}"
+
+    patch project_url(@project.slug), params: {project: {source_url_template: template}}
+
+    assert_redirected_to project_path(@project.slug)
+    assert_equal template, @project.reload.source_url_template
+  end
+
+  test "edit offers the source link template" do
+    get edit_project_url(@project.slug)
+
+    assert_select "input[name=?]", "project[source_url_template]"
+  end
 end

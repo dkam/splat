@@ -40,4 +40,12 @@ class Release < ApplicationRecord
   rescue ActiveRecord::RecordNotUnique
     retry
   end
+
+  # The commit a release version names, when it carries a full 40-character
+  # SHA: whole, or as build metadata ("19.11.0+e59f668…"), which is what
+  # sentry-ruby sends from a REVISION file or `git rev-parse HEAD`. Short SHAs
+  # aren't taken: "1.0.0+20261014" would read as one.
+  def self.commit_sha(version)
+    version.to_s[/(?<!\h)\h{40}(?!\h)/]
+  end
 end

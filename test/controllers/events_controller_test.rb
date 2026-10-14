@@ -161,4 +161,20 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     assert_select "h1", text: "boom"
     assert_select "#event-message-detail", count: 0
   end
+
+  test "show links in-app frames to their line in the repository at the release's commit" do
+    sha = "e59f6680a82f15d8f82131f9c4c417223f31a153"
+    @project.update!(source_url_template: "https://git.example/booko/booko/src/commit/{sha}/{path}#L{line}")
+    event = Event.create_from_sentry_payload!(
+      "evt-source-links",
+      CHAINED.merge("release" => "19.11.0+#{sha}"),
+      @project
+    )
+
+    get project_event_url(@project.slug, event)
+    assert_response :success
+    assert_select "a[href=?]", "https://git.example/booko/booko/src/commit/#{sha}/app/models/payment.rb#L42"
+    # net/protocol.rb is Ruby's, not the project's.
+    assert_select "a[href^='https://git.example/']", count: 1
+  end
 end
