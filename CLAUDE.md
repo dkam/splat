@@ -1066,6 +1066,12 @@ Notes:
 - Result validation is on outside production, so structured payloads that drift
   from their schema fail in CI. It's off in production because that failure is
   raised, not returned, and would cost the caller the markdown answer too.
+- **Every tool call runs under a statement timeout** (`SplatMcpServer.dispatch`,
+  `SqliteStatementTimeout`; 15s, `SPLAT_MCP_STATEMENT_TIMEOUT`). A query past it
+  comes back as an `isError` telling the model to narrow the window. It's per
+  statement, set on each database's connection and cleared afterwards. Needs
+  sqlite3 ≥ 2.10; on 2.9.6 and earlier `statement_timeout` is broken and a boot
+  probe leaves the cap off — see `docs/learnings/sqlite.md`.
 
 ## Future Enhancements (Maybe)
 

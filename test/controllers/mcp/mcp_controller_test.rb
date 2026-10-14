@@ -19,7 +19,11 @@ module Mcp
       assert_response :success
       instructions = JSON.parse(response.body).dig("result", "instructions").to_s
       assert_match(/SERIALLY/, instructions)
-      assert_match(/no server-side statement timeout/i, instructions)
+      if SqliteStatementTimeout.supported?
+        assert_match(/stopped after 15 seconds/, instructions)
+      else
+        assert_match(/no server-side statement timeout/i, instructions)
+      end
     end
 
     test "initialize negotiates the client's protocol version" do

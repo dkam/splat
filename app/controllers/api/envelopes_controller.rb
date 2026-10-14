@@ -16,19 +16,19 @@ class Api::EnvelopesController < ApplicationController
     limits = rate_limits(project)
     response.headers["X-Sentry-Rate-Limits"] = limits if limits
 
-    raw_body = Ingest::Decompression.decompress(
+    raw_body = envelope(Ingest::Decompression.decompress(
       Ingest::Decompression.read(request.body), request.headers["Content-Encoding"]
-    )
+    ))
 
     processor = SentryProtocol::EnvelopeProcessor.new(raw_body, project)
     processor.process
     # The envelope is lost, and a forward would go through the same tuber.
     return head :service_unavailable if processor.tuber_unreachable?
 
-    EnvelopeForwarder.forward(raw_body, project: project, content_type: request.content_type || "application/x-sentry-envelope")
+    EnvelopeForwarder.forward(raw_body, project: project, content_type: envelope_content_type)
 
     # 200 for an envelope that couldn't be read too: sent again, it still couldn't.
-    head :ok
+    accepted
   rescue DsnAuthenticationService::AuthenticationError => e
     Rails.logger.warn "DSN authentication failed: #{e.message}"
     head :unauthorized
@@ -36,11 +36,18 @@ class Api::EnvelopesController < ApplicationController
     Rails.logger.warn "[Envelope] refused for project #{project.slug}: #{e.message}"
     head :content_too_large
   rescue Ingest::Decompression::Unreadable => e
-    Rails.logger.error "[Envelope] couldn't decompress for project #{project.slug}: #{e.message}"
+    Rails.logger.error "[Envelope] couldn't read the body for project #{project.slug}: #{e.message}"
     head :ok
   end
 
   private
+
+  # The request body, decompressed, as an envelope. /store/ makes one of an event.
+  def envelope(body) = body
+
+  def envelope_content_type = request.content_type || "application/x-sentry-envelope"
+
+  def accepted = head(:ok)
 
   # The streams switched off in Settings, as a Sentry rate limit, so SDKs stop
   # sending what Splat would throw away. They honour it on any response and
@@ -54,7 +61,9 @@ class Api::EnvelopesController < ApplicationController
     "60:#{off.join(";")}:organization:disabled" if off.any?
   end
 
+  # From the path, not params, which would parse a JSON-typed body as form
+  # parameters first, and fail on one that's compressed.
   def authenticate_project!
-    DsnAuthenticationService.authenticate(request, params[:project_id])
+    DsnAuthenticationService.authenticate(request, request.path_parameters[:project_id])
   end
 end

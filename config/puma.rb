@@ -31,6 +31,20 @@ threads threads_count, threads_count
 # Specifies the `port` that Puma will listen on to receive requests; default is 3000.
 port ENV.fetch("PORT", 3000)
 
+# With WEB_CONCURRENCY above 1, Puma preloads the app and forks a worker per
+# process. That's how Splat keeps the UI and ingest answering while a long
+# query holds one process: the sqlite3 gem keeps the GVL for a whole statement,
+# so more threads in one process wouldn't help. Connections must not cross the
+# fork — the same reasons as Ingest::Supervisor#disconnect_all. Only declared
+# with workers: in single mode Puma warns at boot about a hook it won't run.
+web_concurrency = ENV.fetch("WEB_CONCURRENCY", "0")
+if web_concurrency == "auto" || web_concurrency.to_i > 0
+  before_fork do
+    ActiveRecord::Base.connection_handler.clear_all_connections!(:all)
+    Ingest::Tuber.reset_producer!
+  end
+end
+
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart
 

@@ -224,6 +224,9 @@ services:
       OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME}
       OIDC_REQUIRE_PKCE: ${OIDC_REQUIRE_PKCE}
       SPLAT_ALLOWED_USERS: ${SPLAT_ALLOWED_USERS}
+      # Two Puma processes, so one long query can't stop the UI and ingest
+      # answering — see "A long query holds its whole process" below.
+      WEB_CONCURRENCY: 2
     volumes:
       - /storage/splat/storage:/rails/storage
       - /storage/splat/logs/web:/rails/log
@@ -394,10 +397,13 @@ For scale, a quiet instance — a few apps, ~16,000 transactions a day — runs 
 
 Both are down from 1.19.4, which booted Rails four times — web, ingest, maintenance and a scheduler. Tuber 0.16 now fires the recurring jobs, and ingest and maintenance share one `worker` container that boots once and forks (see [Workers](#workers)). Counting resident and swapped-out together, the busy instance went from ~1.4 GB to ~1 GB, and the quiet one from ~680 MiB to ~440 MiB.
 
+The web figures are for one Puma process. They were measured before `WEB_CONCURRENCY: 2` went into the compose example, and a second worker adds to them — less than a second boot would, since Puma forks it from the booted app.
+
 ### SQLite Performance
 
 - **One writer per database is enough.** The ingest worker runs one consumer per data tube, and each tube writes to its own database file, so events, transactions and logs never queue behind each other's write lock.
 - **Ingestion keeps up at 160 GB.** The transactions database is that size and the queue still sits empty.
+- **A long query holds its whole process.** The sqlite3 gem keeps Ruby's global lock for the whole of a statement, so while one thread scans, every other thread in that process waits — more threads don't help. Hence `WEB_CONCURRENCY: 2` on the web service: one process can be stuck on a wide search while the other answers the UI and ingest. MCP tool queries are also stopped after 15 seconds (`SPLAT_MCP_STATEMENT_TIMEOUT`), with an error telling the model to narrow its window or add filters. That cap relies on sqlite3 2.10's `statement_timeout`; earlier versions stop every query at once ([sqlite3-ruby#737](https://github.com/sparklemotion/sqlite3-ruby/pull/737)).
 - **Lock contention happens, and is expected.** The hourly rollup and retention's vacuum write to the same files ingest does. Both treat `database is locked` as transient: they stop, log it, and pick up the remainder on their next scheduled run.
 
 WAL mode (see `config/database.yml`) is what lets the UI read while ingest writes.
@@ -887,11 +893,13 @@ Once configured, you can ask Claude:
   SPLAT_DOMAIN: https://splat.example.com # Change this to your domain
   FROM_EMAIL: splat@splat.example.com # Change this to your email
   TUBER_URL: tuber:11300 # host:port of the Tuber work queue
+  WEB_CONCURRENCY: 2 # Puma processes for the web service; 2 keeps one free while the other runs a long query
 ```
 
 ### MCP (Model Context Protocol)
 ```
 MCP_AUTH_TOKEN: Generate with `openssl rand -hex 32`
+SPLAT_MCP_STATEMENT_TIMEOUT: Seconds before an MCP tool's query is stopped (default 15; 0 turns it off).
 ```
 
 ### Data Retention

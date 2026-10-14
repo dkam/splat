@@ -8,6 +8,8 @@ Rails.application.routes.draw do
   # Sentry ingestion endpoint
   namespace :api, defaults: {format: :json} do
     post ":project_id/envelope", to: "envelopes#create"
+    # Before envelopes: one event a request, from raven-era and third-party clients.
+    post ":project_id/store", to: "store#create"
   end
 
   # OTLP/HTTP logs ingestion (OpenTelemetry, JSON encoding). Project is

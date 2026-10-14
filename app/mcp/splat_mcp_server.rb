@@ -95,13 +95,13 @@ class SplatMcpServer
   end
 
   # Parallelising independent reads is normally the right instinct, and here
-  # it is actively dangerous: Splat is one Puma process with a small thread
-  # pool, and SQLite offers no statement timeout — busy_timeout only bounds
-  # lock waits, not a scan already underway. A client-side timeout doesn't
-  # cancel the query either, so abandoning a slow call leaves it holding a
-  # thread. Enough concurrent wide scans and the instance stops serving,
-  # including the UI. Stated here because it's a property of the backend that
-  # no individual tool schema can express.
+  # it is actively dangerous: the sqlite3 gem holds Ruby's global lock for the
+  # whole of a statement, so one wide scan freezes every thread in its Puma
+  # process, and a client-side timeout doesn't cancel it. Each statement is
+  # capped (see dispatch and SqliteStatementTimeout) — but only on a sqlite3
+  # gem whose statement_timeout works, so the note says which applies. Stated
+  # here because it's a property of the backend that no individual tool
+  # schema can express.
   #
   # Note this reaches the client only from protocol version 2025-03-26 on —
   # `instructions` didn't exist before that, and the gem drops it when a client
@@ -110,13 +110,38 @@ class SplatMcpServer
   # hadn't defined.
   def self.concurrency_note
     threads = ENV.fetch("RAILS_MAX_THREADS", "5")
-    "Issue calls to this server SERIALLY, not in parallel. It runs a single " \
-    "Puma process with #{threads} threads against SQLite, and a wide scan " \
-    "(search_slow_transactions with tags, search_logs over a long window) can " \
-    "hold its thread for minutes. There is no server-side statement timeout, " \
-    "and giving up client-side does not cancel the query — so parallel calls " \
-    "can take the whole instance down, UI included, and keep it down after " \
-    "you stop. Narrow the window or add filters instead of fanning out."
+    processes = Integer(ENV.fetch("WEB_CONCURRENCY", "1"), exception: false)
+    shape = if processes.nil? then "several Puma processes"
+    elsif processes <= 1 then "a single Puma process"
+    else "#{processes} Puma processes"
+    end
+
+    cap = if SqliteStatementTimeout.supported? && statement_timeout_ms.positive?
+      "Each query is stopped after #{statement_timeout_seconds} seconds, and the " \
+      "call returns an error saying so — narrow the window or add filters " \
+      "rather than retrying the same call."
+    else
+      "There is no server-side statement timeout, and giving up client-side " \
+      "does not cancel the query — so parallel calls can take the whole " \
+      "instance down, UI included, and keep it down after you stop. Narrow " \
+      "the window or add filters instead of fanning out."
+    end
+
+    "Issue calls to this server SERIALLY, not in parallel. It runs #{shape} " \
+    "with #{threads} threads each against SQLite, and a wide scan " \
+    "(search_slow_transactions with tags, search_logs over a long window) " \
+    "holds its whole process while it runs. #{cap}"
+  end
+
+  # Per statement, not per call. SPLAT_MCP_STATEMENT_TIMEOUT is in seconds;
+  # 0 turns the cap off.
+  def self.statement_timeout_ms
+    (Float(ENV.fetch("SPLAT_MCP_STATEMENT_TIMEOUT", "15")) * 1000).to_i
+  end
+
+  def self.statement_timeout_seconds
+    seconds = statement_timeout_ms / 1000.0
+    (seconds % 1).zero? ? seconds.to_i : seconds
   end
 
   def self.build
@@ -175,8 +200,21 @@ class SplatMcpServer
   # message buried under "Internal error calling tool X", which is both the wrong
   # code and the wrong audience. These are arguments the model can fix, so they
   # come back as tool errors carrying the original, actionable text.
+  #
+  # A query stopped by the statement timeout comes back the same way: the
+  # model chose the window and the filters, so it's the one that can narrow
+  # them.
   def self.dispatch(tools, name, args)
-    tools.public_send(name, args.deep_stringify_keys)
+    SqliteStatementTimeout.with(statement_timeout_ms) do
+      tools.public_send(name, args.deep_stringify_keys)
+    end
+  rescue ActiveRecord::StatementInvalid => e
+    raise unless SqliteStatementTimeout.interrupted?(e)
+
+    tools.render_error("Stopped after #{statement_timeout_seconds} seconds: this query is too broad. " \
+      "Narrow the time window or add filters (project, level, a search term), then try again. " \
+      "Splat stops each MCP query at #{statement_timeout_seconds} seconds so that one wide scan " \
+      "can't stall the server for everyone else.")
   rescue SplatMcpTools::ProjectResolutionError, SplatMcpTools::WindowError => e
     tools.render_error(e.message)
   rescue ActiveRecord::RecordNotFound => e

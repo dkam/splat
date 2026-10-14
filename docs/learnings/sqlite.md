@@ -289,3 +289,24 @@ planner works with no statistics at all. Two consequences:
   unaffected, but this is worth revisiting for the app's real query paths.
 
 **Check:** `SELECT COUNT(*) FROM sqlite_master WHERE name = 'sqlite_stat1'`.
+
+## A running statement freezes its whole Ruby process, and only SQLite can stop it
+
+The sqlite3 gem holds Ruby's global lock for the whole of `sqlite3_step` — it
+never releases it — so while one thread scans, no other thread in the process
+runs. More Puma threads don't help; more processes do. It also means no
+watchdog thread can call `Database#interrupt`, because it can't get scheduled.
+The only way to stop a statement in-process is SQLite's progress handler, which
+the gem exposes as `Database#statement_timeout=`.
+
+Through sqlite3 2.9.6 that method is broken: it sets the deadline to *now* on
+the first progress callback instead of now plus the timeout, so any statement
+past ~2000 VM steps is interrupted at once, whatever the timeout
+(sparklemotion/sqlite3-ruby#737). Measured 2026-10-14: under a 10s timeout, a
+recursive CTE counting to 1,000 raises `SQLite3::InterruptException` in 0.0s.
+Fixed in 2.10.0 (2026-10-13), which the Gemfile now requires.
+`SqliteStatementTimeout.supported?` still probes for it rather than trusting
+the version.
+
+**Check:** `db.statement_timeout = 10_000`, then a query that takes ~10ms
+uncapped. A working gem returns it; a broken one raises.

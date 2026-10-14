@@ -178,6 +178,18 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Rails would parse a body typed as JSON into params, and fail on gzip.
+  test "reads a compressed envelope sent as Content-Type: application/json" do
+    queued = capture_tuber_puts do
+      post "/api/#{@project.slug}/envelope?sentry_key=#{@project.public_key}",
+        headers: {"Content-Type" => "application/json", "Content-Encoding" => "gzip"},
+        params: compress("gzip", @valid_envelope)
+    end
+
+    assert_response :success
+    assert_equal [Ingest::Tuber::EVENTS_TUBE], queued.map(&:first)
+  end
+
   test "answers 413 to a body over 20 MB as sent" do
     queued = capture_tuber_puts { post_envelope(@valid_envelope + "\n" + (" " * 20.megabytes)) }
 

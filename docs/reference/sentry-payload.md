@@ -33,6 +33,14 @@ and length. Note the `event_id` appears in **both** the envelope header and the
 event payload — Splat prefers the payload's and falls back to the envelope's
 (`EnvelopeProcessor#process_item`), following GlitchTip.
 
+**Before envelopes**, clients posted a single event to `/api/:project_id/store/`,
+and the raven-era ones (raven-ruby, raven-python) as base64 of zlib-compressed
+JSON. `Api::StoreController` reads it as Relay does — JSON as sent, else base64,
+then JSON or zlib — and makes it a one-item envelope, `event` or, for an event
+whose `type` is `transaction`, `transaction`, with a generated `event_id` if it
+has none. From there it is an envelope: queued, forwarded, and answered alike,
+except that success is `{"id": "<event_id>"}`.
+
 ## 2. What Splat does with each item
 
 Five item types reach `process_item`. Three are stored, two are deliberately

@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **The `/api/:project_id/store/` endpoint**, where Sentry's clients posted
+  one event at a time before envelopes: the raven-era SDKs and third-party
+  clients that never moved on. Those got a `404`. The body is read as Sentry
+  reads it (JSON, or base64 of JSON or of zlib-compressed JSON) and goes on
+  as an envelope, so the size limits, the `503`, the rate limits and
+  forwarding apply to it unchanged.
+
 ### Changed
 
 - **SDKs stop sending what Splat would throw away.** With a stream switched
@@ -40,6 +49,9 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ### Fixed
 
+- **A compressed envelope sent as `Content-Type: application/json` is read.**
+  Rails parsed the body as JSON form parameters on the way to the project id,
+  and a gzip body failed that before Splat saw it.
 - **Envelopes compressed with Zstandard are read.** The controller required
   a file the zstd gem doesn't have, so every one was dropped with "Zstd gem
   not available".
