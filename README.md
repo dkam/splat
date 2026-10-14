@@ -666,7 +666,21 @@ Configure Uptime Kuma to send alerts via:
 
 Splat splits its data across **six separate SQLite database files**, and backup tools operate per-file — backing up `production.sqlite3` alone captures only projects and settings, not your errors, transactions, or logs. Every database you care about needs its own backup configuration.
 
-Two recommended backup strategies:
+**Built in — two rake tasks**, for a copy on demand or from cron:
+
+```bash
+# A compacted copy of each database, via VACUUM INTO. Never overwrites one already there.
+docker compose exec web bin/rails splat:backup:snapshot                  # storage/backups/<UTC time>/
+docker compose exec web bin/rails "splat:backup:snapshot[/backups/splat]"
+
+# Keep one copy of each database current. Where a copy exists and sqlite3_rsync
+# is installed, only the changed pages are written; otherwise it's a fresh VACUUM INTO.
+docker compose exec web bin/rails splat:backup:sync                      # storage/backups/current/
+```
+
+Both copy the four databases that hold data (not the cache or cable) while Splat runs, and need as much free space as the databases take. The image's SQLite (Debian's 3.46) has no `sqlite3_rsync`, which arrived in 3.47, so in the container `sync` makes each copy afresh. The default directories are on the storage volume, the same disk as the databases; mount somewhere else and pass it if the copy should survive that disk.
+
+Or one of these, run outside Splat:
 
 **[Litestream](https://litestream.io/)** - Continuous replication to S3-compatible storage
 - Real-time backup with ~10-30 second lag

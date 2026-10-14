@@ -20,6 +20,10 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   Discord message. The JSON is signed when a secret is set:
   `X-Splat-Signature: sha256=<HMAC-SHA256 of the body>`. Discord messages
   mention no one, whatever the error says.
+- **Backup tasks.** `bin/rails splat:backup:snapshot` copies the four
+  databases that hold data with `VACUUM INTO`; `bin/rails splat:backup:sync`
+  keeps one copy of each current, writing only the changed pages with
+  `sqlite3_rsync` where it's installed. Both run while Splat does.
 
 ### Fixed
 
