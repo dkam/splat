@@ -358,7 +358,9 @@ end
 ```
 
 **Status behavior on new events** (matches GlitchTip):
-- `resolved` → automatically changed to `unresolved`
+- `resolved` → automatically changed to `unresolved` — unless it was resolved
+  in the next release (`resolved_in_release`) and the event is from that
+  release or an older one (`Issue#regressed_by?`, in `Event.create_from_sentry_payload!`)
 - `ignored` → stays `ignored` (explicit "don't care" decision)
 - `unresolved` → stays `unresolved`
 

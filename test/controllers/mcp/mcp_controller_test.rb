@@ -439,6 +439,19 @@ module Mcp
       assert_match(/\| web01 \(Project One\) \| web01 \(Project Two\) \|/, tool_text)
     end
 
+    test "resolve_issue can resolve in the next release" do
+      project = projects(:one)
+      Release.record_sighting!(project: project, version: "19.11.0", timestamp: 1.day.ago)
+      issue = Issue.create!(project: project, fingerprint: "mcp::next-release", title: "Boom",
+        first_seen: Time.current, last_seen: Time.current)
+
+      call_tool("resolve_issue", {issue_id: issue.id, in_next_release: true})
+
+      assert_response :success
+      assert_match(/in the release after 19\.11\.0/, tool_text)
+      assert_equal "19.11.0", issue.reload.resolved_in_release
+    end
+
     test "get_status reports version, storage, and compression from the snapshot" do
       fake = {
         total: 700_000_000,

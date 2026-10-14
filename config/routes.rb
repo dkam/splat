@@ -45,6 +45,7 @@ Rails.application.routes.draw do
     resources :issues, only: [:index, :show] do
       member do
         patch :resolve
+        patch :resolve_in_next_release
         patch :ignore
         patch :reopen
       end

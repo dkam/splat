@@ -4,7 +4,7 @@ class IssuesController < ApplicationController
   include Pagy::Method
 
   before_action :set_project
-  before_action :set_issue, only: [:show, :resolve, :ignore, :reopen]
+  before_action :set_issue, only: [:show, :resolve, :resolve_in_next_release, :ignore, :reopen]
 
   def index
     @status = params[:status] || "open"
@@ -85,6 +85,15 @@ class IssuesController < ApplicationController
     @issue.resolved!
     redirect_back_or_to project_issue_path(@project.slug, @issue),
       allow_other_host: false, notice: "Issue marked as resolved"
+  end
+
+  def resolve_in_next_release
+    @issue.resolve_in_next_release!
+    redirect_back_or_to project_issue_path(@project.slug, @issue),
+      allow_other_host: false, notice: "Resolved in the release after #{@issue.resolved_in_release}"
+  rescue Issue::NoRelease
+    redirect_back_or_to project_issue_path(@project.slug, @issue),
+      allow_other_host: false, alert: "No release seen for #{@project.name} yet, so there's no next one to resolve in"
   end
 
   def ignore

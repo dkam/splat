@@ -9,6 +9,9 @@ class Issue < IssuesEventsRecord
 
   enum :status, {open: 0, resolved: 1, ignored: 2}
 
+  # Resolving in the next release needs a release to come after.
+  class NoRelease < StandardError; end
+
   validates :fingerprint, presence: true, uniqueness: {scope: :project_id}
   validates :title, presence: true
 
@@ -38,6 +41,10 @@ class Issue < IssuesEventsRecord
   # alert suppresses follow-ups for the same issue (one alert per hour).
   BURST_CHECK_INTERVAL = 30.seconds
   BURST_ALERT_DEDUP_WINDOW = 1.hour
+
+  # Any other change of status — resolved or reopened by hand, ignored, or
+  # reopened by a newer release — ends a resolve in next release.
+  before_update -> { self.resolved_in_release = nil }, if: -> { status_changed? && !resolved_in_release_changed? }
 
   # Callbacks for email + ntfy notifications
   after_create :notify_new_issue, if: :should_notify_new_issue?
@@ -133,6 +140,41 @@ class Issue < IssuesEventsRecord
       count: count + 1,
       last_seen: timestamp
     )
+  end
+
+  # The project's newest release: the one Splat first saw most recently. Not
+  # by version number, which needn't sort ("19.11.0+e59f668…", a date, a SHA).
+  def latest_release
+    Release.where(project_id: project_id).order(first_seen_at: :desc).pick(:version)
+  end
+
+  def next_release_resolvable? = latest_release.present?
+
+  # A plain resolve, of an issue resolved in the next release too: its status
+  # doesn't change, so the callback above wouldn't forget the release.
+  def resolved!
+    update!(status: :resolved, resolved_in_release: nil)
+  end
+
+  # Resolved, but fixed in the deploy to come: events from the release running
+  # now, or an older one, don't reopen it.
+  def resolve_in_next_release!
+    release = latest_release or raise NoRelease, "no release seen for this project yet"
+    update!(status: :resolved, resolved_in_release: release)
+  end
+
+  # Whether an event from +release+ brings this resolved issue back: always,
+  # unless it was resolved in the next release and the event is from that
+  # release or one Splat saw before it. An event with no release, or a release
+  # Splat has no record of, can't be placed, so it counts as a regression.
+  def regressed_by?(release)
+    return true if resolved_in_release.blank? || release.blank?
+    return false if release == resolved_in_release
+
+    seen = Release.where(project_id: project_id, version: [release, resolved_in_release]).pluck(:version, :first_seen_at).to_h
+    return true unless seen[release] && seen[resolved_in_release]
+
+    seen[release] > seen[resolved_in_release]
   end
 
   # The first release this issue was seen in, and the latest. Out of order,

@@ -46,7 +46,7 @@ See [Deployment](#deployment) for running it for real, and [Authentication](#aut
 
 **Error Tracking**
 - ✅ **Fingerprint Grouping** - Groups events into issues by Sentry fingerprint, or derives one from exception type + location
-- ✅ **Issue Lifecycle** - Open / resolved / ignored, with resolved issues auto-reopening on new events
+- ✅ **Issue Lifecycle** - Open / resolved / ignored, with resolved issues auto-reopening on new events, or resolved in the next release so only a newer release reopens them
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
 - ✅ **Stack Traces & Context** - Full event detail: stack trace, request data, breadcrumbs, user context
 - ✅ **Burst Alerting** - Spike detection with a configurable threshold, plus email, [ntfy.sh](https://ntfy.sh) and webhook notifications (JSON, Slack or Discord) on new and reopened issues
@@ -857,7 +857,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 - `get_issue` - Get detailed issue with stack trace
 - `get_issue_events` - List event occurrences for an issue
 - `get_event` - Get full event details (request ID, breadcrumbs, context)
-- `resolve_issue` / `ignore_issue` / `reopen_issue` - Lifecycle transitions
+- `resolve_issue` / `ignore_issue` / `reopen_issue` - Lifecycle transitions (`resolve_issue` takes `in_next_release`)
 
 **Performance Monitoring:**
 - `get_transaction_stats` - Overall percentiles plus top endpoints ranked by total time spent (avg × count)

@@ -1150,8 +1150,16 @@ class SplatMcpTools
 
   def resolve_issue(args)
     issue = Issue.find(args["issue_id"])
-    issue.resolved!
-    render_text("✅ Issue ##{issue.id} marked as resolved")
+    if ActiveModel::Type::Boolean.new.cast(args["in_next_release"])
+      issue.resolve_in_next_release!
+      render_text("✅ Issue ##{issue.id} resolved in the release after #{issue.resolved_in_release}: " \
+        "events from #{issue.resolved_in_release} or an older release won't reopen it")
+    else
+      issue.resolved!
+      render_text("✅ Issue ##{issue.id} marked as resolved")
+    end
+  rescue Issue::NoRelease
+    render_error("Issue ##{issue.id}'s project has no release seen yet, so there's no next release to resolve in. Resolve it without in_next_release.")
   end
 
   def ignore_issue(args)

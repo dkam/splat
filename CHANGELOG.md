@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **Resolve in next release.** For a fix that ships in the deploy to come:
+  events from the project's current release, or an older one, are counted
+  but don't reopen the issue; one from a newer release does, with the usual
+  alert. "Newer" is the order Splat first saw the releases in, so any
+  version format works. On the issue page once a release has been seen, and
+  as `in_next_release` on the MCP `resolve_issue` tool.
+
 ### Fixed
 
 - **A resolved issue reopens when it happens again**, and alerts as

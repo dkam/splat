@@ -5,6 +5,28 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     @project = projects(:one)
   end
 
+  test "resolve in next release, from the issue page" do
+    Release.record_sighting!(project: @project, version: "19.11.0", timestamp: 1.day.ago)
+    issue = create_issue("next-release", "NextRelease")
+
+    get project_issue_url(@project.slug, issue)
+    assert_select "form[action='#{resolve_in_next_release_project_issue_path(@project.slug, issue)}']"
+
+    patch resolve_in_next_release_project_issue_url(@project.slug, issue)
+    assert_redirected_to project_issue_path(@project.slug, issue)
+    assert_equal "Resolved in the release after 19.11.0", flash[:notice]
+
+    get project_issue_url(@project.slug, issue)
+    assert_select "*", text: /in the release after 19\.11\.0/
+  end
+
+  test "no resolve in next release before any release is seen" do
+    issue = create_issue("no-release", "NoRelease")
+
+    get project_issue_url(@project.slug, issue)
+    assert_select "form[action='#{resolve_in_next_release_project_issue_path(@project.slug, issue)}']", 0
+  end
+
   test "index renders and paginates with numbered series nav" do
     # limit is 25 per page; create enough open issues to force a second page.
     30.times do |i|

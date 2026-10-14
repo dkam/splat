@@ -68,8 +68,9 @@ class Event < IssuesEventsRecord
     issue.record_release!(event.release, at: event.timestamp)
     Release.record_sighting!(project: project, version: event.release, timestamp: event.timestamp, kind: :event)
 
-    # A resolved issue that happens again is open again, and alerts as such.
-    issue.open! if issue.resolved?
+    # A resolved issue that happens again is open again, and alerts as such —
+    # unless it was resolved in the next release and this is the old one.
+    issue.open! if issue.resolved? && issue.regressed_by?(event.release)
 
     # Best-effort side effects; both throttled, and neither raises into ingest.
     issue.harvest_facets!(environment: event.environment, release: event.release, seen_at: event.timestamp)

@@ -816,11 +816,17 @@ class SplatMcpServer
       },
       {
         name: "resolve_issue",
-        description: "Mark an issue as resolved",
+        description: "Mark an issue as resolved. A new event reopens it — or, with in_next_release, only an event from a release newer than the project's current one.",
         inputSchema: {
           type: "object",
           properties: {
-            issue_id: integer_arg("The ID of the issue to resolve")
+            issue_id: integer_arg("The ID of the issue to resolve"),
+            # A string too: the reader casts "true", and clients send it.
+            in_next_release: {
+              type: ["boolean", "string"],
+              description: "Resolve in the next release: the fix ships in the deploy to come, so events from the project's " \
+                "current release, or an older one, don't reopen the issue. Needs a release seen for the project."
+            }
           },
           required: ["issue_id"]
         }
