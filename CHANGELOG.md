@@ -13,6 +13,12 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.24.0 — 2026-10-14
+
+Alerts can go to a webhook, as Splat's JSON or as a Slack or Discord
+message, and two rake tasks back up the databases. Puma refuses a body over
+20 MB before Rails reads it.
+
 ### Added
 
 - **Webhook alerts.** New issues, reopened issues and bursts can be POSTed to
