@@ -20,6 +20,36 @@ class IssueGroupingTest < ActiveSupport::TestCase
     assert_not_equal books.issue_id, authors.issue_id
   end
 
+  # Decided, not an accident: a shared helper is one issue for every caller.
+  # Sentry hashes every in-app frame, which opens an issue per call path; and
+  # the nearest in-app caller is usually still inside the helper (here
+  # S3Functions#s3_open), so keying on it wouldn't tell the jobs apart either.
+  # The events list on the issue shows which callers it came from. Covers'
+  # S3 errors, 2026-10-14.
+  test "an error raised in a shared helper is one issue whichever of your code called it" do
+    networking = "Seahorse::Client::NetworkingError"
+    s3_get = frame("aws-sdk-s3/object.rb", 1965, "get", "Aws::S3::Object", app: false)
+    helper = [
+      frame("app/models/concerns/s3_functions.rb", 117, "download_to_tempfile", "S3Functions"),
+      frame("app/models/concerns/s3_functions.rb", 99, "block in s3_open", "S3Functions"),
+      frame("app/models/concerns/s3_functions.rb", 98, "s3_open", "S3Functions")
+    ]
+    lqip = ingest(exception_payload(networking, s3_get, *helper,
+      frame("app/models/cover.rb", 265, "lqip_generator", "Cover"),
+      frame("app/jobs/best_job.rb", 93, "process_cover", "BestJob")))
+    variants = ingest(exception_payload(networking, s3_get, *helper,
+      frame("app/services/variant_service.rb", 80, "inventory_variants", "VariantService"),
+      frame("app/jobs/generate_cover_variants_job.rb", 17, "perform", "GenerateCoverVariantsJob")))
+    listing = ingest(exception_payload(networking,
+      frame("aws-sdk-s3/client.rb", 14524, "list_objects_v2", "Aws::S3::Client", app: false),
+      frame("app/models/concerns/s3_functions.rb", 44, "file_list", "S3Functions"),
+      frame("app/services/variant_service.rb", 80, "inventory_variants", "VariantService")))
+
+    assert_equal lqip.issue_id, variants.issue_id
+    assert_equal "#{networking}::S3Functions::download_to_tempfile", lqip.issue.fingerprint
+    assert_not_equal lqip.issue_id, listing.issue_id, "a different function of the helper is a different issue"
+  end
+
   test "an issue survives the line it's raised on moving" do
     before_edit = ingest(exception_payload("NoMethodError", frame("app/models/book.rb", 12, "title", "Book")))
     after_edit = ingest(exception_payload("NoMethodError", frame("app/models/book.rb", 15, "title", "Book")))
