@@ -13,6 +13,12 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.23.0 — 2026-10-14
+
+Stack frames link to their line in the project's repository, at the commit
+the event's release names. Ingest no longer turns envelopes away while Tuber
+is down: they wait on disk and are queued once it answers again.
+
 ### Added
 
 - **Stack frames link to their line in your repository.** Give a project a
