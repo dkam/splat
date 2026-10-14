@@ -13,6 +13,12 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.25.0 — 2026-10-14
+
+Resolved issues reopen again when they recur — they hadn't since May — and
+an issue can be resolved in the next release, so only a newer release
+reopens it.
+
 ### Added
 
 - **Resolve in next release.** For a fix that ships in the deploy to come:
