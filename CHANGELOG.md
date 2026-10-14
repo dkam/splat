@@ -46,6 +46,17 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 - **An envelope whose gzip or deflate is corrupt is dropped with a `200`**,
   logged, as Brotli and Zstandard already were. It used to raise, for a
   `500`. On the OTLP endpoint a corrupt gzip body is a `400`.
+- **MCP queries are stopped after 15 seconds**, with an error telling the
+  model to narrow its window or add filters. One wide `search_logs` used to
+  hold its Puma process until it finished — about 20 minutes on 2026-09-12,
+  with every other tool call and the UI waiting behind it.
+  `SPLAT_MCP_STATEMENT_TIMEOUT` sets the cap in seconds.
+- sqlite3 2.9.6 → 2.10.0, which fixes `statement_timeout` (it stopped every
+  query at once, sqlite3-ruby#737). The Gemfile now requires 2.10.
+- **The compose example runs two Puma processes** (`WEB_CONCURRENCY: 2`), so
+  the UI and ingest keep answering while the other process is stuck on a long
+  query. More threads couldn't do it: the sqlite3 gem holds Ruby's global lock
+  for the whole of a statement.
 
 ### Fixed
 
