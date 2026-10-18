@@ -2,22 +2,13 @@
     timeline's Events row, or an issue's row, opens. The arrows step a window
     of the same length back and forward. %>
 <% span = @window.end - @window.begin %>
-<% filters = {issue_id: @issue&.id, status: @status}.compact %>
-<% window_path = ->(from, to) { project_events_path(@project.slug, **filters, from: from.utc.iso8601, to: to.utc.iso8601) } %>
-<% nav = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800" %>
 
 <div class="py-4">
   <div class="mb-1"><%= breadcrumbs([@project.name, project_path(@project.slug)], ["Events", nil]) %></div>
 
   <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
     <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Events</h1>
-    <div class="flex items-center gap-1.5">
-      <%= link_to "←", window_path.call(@window.begin - span, @window.begin), class: nav, title: "The #{timeline_window_label((@window.begin - span)...@window.begin)} before" %>
-      <span class="px-1 font-mono text-sm tabular-nums text-gray-800 dark:text-gray-200"><%= timeline_window_label(@window) %></span>
-      <% if @window.end < Time.current %>
-        <%= link_to "→", window_path.call(@window.end, @window.end + span), class: nav, title: "The #{timeline_window_label(@window.end...(@window.end + span))} after" %>
-      <% end %>
-    </div>
+    <%= render "shared/window_steps", window: @window %>
     <span class="font-mono text-xs text-gray-500 dark:text-gray-400"><%= pluralize(number_with_delimiter(@total), "event") %></span>
     <% if @issue %>
       <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-700 text-xs">
@@ -52,6 +43,8 @@
       <% end %>
     </div>
   <% end %>
+
+  <%= render "audience", audience: @audience, total: @total if @audience %>
 
   <% if @events.any? %>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">

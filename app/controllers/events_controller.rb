@@ -28,6 +28,8 @@ class EventsController < ApplicationController
     @total = counts.values.sum + scope.where(issue_id: nil).count
     @by_issue = counts.sort_by { |id, n| [-n, -id] }.first(12)
     @issues = @project.issues.where(id: @by_issue.map(&:first)).index_by(&:id)
+    # Who they came from, over the whole window, so only above the first page.
+    @audience = Analytics::Audience.new(scope) if @total.positive? && params[:page].to_i <= 1
 
     # Countless, as the logs are: a busy window can hold thousands, and the
     # count above already says how many.

@@ -213,6 +213,23 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href=?]", project_event_path(@project.slug, kept), count: 0
   end
 
+  # Is it one client hammering a page, or everyone?
+  test "index says how many IPs, networks, users, browsers and systems the window's events came from" do
+    from = 1.hour.ago.utc.beginning_of_minute
+    chrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+    3.times { |i| event_from(from + i.minutes, ip: "198.51.100.7", ua: chrome) }
+    event_from(from + 4.minutes, ip: "198.51.100.20", ua: chrome, user: {"id" => 42})
+    event_at("Raised outside a request", from + 5.minutes)
+
+    get project_events_url(@project.slug, from: from.iso8601, to: Time.current.iso8601)
+    assert_response :success
+    assert_select "[data-dimension=ip]", text: /2 IPs.*198\.51\.100\.7\s+3.*1 not sent/m
+    assert_select "[data-dimension=network]", text: /1 network.*198\.51\.100\.0\/24\s+4/m
+    assert_select "[data-dimension=user]", text: /1 user.*id:42\s+1.*4 not sent/m
+    assert_select "[data-dimension=browser]", text: /1 browser.*Chrome 145\s+4/m
+    assert_select "[data-dimension=os]", text: /1 system.*macOS\s+4/m
+  end
+
   test "index without a usable window shows the last 24 hours" do
     old = event_at("Two days ago", 2.days.ago)
     recent = event_at("An hour ago", 1.hour.ago)
@@ -227,5 +244,14 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
 
   def event_at(message, at)
     Event.create_from_sentry_payload!(SecureRandom.hex(16), {"message" => message, "timestamp" => at.utc.iso8601}, @project)
+  end
+
+  # An error raised in a request, the way sentry-rails sends one.
+  def event_from(at, ip:, ua:, user: {})
+    payload = {
+      "message" => "Raised in a request", "timestamp" => at.utc.iso8601, "user" => user,
+      "request" => {"url" => "https://example.com/", "headers" => {"User-Agent" => ua, "X-Real-Ip" => ip}}
+    }
+    Event.create_from_sentry_payload!(SecureRandom.hex(16), payload, @project)
   end
 end

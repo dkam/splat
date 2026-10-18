@@ -39,6 +39,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   endpoint's slowest. Both Performance pages take `from` and `to` and step
   a window at a time, and both can list their transactions newest or
   slowest first.
+- **Who the events came from.** Above the events list, a panel counts the
+  distinct IPs, networks (/24, or /48 for IPv6), users, browsers and
+  systems in the window. It names the most common of each and says how many
+  events didn't say. So one client hammering a page reads as "1 IP", and a
+  real outage as many. The breakdown reads the payloads of the newest 500
+  events and says so when there were more. Booko's events carry a
+  User-Agent but not an IP: sentry-ruby 7 sends `[Filtered]` for them unless
+  `data_collection.user_info` is on.
 - **Monitor run history.** Every check-in is now kept as a run in
   `cron_check_ins`, as well as in the monitor's latest state. A run's
   `in_progress` and its `ok` or `error` fill in one row, with its start, end
