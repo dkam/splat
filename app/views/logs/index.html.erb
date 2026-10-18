@@ -73,7 +73,7 @@
   <% if @window %>
     <div class="mb-4 text-sm text-gray-600 dark:text-gray-400">
       Between <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded"><%= timeline_window_label(@window) %></span>
-      <%= link_to "any time", url_for(request.query_parameters.except("from", "to", "page")), class: "ml-1 text-blue-600 dark:text-blue-400 hover:underline" %>
+      <%= link_to "any time", current_page_with(drop: %w[from to]), class: "ml-1 text-blue-600 dark:text-blue-400 hover:underline" %>
     </div>
   <% end %>
 

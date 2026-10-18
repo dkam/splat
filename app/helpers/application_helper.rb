@@ -153,6 +153,14 @@ module ApplicationHelper
     ))
   end
 
+  # This page again with its query changed: `set` merged in, `drop` and the
+  # page number taken out. Built on request.path, where url_for would read a
+  # ?host=, ?protocol= or ?script_name= in the query as where the link goes.
+  def current_page_with(drop: [], **set)
+    query = request.query_parameters.except("page", *drop.map(&:to_s)).merge(set.stringify_keys)
+    query.empty? ? request.path : "#{request.path}?#{query.to_query}"
+  end
+
   # Whether an issue's row offers "resolve in next release", which needs a
   # release to come after. Asked once per project per page, not once a row.
   def next_release_resolvable?(issue)

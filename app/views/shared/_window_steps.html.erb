@@ -1,0 +1,13 @@
+<%# A window the project timeline opened (?from=&to=), with arrows to the
+    window of the same length before and after it. They keep the page's other
+    filters; there's no arrow into the future. %>
+<% span = window.end - window.begin %>
+<% step = ->(from, to) { current_page_with(from: from.utc.iso8601, to: to.utc.iso8601) } %>
+<% nav = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800" %>
+<div class="flex items-center gap-1.5">
+  <%= link_to "←", step.call(window.begin - span, window.begin), class: nav, title: "The #{timeline_window_label((window.begin - span)...window.begin)} before" %>
+  <span class="px-1 font-mono text-sm tabular-nums text-gray-800 dark:text-gray-200"><%= timeline_window_label(window) %></span>
+  <% if window.end < Time.current %>
+    <%= link_to "→", step.call(window.end, window.end + span), class: nav, title: "The #{timeline_window_label(window.end...(window.end + span))} after" %>
+  <% end %>
+</div>

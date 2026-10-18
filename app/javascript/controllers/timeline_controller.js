@@ -8,7 +8,7 @@ import { Controller } from "@hotwired/stimulus"
 // The overlay target lies over exactly the strip column, so the pointer's place
 // across it is its place in the window.
 //
-// A strip with data-timeline-href (the Events, Logs and issue rows) opens that
+// A strip with data-timeline-href (the signal, issue and endpoint rows) opens that
 // list for the bucket clicked: the href with ?from=&to= set to the bucket.
 export default class extends Controller {
   static targets = ["overlay", "cursor", "readout", "localTick", "zone"]

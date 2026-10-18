@@ -114,6 +114,16 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-timeline-href=?]", project_logs_path(@project.slug)
   end
 
+  test "show's throughput, latency and endpoint rows open the endpoints for the bucket clicked" do
+    @project.transactions.create!(transaction_id: "txn-click", transaction_name: "BooksController#show",
+      timestamp: 1.hour.ago, duration: 120)
+
+    get project_url(@project.slug, window: "24h")
+    assert_select "[data-timeline-href=?]", project_endpoints_path(@project.slug)
+    assert_select "[data-timeline-href=?]", project_endpoints_path(@project.slug, sort: "slowest")
+    assert_select "[data-timeline-href=?]", detail_project_endpoints_path(@project.slug, name: "BooksController#show", sort: "slowest")
+  end
+
   test "show draws every window" do
     ProjectTimeline::WINDOWS.each_key do |key|
       get project_url(@project.slug, window: key)

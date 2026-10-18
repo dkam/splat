@@ -222,6 +222,41 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     end
   end
 
+  # The project timeline links a bucket to the endpoints pages as from...to.
+  # An hour that ends a window is outside it, but the rollups read the end
+  # hour inclusively, so a click on 09:00 counted 10:00's requests too.
+  test "a window ending on the hour leaves out the hour it ends at" do
+    3.times { create_txn(duration: 100, at: @hour - 1.hour, query_count: 2) }
+    5.times { create_txn(duration: 900, at: @hour, query_count: 40) }
+    window = (@hour - 1.hour)...@hour
+
+    ranked = Transaction.stats_by_endpoint_with_impact(window, project_id: @project.id)
+    assert_equal [3], ranked.map { |r| r["count"] }
+    assert_equal 2, ranked.first["max_queries"]
+    assert_equal 3, Transaction.percentiles(window, project_id: @project.id)[:count]
+    assert_equal 3, Transaction.percentiles_for_endpoint("GET /x", window, project_id: @project.id)["count"]
+
+    # An inclusive range still takes in its end hour: it's how "the last 24
+    # hours" reaches the hour in progress.
+    assert_equal 8, Transaction.percentiles((@hour - 1.hour)..@hour, project_id: @project.id)[:count]
+  end
+
+  # A 5- or 15-minute bucket can't be read from hourly rows, so its endpoint
+  # table comes from the raw rows, with the columns the endpoints page shows.
+  test "stats_by_endpoint_raw has the endpoint page's columns and filters by name" do
+    2.times { create_txn(duration: 100, at: @hour + 20.minutes, query_count: 4) }
+    create_txn(duration: 100, at: @hour + 20.minutes, query_count: 30)
+    create_txn(name: "GET /other", duration: 50, at: @hour + 20.minutes)
+    create_txn(duration: 100, at: @hour + 40.minutes, query_count: 99)
+    window = (@hour + 15.minutes)...(@hour + 30.minutes)
+
+    rows = Transaction.stats_by_endpoint_raw(window, project_id: @project.id, name_query: "/x", limit: nil)
+    assert_equal ["GET /x"], rows.map { |r| r["transaction_name"] }
+    assert_equal 3, rows.first["count"]
+    assert_in_delta 12.7, rows.first["avg_queries"], 0.05
+    assert_equal 30, rows.first["max_queries"]
+  end
+
   test "unscoped endpoint rankings keep a name two projects share apart" do
     other = Project.create!(name: "Other", slug: "other", public_key: "other-key")
     20.times { create_txn(duration: 800, query_count: 40, has_n_plus_one: true) }

@@ -7,6 +7,8 @@ module TransactionAnalytics
   # class methods below. Window covers whole hours [hour(begin) .. hour(end)]
   # inclusive — the end hour is the in-progress one (kept current by the live
   # ingest bump); the begin hour over-includes up to ~1h of pre-window rows.
+  # An exclusive range that ends on the hour (a timeline bucket) stops short of
+  # that hour.
   # est_count / est_sum_duration are scaled up by the SDK's sample rate; an hour
   # rolled up before the rate was kept has est_count 0 and stands in as recorded.
   HOURLY_AGG = <<~SQL.squish.freeze
@@ -273,21 +275,25 @@ module TransactionAnalytics
       }
     end
 
-    # The fields of #stats_by_endpoint_with_impact the MCP reads, per project
-    # and endpoint, ranked by time spent.
-    def stats_by_endpoint_raw(time_range, project_id: nil, environment: nil, server_name: nil, limit: 20)
+    # The fields of #stats_by_endpoint_with_impact the MCP and the endpoints
+    # page read, per project and endpoint, ranked by time spent. A nil limit
+    # returns every endpoint.
+    def stats_by_endpoint_raw(time_range, project_id: nil, environment: nil, server_name: nil, name_query: nil, limit: 20)
       scope = raw_window_scope(time_range, project_id: project_id, environment: environment, server_name: server_name)
+      scope = scope.where("transaction_name LIKE ?", "%#{name_query}%") if name_query.present?
       ranked = scope.group(:project_id, :transaction_name)
         .pluck(:project_id, :transaction_name, Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"),
           Arel.sql("SUM(duration * COALESCE(1.0 / sample_rate, 1.0))"), Arel.sql("COUNT(sample_rate)"),
-          Arel.sql("SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END)"))
-        .map do |pid, name, cnt, sum, mx, est_sum, rated, n_plus_one|
+          Arel.sql("SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END)"), Arel.sql("SUM(query_count)"), Arel.sql("MAX(query_count)"))
+        .map do |pid, name, cnt, sum, mx, est_sum, rated, n_plus_one, queries, max_queries|
           avg = sum.to_f / cnt
           {"project_id" => pid, "transaction_name" => name, "count" => cnt, "avg_duration" => avg.round(1),
            "max_duration" => mx.to_i, "time_spent" => (avg * cnt).round,
-           "est_time_spent" => est_sum.to_f.round, "rated_count" => rated.to_i, "n_plus_one_count" => n_plus_one.to_i}
+           "est_time_spent" => est_sum.to_f.round, "rated_count" => rated.to_i, "n_plus_one_count" => n_plus_one.to_i,
+           "avg_queries" => (queries.to_f / cnt).round(1), "max_queries" => max_queries.to_i}
         end
-        .sort_by { |r| -r["est_time_spent"] }.first(limit)
+        .sort_by { |r| -r["est_time_spent"] }
+      ranked = ranked.first(limit) if limit
       return ranked if ranked.empty?
 
       dists = Hash.new { |h, k| h[k] = {} }
@@ -484,7 +490,8 @@ module TransactionAnalytics
     def hourly_filters(time_range:, project_id:, environment:, transaction_name: nil, name_query: nil)
       lo = Analytics::Histogram.hour_bucket(time_range.begin)
       hi = Analytics::Histogram.hour_bucket(time_range.end)
-      clauses = ["hour_bucket >= ?", "hour_bucket <= ?"]
+      upto = (time_range.exclude_end? && hi == time_range.end) ? "<" : "<="
+      clauses = ["hour_bucket >= ?", "hour_bucket #{upto} ?"]
       binds = [lo, hi]
       if project_id
         clauses << "project_id = ?"

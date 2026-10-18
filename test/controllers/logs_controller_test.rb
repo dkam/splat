@@ -100,4 +100,16 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     assert_select "input[type=hidden][name=from][value=?]", from.iso8601
     assert_select "input[type=hidden][name=to][value=?]", (from + 1.hour).iso8601
   end
+
+  # The "any time" link is this page with ?from=&to= dropped. Built with
+  # url_for(query), a ?host= in the query became the link's host.
+  test "index's links back out of a window stay on this site" do
+    from = 2.hours.ago.utc.beginning_of_hour
+    hostile = {host: "evil.example", script_name: "//evil.example", protocol: "javascript"}
+    get project_logs_path(@project.slug), params: {from: from.iso8601, to: (from + 1.hour).iso8601, **hostile}
+    assert_response :success
+    assert_select "a[href^=?]", "#{project_logs_path(@project.slug)}?", text: "any time"
+    refute_match %r{href="[^"]*//evil\.example}, response.body
+    refute_match %r{href="javascript:}, response.body
+  end
 end

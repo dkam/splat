@@ -12,7 +12,8 @@
             title="<%= share %>% of its requests repeated a query in a loop">N+1</span>
     <% end %>
   </div>
-  <svg viewBox="0 0 480 24" class="w-full h-6" preserveAspectRatio="none" aria-hidden="true">
+  <svg viewBox="0 0 480 24" class="w-full h-6 cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+       data-timeline-href="<%= detail_project_endpoints_path(project.slug, name: endpoint.name, sort: "slowest") %>" data-timeline-hint="click for its slowest requests">
     <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 23.5H480"/>
     <% if endpoint.line? %>
       <% line = timeline_line(endpoint.p95s.map { it.to_i.positive? ? it : nil }, height: 24) %>

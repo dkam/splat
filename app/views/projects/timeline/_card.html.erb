@@ -79,7 +79,8 @@
         <div class="min-w-0"><div class="text-sm font-semibold">Throughput</div><div class="text-[11px] text-gray-500 dark:text-gray-400">transactions <%= per %>, as received</div></div>
         <% if tx.sum.positive? %>
           <% bars = timeline_bars(tx, height: 40, partial: partial) %>
-          <svg viewBox="0 0 480 40" class="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+          <svg viewBox="0 0 480 40" class="w-full h-10 cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+               data-timeline-href="<%= project_endpoints_path(project.slug) %>" data-timeline-hint="click for the endpoints behind it">
             <path class="fill-gray-200 dark:fill-gray-800" d="<%= bars[:empty] %>"/>
             <path class="fill-blue-500 dark:fill-blue-400" d="<%= bars[:bars] %>"/>
             <path class="fill-blue-200 dark:fill-blue-900" d="<%= bars[:partial] %>"/>
@@ -98,7 +99,8 @@
         <div class="min-w-0"><div class="text-sm font-semibold">Latency</div><div class="text-[11px] text-gray-500 dark:text-gray-400">p95 <%= per %>, every endpoint</div></div>
         <% if t.latency.compact.any? %>
           <% line = timeline_line(t.latency, height: 40) %>
-          <svg viewBox="0 0 480 40" class="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+          <svg viewBox="0 0 480 40" class="w-full h-10 cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+               data-timeline-href="<%= project_endpoints_path(project.slug, sort: "slowest") %>" data-timeline-hint="click for the slowest requests">
             <path class="fill-amber-500/15" d="<%= line[:area] %>"/>
             <path class="fill-none stroke-amber-500" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" d="<%= line[:line] %>"/>
           </svg>

@@ -1,12 +1,19 @@
 <div class="py-4">
   <div class="mb-8">
     <%= breadcrumbs([@project.name, project_path(@project.slug)],
-                    ["Performance", project_endpoints_path(@project.slug, time_range: @time_range)],
+                    ["Performance", project_endpoints_path(@project.slug, **range_params)],
                     [@endpoint, nil]) %>
   </div>
 
   <div class="mb-6">
     <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2"><%= @endpoint %></h1>
+    <% if @window %>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <%= render "shared/window_steps", window: @window %>
+        <%= link_to "last #{@time_range}", current_page_with(drop: %w[from to]),
+            class: "text-sm text-blue-600 dark:text-blue-400 hover:underline" %>
+      </div>
+    <% end %>
   </div>
 
   <!-- Stats Cards -->
@@ -57,10 +64,14 @@
     </div>
   <% end %>
 
-  <!-- Filters -->
+  <!-- Filters: the window above stands in for them -->
+  <% unless @window %>
   <div class="mb-6 bg-white dark:bg-gray-900 rounded-lg shadow p-4 border border-gray-200 dark:border-gray-800">
     <%= form_with url: detail_project_endpoints_path(@project.slug), method: :get, class: "flex flex-wrap gap-4" do |f| %>
       <%= f.hidden_field :endpoint, value: @endpoint %>
+      <% if @sort == "slowest" %>
+        <%= hidden_field_tag :sort, @sort, id: nil %>
+      <% end %>
 
       <div class="flex-1 min-w-[150px]">
         <%= f.label :time_range, "Time Range", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" %>
@@ -75,8 +86,13 @@
       </div>
     <% end %>
   </div>
+  <% end %>
 
   <!-- Transactions Table -->
+  <div class="flex items-center justify-between gap-3 mb-4">
+    <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100"><%= (@sort == "slowest") ? "Slowest" : "Recent" %> Transactions</h2>
+    <%= render "endpoints/sort" %>
+  </div>
   <% if @transactions.any? %>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 overflow-hidden">
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">

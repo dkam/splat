@@ -33,7 +33,12 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   The new events list (`/projects/:slug/events`) takes `from` and `to`,
   counts the events by issue, and steps to the hour before or after. It
   can also narrow to one issue or to one status. The logs list takes
-  `from` and `to` too.
+  `from` and `to` too. The Throughput row opens the Performance page for
+  that bucket, ranked by time spent. The Latency row opens it with the
+  bucket's slowest requests first, and an endpoint's row opens that
+  endpoint's slowest. Both Performance pages take `from` and `to` and step
+  a window at a time, and both can list their transactions newest or
+  slowest first.
 - **Monitor run history.** Every check-in is now kept as a run in
   `cron_check_ins`, as well as in the monitor's latest state. A run's
   `in_progress` and its `ok` or `error` fill in one row, with its start, end
