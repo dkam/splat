@@ -334,13 +334,15 @@ class SplatMcpServer
             },
             top_endpoints: {
               type: "array",
-              description: "Ranked by time_spent (avg × count), never narrowed by the endpoint filter. One row per project and endpoint, so an unscoped call lists a name two projects share twice.",
+              description: "Ranked by est_time_spent, never narrowed by the endpoint filter. time_spent is avg × count as recorded; est_time_spent scales each transaction up by the sample rate its SDK reported (1% counts 100 times), so endpoints sampled at different rates compare fairly. rated_count is how many of the transactions reported a rate; at 0 the two figures are equal. One row per project and endpoint, so an unscoped call lists a name two projects share twice.",
               items: {
                 type: "object",
                 properties: {
                   project: {type: ["string", "null"]},
                   transaction_name: {type: ["string", "null"]},
                   time_spent: MS,
+                  est_time_spent: MS,
+                  rated_count: {type: "integer"},
                   avg_duration: MS,
                   p95_duration: MS,
                   count: {type: "integer"}
@@ -543,7 +545,7 @@ class SplatMcpServer
       },
       {
         name: "get_transaction_stats",
-        description: "Get overall performance percentiles plus the top endpoints ranked by total time spent (avg duration × request count). Use this to find where the app is actually spending its time, not just where individual outliers are slow. Each endpoint includes time_spent, avg, p95, and request count. Without project or endpoint, each project with traffic gets its own overall figures instead of one blended set.",
+        description: "Get overall performance percentiles plus the top endpoints ranked by total time spent (avg duration × request count). Use this to find where the app is actually spending its time, not just where individual outliers are slow. Each endpoint includes time_spent (as recorded), est_time_spent (scaled up by the SDK's sample rate, which is what the ranking uses), avg, p95, and request count. Without project or endpoint, each project with traffic gets its own overall figures instead of one blended set.",
         inputSchema: {
           type: "object",
           properties: {

@@ -126,6 +126,33 @@ module ApplicationHelper
     end
   end
 
+  # A total of time rather than one request's: "9h 23m", "4m 12s", "850ms".
+  def format_time_spent(ms)
+    return "N/A" if ms.nil?
+
+    seconds = (ms.to_f / 1000).round
+    return "#{ms.to_f.round}ms" if seconds.zero?
+    return "#{seconds}s" if seconds < 60
+    return "#{seconds / 60}m #{seconds % 60}s" if seconds < 3600
+    return "#{seconds / 3600}h #{(seconds % 3600) / 60}m" if seconds < 86_400
+    "#{seconds / 86_400}d #{(seconds % 86_400) / 3600}h"
+  end
+
+  # An endpoint's time spent (a row of stats_by_endpoint_with_impact), scaled
+  # up by the SDK's sample rate wherever the SDK sent one. The figure as
+  # recorded goes in the tooltip, since that's what the count beside it adds
+  # up to.
+  def time_spent_tag(endpoint, **options)
+    recorded = endpoint["time_spent"]
+    return tag.span(format_time_spent(recorded), **options) unless endpoint["rated_count"].to_i.positive?
+
+    tag.span(format_time_spent(endpoint["est_time_spent"]), **options.merge(
+      class: [options[:class], "underline decoration-dotted decoration-gray-400 underline-offset-4"].compact.join(" "),
+      title: "Scaled up by the sample rate the SDK reported. As recorded: #{format_time_spent(recorded)} " \
+             "across #{number_with_delimiter(endpoint["count"])} sampled transactions."
+    ))
+  end
+
   # One hover label per bucket, for sparkline(bar_titles:). Buckets are evenly
   # spaced across `range`, so bucket i starts at range.begin + i * bucket_seconds
   # — no bucket timestamps need carrying through the query layer. The block turns

@@ -37,7 +37,8 @@ module Ingest
         # raise on redelivery and bounce the whole job into a retry loop.
         transaction = nil
         TransactionsSpansRecord.transaction do
-          transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project)
+          transaction = Transaction.create_from_sentry_payload!(args["transaction_id"], args["payload"], project,
+            sample_rate: args["sample_rate"])
           if transaction.previously_new_record?
             span_rows = build_span_rows(transaction, args["payload"])
             if span_rows.any?

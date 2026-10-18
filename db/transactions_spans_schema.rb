@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_14_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_18_000001) do
   create_table "span_trees", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "dict_id"
@@ -61,12 +61,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_14_000001) do
     t.bigint "db_time_count", default: 0, null: false
     t.string "environment", default: "", null: false
     t.bigint "error_count", default: 0, null: false
+    t.float "est_count", default: 0.0, null: false
+    t.float "est_sum_duration", default: 0.0, null: false
     t.datetime "hour_bucket", null: false
     t.integer "max_duration", default: 0, null: false
     t.integer "max_query_count", default: 0, null: false
     t.integer "min_duration"
     t.bigint "n_plus_one_count", default: 0, null: false
     t.bigint "project_id", null: false
+    t.bigint "rated_count", default: 0, null: false
     t.bigint "sum_db_time", default: 0, null: false
     t.bigint "sum_duration", default: 0, null: false
     t.bigint "sum_n_plus_one_time", default: 0, null: false
@@ -93,6 +96,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_14_000001) do
     t.integer "project_id", null: false
     t.integer "query_count", default: 0, null: false
     t.string "release"
+    t.float "sample_rate"
     t.string "server_name"
     t.boolean "spans_truncated", default: false, null: false
     t.json "tags"

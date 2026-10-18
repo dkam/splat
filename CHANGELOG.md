@@ -13,6 +13,20 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Fixed
+
+- **Time spent is scaled by the sample rate.** An SDK sends only a sampled
+  share of its transactions and says which share in the envelope header
+  (`trace.sample_rate`). Splat threw that away, so endpoints sampled at
+  different rates were compared as recorded. Booko traces web requests at 1%
+  and jobs at 10%, so its jobs looked ten times bigger beside its requests
+  than they are. The rate is kept on each transaction now and the hourly
+  rollups sum each one ×1/rate. The Performance page and the MCP
+  `get_transaction_stats` tool rank by the scaled time, and keep the figure
+  as recorded alongside it (in the tooltip, or as `time_spent`). Hours rolled
+  up before this release, and SDKs that send no rate (sentry-rust), count as
+  recorded.
+
 ## 1.25.0 — 2026-10-14
 
 Resolved issues reopen again when they recur — they hadn't since May — and

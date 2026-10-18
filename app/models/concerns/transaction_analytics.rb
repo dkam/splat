@@ -7,6 +7,8 @@ module TransactionAnalytics
   # class methods below. Window covers whole hours [hour(begin) .. hour(end)]
   # inclusive — the end hour is the in-progress one (kept current by the live
   # ingest bump); the begin hour over-includes up to ~1h of pre-window rows.
+  # est_count / est_sum_duration are scaled up by the SDK's sample rate; an hour
+  # rolled up before the rate was kept has est_count 0 and stands in as recorded.
   HOURLY_AGG = <<~SQL.squish.freeze
     COALESCE(SUM(count), 0)            AS count,
     COALESCE(SUM(sum_duration), 0)     AS sum_duration,
@@ -20,7 +22,10 @@ module TransactionAnalytics
     COALESCE(MAX(max_query_count), 0)  AS max_query_count,
     COALESCE(SUM(n_plus_one_count), 0) AS n_plus_one_count,
     COALESCE(SUM(sum_n_plus_one_time), 0) AS sum_n_plus_one_time,
-    COALESCE(SUM(error_count), 0)      AS error_count
+    COALESCE(SUM(error_count), 0)      AS error_count,
+    COALESCE(SUM(CASE WHEN est_count > 0 THEN est_count ELSE count END), 0) AS est_count,
+    COALESCE(SUM(CASE WHEN est_count > 0 THEN est_sum_duration ELSE sum_duration END), 0) AS est_sum_duration,
+    COALESCE(SUM(rated_count), 0)      AS rated_count
   SQL
 
   # All windowed analytics read from the two hourly aggregate tables rather than
@@ -128,7 +133,10 @@ module TransactionAnalytics
       connection.select_rows(sanitize_sql_array([sql, project_ids, *binds])).to_h { |id, c| [id.to_i, c.to_i] }
     end
 
-    # Top endpoints in a window ranked by impact (avg_duration * count). All
+    # Top endpoints in a window ranked by impact: the time they really took,
+    # each transaction scaled up by its sample rate (est_time_spent), so an
+    # endpoint sampled at 1% isn't ranked below one sampled at 10%. time_spent
+    # is the same sum as recorded (avg_duration * count). All
     # scalar stats come from one grouped scan of transaction_hourly_stats; the
     # histogram-backed p50/p95/p99 are computed only for the returned top-N.
     # Rows are per project and endpoint: unscoped, two projects' same-named
@@ -144,11 +152,14 @@ module TransactionAnalytics
           "count" => cnt,
           "max_duration" => r["max_duration"].to_i,
           "time_spent" => (avg * cnt).round,
+          "est_time_spent" => r["est_sum_duration"].to_f.round,
+          "est_count" => r["est_count"].to_f,
+          "rated_count" => r["rated_count"].to_i,
           "avg_queries" => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
           "max_queries" => r["max_query_count"].to_i,
           "n_plus_one_count" => r["n_plus_one_count"].to_i
         }
-      end.sort_by { |r| -r["time_spent"] }
+      end.sort_by { |r| -r["est_time_spent"] }
       ranked = ranked.first(limit) if limit
 
       pcts = endpoint_percentiles_by_name(
@@ -267,13 +278,15 @@ module TransactionAnalytics
     def stats_by_endpoint_raw(time_range, project_id: nil, environment: nil, server_name: nil, limit: 20)
       scope = raw_window_scope(time_range, project_id: project_id, environment: environment, server_name: server_name)
       ranked = scope.group(:project_id, :transaction_name)
-        .pluck(:project_id, :transaction_name, Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"))
-        .map do |pid, name, cnt, sum, mx|
+        .pluck(:project_id, :transaction_name, Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"),
+          Arel.sql("SUM(duration * COALESCE(1.0 / sample_rate, 1.0))"), Arel.sql("COUNT(sample_rate)"))
+        .map do |pid, name, cnt, sum, mx, est_sum, rated|
           avg = sum.to_f / cnt
           {"project_id" => pid, "transaction_name" => name, "count" => cnt, "avg_duration" => avg.round(1),
-           "max_duration" => mx.to_i, "time_spent" => (avg * cnt).round}
+           "max_duration" => mx.to_i, "time_spent" => (avg * cnt).round,
+           "est_time_spent" => est_sum.to_f.round, "rated_count" => rated.to_i}
         end
-        .sort_by { |r| -r["time_spent"] }.first(limit)
+        .sort_by { |r| -r["est_time_spent"] }.first(limit)
       return ranked if ranked.empty?
 
       dists = Hash.new { |h, k| h[k] = {} }
@@ -451,7 +464,10 @@ module TransactionAnalytics
         max_query_count: r["max_query_count"].to_i,
         n_plus_one_count: r["n_plus_one_count"].to_i,
         sum_n_plus_one_time: r["sum_n_plus_one_time"].to_i,
-        error_count: r["error_count"].to_i
+        error_count: r["error_count"].to_i,
+        est_count: r["est_count"].to_f,
+        est_sum_duration: r["est_sum_duration"].to_f,
+        rated_count: r["rated_count"].to_i
       }
     end
 

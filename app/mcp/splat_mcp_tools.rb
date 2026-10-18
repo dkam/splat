@@ -692,6 +692,8 @@ class SplatMcpTools
           project: project_names[row["project_id"]],
           transaction_name: row["transaction_name"],
           time_spent: row["time_spent"]&.to_f,
+          est_time_spent: row["est_time_spent"]&.to_f,
+          rated_count: row["rated_count"].to_i,
           avg_duration: row["avg_duration"]&.to_f,
           p95_duration: row["p95_duration"]&.to_f,
           count: row["count"].to_i
@@ -1555,12 +1557,13 @@ class SplatMcpTools
     end
 
     if top_endpoints.any?
-      result += "### Top Endpoints by Impact (avg × count)\n\n"
-      result += "| #{"Project | " if project_names}Endpoint | Time Spent | Avg | P95 | Count |\n"
-      result += "|#{"---|" if project_names}---|---:|---:|---:|---:|\n"
+      result += "### Top Endpoints by Impact (time spent, scaled by sample rate)\n\n"
+      result += "| #{"Project | " if project_names}Endpoint | Est. Time Spent | As Recorded | Avg | P95 | Count |\n"
+      result += "|#{"---|" if project_names}---|---:|---:|---:|---:|---:|\n"
       top_endpoints.each do |row|
         result += "| #{project_names[row["project_id"]]} " if project_names
         result += "| #{row["transaction_name"]} " \
+                 "| #{format_ms(row["est_time_spent"])}#{" (no rate sent)" if row["rated_count"].to_i.zero?} " \
                  "| #{format_ms(row["time_spent"])} " \
                  "| #{format_ms(row["avg_duration"])} " \
                  "| #{format_ms(row["p95_duration"])} " \
