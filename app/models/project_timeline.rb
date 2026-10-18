@@ -140,12 +140,12 @@ class ProjectTimeline
   def quiet_open_issue_count = open_issue_count - open_issues_with_events
 
   # Ignored issues still firing, folded into one row: [issues, event count, row].
-  def ignored_fold
-    @ignored_fold ||= begin
-      ignored = issues_with_events.values.select(&:ignored?)
-      [ignored, ignored.sum { issue_counts[it.id] }, merge_rows(build_issue_rows(ignored))]
-    end
-  end
+  def ignored_fold = @ignored_fold ||= fold(:ignored?)
+
+  # Resolved issues with events in the window (fixed since, or resolved in a
+  # release these events predate), folded the same way, so that every event in
+  # the Events row is in some row below it.
+  def resolved_fold = @resolved_fold ||= fold(:resolved?)
 
   # ---- Monitors. ----
 
@@ -259,6 +259,11 @@ class ProjectTimeline
   end
 
   def events_in_window = Event.where(project_id: project.id, timestamp: range)
+
+  def fold(status)
+    issues = issues_with_events.values.select(&status)
+    [issues, issues.sum { issue_counts[it.id] }, merge_rows(build_issue_rows(issues))]
+  end
 
   def issue_counts
     @issue_counts ||= events_in_window.where.not(issue_id: nil).group(:issue_id).count

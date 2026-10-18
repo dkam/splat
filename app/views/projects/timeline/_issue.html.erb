@@ -18,7 +18,8 @@
     <%= link_to issue.title.lines.first.to_s.strip, project_issue_path(project.slug, issue),
         class: "block truncate text-xs text-gray-700 dark:text-gray-300 hover:underline", title: issue.title %>
   </div>
-  <svg viewBox="0 0 480 26" class="w-full h-[26px]" preserveAspectRatio="none" aria-hidden="true">
+  <svg viewBox="0 0 480 26" class="w-full h-[26px] cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+       data-timeline-href="<%= project_events_path(project.slug, issue_id: issue.id) %>" data-timeline-hint="click to list this issue's events">
     <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 25.5H480"/>
     <% if row.times %>
       <path class="<%= row.twin_of ? "stroke-red-300 dark:stroke-red-800" : "stroke-red-500 dark:stroke-red-400" %>" stroke-width="1.5" vector-effect="non-scaling-stroke"

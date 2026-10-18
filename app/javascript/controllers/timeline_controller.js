@@ -7,6 +7,9 @@ import { Controller } from "@hotwired/stimulus"
 //
 // The overlay target lies over exactly the strip column, so the pointer's place
 // across it is its place in the window.
+//
+// A strip with data-timeline-href (the Events, Logs and issue rows) opens that
+// list for the bucket clicked: the href with ?from=&to= set to the bucket.
 export default class extends Controller {
   static targets = ["overlay", "cursor", "readout", "localTick", "zone"]
   static values = { buckets: Array, bucketSeconds: Number }
@@ -17,11 +20,13 @@ export default class extends Controller {
     this.localize()
     this.element.addEventListener("pointermove", this.move)
     this.element.addEventListener("pointerleave", this.leave)
+    this.element.addEventListener("click", this.open)
   }
 
   disconnect() {
     this.element.removeEventListener("pointermove", this.move)
     this.element.removeEventListener("pointerleave", this.leave)
+    this.element.removeEventListener("click", this.open)
   }
 
   localize() {
@@ -37,31 +42,53 @@ export default class extends Controller {
   }
 
   move = (event) => {
-    const box = this.overlayTarget.getBoundingClientRect()
-    const frac = (event.clientX - box.left) / box.width
-    if (frac < 0 || frac >= 1 || event.clientY < box.top || event.clientY > box.bottom) return this.leave()
+    const index = this.indexAt(event)
+    if (index === null) return this.leave()
+
+    const lane = event.target.closest?.("[data-timeline-href]") || null
+    if (index === this.index && lane === this.lane) return
+    this.index = index
+    this.lane = lane
 
     const count = this.bucketsValue.length
-    const index = Math.floor(frac * count)
-    if (index === this.index) return
-    this.index = index
-
     this.cursorTarget.style.left = `${(index / count) * 100}%`
     this.cursorTarget.style.width = `${100 / count}%`
     this.cursorTarget.classList.remove("hidden")
-    this.readoutTarget.replaceChildren(...this.describe(this.bucketsValue[index]))
+    this.readoutTarget.replaceChildren(...this.describe(this.bucketsValue[index], lane))
+  }
+
+  open = (event) => {
+    const lane = event.target.closest?.("[data-timeline-href]")
+    const index = this.indexAt(event)
+    if (!lane || index === null) return
+
+    const bucket = this.bucketsValue[index]
+    const url = new URL(lane.dataset.timelineHref, window.location.href)
+    url.searchParams.set("from", new Date(bucket.t * 1000).toISOString())
+    url.searchParams.set("to", new Date((bucket.t + this.bucketSecondsValue) * 1000).toISOString())
+    if (window.Turbo) window.Turbo.visit(url.toString())
+    else window.location.assign(url.toString())
+  }
+
+  // The bucket under the pointer, or null when it's outside the strips.
+  indexAt(event) {
+    const box = this.overlayTarget.getBoundingClientRect()
+    const frac = (event.clientX - box.left) / box.width
+    if (frac < 0 || frac >= 1 || event.clientY < box.top || event.clientY > box.bottom) return null
+    return Math.floor(frac * this.bucketsValue.length)
   }
 
   leave = () => {
     if (this.index === null) return
     this.index = null
+    this.lane = null
     this.cursorTarget.classList.add("hidden")
     this.readoutTarget.replaceChildren(...this.idle.map((node) => node.cloneNode(true)))
   }
 
   // One span per fact, built with textContent: issue and endpoint names come
   // from the monitored app.
-  describe(bucket) {
+  describe(bucket, lane) {
     const from = new Date(bucket.t * 1000)
     const to = new Date((bucket.t + this.bucketSecondsValue) * 1000)
     const parts = [[`${this.utc(from)}–${this.utc(to)}Z · ${this.local(from)} local`, "text-blue-700 dark:text-blue-300"]]
@@ -76,6 +103,8 @@ export default class extends Controller {
       if (status) parts.push([`${slug} ${status}`, "text-red-700 dark:text-red-300"])
       else parts.push([`${slug} ran`, "text-emerald-700 dark:text-emerald-300"])
     }
+
+    if (lane) parts.push([`· ${lane.dataset.timelineHint}`, "underline decoration-dotted text-blue-700 dark:text-blue-300"])
 
     return parts.map(([text, className]) => {
       const span = document.createElement("span")

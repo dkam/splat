@@ -60,9 +60,20 @@
     <% if @trace_id %>
       <%= f.hidden_field :trace_id, value: @trace_id %>
     <% end %>
+    <% if @window %>
+      <%= hidden_field_tag :from, @window.begin.utc.iso8601, id: nil %>
+      <%= hidden_field_tag :to, @window.end.utc.iso8601, id: nil %>
+    <% end %>
     <div>
       <%= f.submit "Filter", class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md cursor-pointer" %>
       <%= link_to "Clear", project_logs_path(@project.slug), class: "ml-2 text-sm text-gray-500 dark:text-gray-400 hover:underline" %>
+    </div>
+  <% end %>
+
+  <% if @window %>
+    <div class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+      Between <span class="font-mono text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded"><%= timeline_window_label(@window) %></span>
+      <%= link_to "any time", url_for(request.query_parameters.except("from", "to", "page")), class: "ml-1 text-blue-600 dark:text-blue-400 hover:underline" %>
     </div>
   <% end %>
 

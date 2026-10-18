@@ -1,0 +1,19 @@
+<%# Ignored or resolved issues that had events in the window, folded into one
+    dim row (ProjectTimeline#ignored_fold, #resolved_fold), so that every event
+    in the Events row is in some row. Clicking lists those issues' events. %>
+<div class="<%= lane %> py-1">
+  <div class="min-w-0">
+    <div class="text-xs text-gray-500 dark:text-gray-400"><%= pluralize(issues.size, "#{status} issue") %>, folded</div>
+    <div class="truncate font-mono text-[11px] text-gray-400 dark:text-gray-500"><%= issues.first(3).map { "##{it.id} #{it.exception_type.to_s.demodulize.presence || "Message"}" }.join(" · ") %></div>
+  </div>
+  <svg viewBox="0 0 480 18" class="w-full h-[18px] cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+       data-timeline-href="<%= project_events_path(project.slug, status: status) %>" data-timeline-hint="click to list these events">
+    <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 17.5H480"/>
+    <% if row.times %>
+      <path class="stroke-gray-400 dark:stroke-gray-500" stroke-width="1.5" vector-effect="non-scaling-stroke" d="<%= timeline_ticks(row.times.map { timeline.frac(it) }, top: 3, bottom: 17) %>"/>
+    <% else %>
+      <path class="fill-gray-400 dark:fill-gray-500" d="<%= timeline_bars(row.bars, height: 18)[:bars] %>"/>
+    <% end %>
+  </svg>
+  <span class="text-right text-xs tabular-nums text-gray-500 dark:text-gray-400"><%= pluralize(number_with_delimiter(count), "event") %></span>
+</div>

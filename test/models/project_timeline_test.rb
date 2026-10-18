@@ -146,6 +146,20 @@ class ProjectTimelineTest < ActiveSupport::TestCase
     assert_equal 5.minutes, timeline(window: "1h").bucket_seconds
   end
 
+  test "every event in the window is in an issue row or a fold" do
+    open_issue = issue("Open")
+    events(open_issue, @now - 1.hour)
+    muted = issue("Muted", status: :ignored)
+    events(muted, @now - 2.hours)
+    fixed = issue("Fixed", status: :resolved)
+    events(fixed, @now - 3.hours, @now - 3.hours + 1)
+
+    tl = timeline
+    folded = [tl.ignored_fold, tl.resolved_fold].sum { it[1] }
+    assert_equal tl.events_per_bucket.sum, tl.issue_rows.sum(&:in_window) + folded
+    assert_equal [[fixed], 2], tl.resolved_fold.first(2)
+  end
+
   test "the cursor reads out each bucket's counts across the rows" do
     a = issue("A")
     events(a, @now - 2.minutes, @now - 1.minute)

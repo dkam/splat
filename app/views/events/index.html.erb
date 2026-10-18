@@ -1,0 +1,88 @@
+<%# A window's events (EventsController#index): what clicking the project
+    timeline's Events row, or an issue's row, opens. The arrows step a window
+    of the same length back and forward. %>
+<% span = @window.end - @window.begin %>
+<% filters = {issue_id: @issue&.id, status: @status}.compact %>
+<% window_path = ->(from, to) { project_events_path(@project.slug, **filters, from: from.utc.iso8601, to: to.utc.iso8601) } %>
+<% nav = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800" %>
+
+<div class="py-4">
+  <div class="mb-1"><%= breadcrumbs([@project.name, project_path(@project.slug)], ["Events", nil]) %></div>
+
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Events</h1>
+    <div class="flex items-center gap-1.5">
+      <%= link_to "←", window_path.call(@window.begin - span, @window.begin), class: nav, title: "The #{timeline_window_label((@window.begin - span)...@window.begin)} before" %>
+      <span class="px-1 font-mono text-sm tabular-nums text-gray-800 dark:text-gray-200"><%= timeline_window_label(@window) %></span>
+      <% if @window.end < Time.current %>
+        <%= link_to "→", window_path.call(@window.end, @window.end + span), class: nav, title: "The #{timeline_window_label(@window.end...(@window.end + span))} after" %>
+      <% end %>
+    </div>
+    <span class="font-mono text-xs text-gray-500 dark:text-gray-400"><%= pluralize(number_with_delimiter(@total), "event") %></span>
+    <% if @issue %>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-700 text-xs">
+        <%= link_to "##{@issue.id}", project_issue_path(@project.slug, @issue), class: "font-mono hover:underline" %>
+        <span class="max-w-xs truncate text-gray-600 dark:text-gray-400"><%= @issue.title.lines.first.to_s.strip %></span>
+        <%= link_to "×", project_events_path(@project.slug, from: @window.begin.utc.iso8601, to: @window.end.utc.iso8601),
+            class: "text-gray-400 hover:text-gray-700 dark:hover:text-gray-200", title: "Every issue's events", aria: {label: "Show every issue's events"} %>
+      </span>
+    <% elsif @status %>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-700 text-xs">
+        <%= @status %> issues
+        <%= link_to "×", project_events_path(@project.slug, from: @window.begin.utc.iso8601, to: @window.end.utc.iso8601),
+            class: "text-gray-400 hover:text-gray-700 dark:hover:text-gray-200", title: "Every issue's events", aria: {label: "Show every issue's events"} %>
+      </span>
+    <% end %>
+    <%= link_to "← timeline", project_path(@project.slug), class: "ml-auto text-sm text-blue-600 dark:text-blue-400 hover:underline" %>
+  </div>
+
+  <% if @by_issue.size > 1 %>
+    <div class="mb-3 flex flex-wrap gap-1.5">
+      <% @by_issue.each do |issue_id, n| %>
+        <% issue = @issues[issue_id] %>
+        <% next unless issue %>
+        <%= link_to project_events_path(@project.slug, issue_id: issue.id, from: @window.begin.utc.iso8601, to: @window.end.utc.iso8601),
+            class: "inline-flex items-center gap-1.5 max-w-sm px-2 py-1 rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-xs hover:border-blue-400 dark:hover:border-blue-600",
+            title: issue.title do %>
+          <span class="font-mono text-gray-900 dark:text-gray-100">#<%= issue.id %></span>
+          <span class="truncate text-gray-600 dark:text-gray-400"><%= issue.exception_type.presence || issue.title.lines.first.to_s.strip %></span>
+          <span class="font-semibold tabular-nums">×<%= number_with_delimiter(n) %></span>
+          <% unless issue.open? %><span class="text-gray-400 dark:text-gray-500"><%= issue.status %></span><% end %>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <% if @events.any? %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
+      <% @events.each do |event| %>
+        <%# A stretched link, as on the issues list, so the issue link beside it
+            isn't a link inside a link. %>
+        <div class="relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800/60">
+          <%= link_to project_event_path(@project.slug, event), class: "absolute inset-0" do %>
+            <span class="sr-only">Event #<%= event.id %>: <%= event.headline %></span>
+          <% end %>
+          <span class="shrink-0 w-[4.5rem] font-mono text-xs tabular-nums text-gray-500 dark:text-gray-400" title="<%= event.timestamp.utc.iso8601 %>"><%= event.timestamp.utc.strftime(span > 1.day ? "%-d %b %H:%M" : "%H:%M:%S") %></span>
+          <% if event.issue %>
+            <%= link_to "##{event.issue.id}", project_issue_path(@project.slug, event.issue),
+                class: "relative shrink-0 font-mono text-xs text-blue-600 dark:text-blue-400 hover:underline" %>
+          <% end %>
+          <span class="shrink-0 max-w-[14rem] truncate font-mono text-xs text-gray-500 dark:text-gray-400"><%= event.exception_type.presence || "Message" %></span>
+          <span class="min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100"><%= event.headline %></span>
+          <span class="hidden md:inline shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400"><%= event.server_name %></span>
+          <% if event.release.present? %>
+            <span class="hidden lg:inline shrink-0 font-mono text-xs text-violet-700 dark:text-violet-300" title="<%= event.release %>"><%= timeline_release(event.release) %></span>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="mt-6 flex justify-center">
+      <%= pagy_nav_countless_tailwind(@pagy) %>
+    </div>
+  <% else %>
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-8 text-center border border-gray-200 dark:border-gray-800">
+      <p class="text-gray-600 dark:text-gray-400">No events in this window.</p>
+    </div>
+  <% end %>
+</div>

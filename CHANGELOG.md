@@ -27,6 +27,13 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   the same seconds under the same message are marked as twins. Issue rows
   keep resolve and ignore, and gain resolve in the next release, as the
   issues list does.
+- **Click a bucket to list what's in it.** On the project page, clicking the
+  Events row opens that hour's events (or whatever the bucket is), an
+  issue's row opens that issue's events, and the Logs row opens the logs.
+  The new events list (`/projects/:slug/events`) takes `from` and `to`,
+  counts the events by issue, and steps to the hour before or after. It
+  can also narrow to one issue or to one status. The logs list takes
+  `from` and `to` too.
 - **Monitor run history.** Every check-in is now kept as a run in
   `cron_check_ins`, as well as in the monitor's latest state. A run's
   `in_progress` and its `ok` or `error` fill in one row, with its start, end

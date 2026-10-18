@@ -116,7 +116,8 @@
         <div class="min-w-0"><div class="text-sm font-semibold">Events</div><div class="text-[11px] text-gray-500 dark:text-gray-400">errors and messages <%= per %></div></div>
         <% if ev.sum.positive? %>
           <% bars = timeline_bars(ev, height: 40) %>
-          <svg viewBox="0 0 480 40" class="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+          <svg viewBox="0 0 480 40" class="w-full h-10 cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+               data-timeline-href="<%= project_events_path(project.slug) %>" data-timeline-hint="click to list these events">
             <path class="fill-gray-200 dark:fill-gray-800" d="<%= bars[:empty] %>"/>
             <path class="fill-red-500 dark:fill-red-400" d="<%= bars[:bars] %>"/>
           </svg>
@@ -137,7 +138,8 @@
             <div class="text-[11px] text-gray-500 dark:text-gray-400">lines <%= per %></div>
           </div>
           <% bars = timeline_bars(logs, height: 28, partial: partial) %>
-          <svg viewBox="0 0 480 28" class="w-full h-7" preserveAspectRatio="none" aria-hidden="true">
+          <svg viewBox="0 0 480 28" class="w-full h-7 cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+               data-timeline-href="<%= project_logs_path(project.slug) %>" data-timeline-hint="click to read these logs">
             <path class="fill-gray-200 dark:fill-gray-800" d="<%= bars[:empty] %>"/>
             <path class="fill-slate-400 dark:fill-slate-500" d="<%= bars[:bars] %>"/>
             <path class="fill-slate-200 dark:fill-slate-700" d="<%= bars[:partial] %>"/>
@@ -148,29 +150,15 @@
 
       <div class="<%= head %>">
         <span>Issues</span>
-        <span class="normal-case tracking-normal font-normal"><%= t.open_issues_with_events %> of <%= t.open_issue_count %> open had events</span>
+        <span class="normal-case tracking-normal font-normal"><%= t.open_issue_count.zero? ? "no open issues" : "#{t.open_issues_with_events} of #{t.open_issue_count} open had events" %></span>
         <span class="text-right">window / all</span>
       </div>
       <% t.issue_rows.each do |issue_row| %>
         <%= render "projects/timeline/issue", row: issue_row, timeline: t, project: project, lane: row %>
       <% end %>
-      <% ignored, ignored_events, ignored_row = t.ignored_fold %>
-      <% if ignored.any? %>
-        <div class="<%= row %> py-1">
-          <div class="min-w-0">
-            <div class="text-xs text-gray-500 dark:text-gray-400"><%= pluralize(ignored.size, "ignored issue") %>, folded</div>
-            <div class="truncate font-mono text-[11px] text-gray-400 dark:text-gray-500"><%= ignored.first(3).map { "##{it.id} #{it.exception_type.to_s.demodulize}" }.join(" · ") %></div>
-          </div>
-          <svg viewBox="0 0 480 18" class="w-full h-[18px]" preserveAspectRatio="none" aria-hidden="true">
-            <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 17.5H480"/>
-            <% if ignored_row.times %>
-              <path class="stroke-gray-400 dark:stroke-gray-500" stroke-width="1.5" vector-effect="non-scaling-stroke" d="<%= timeline_ticks(ignored_row.times.map { t.frac(it) }, top: 3, bottom: 17) %>"/>
-            <% else %>
-              <path class="fill-gray-400 dark:fill-gray-500" d="<%= timeline_bars(ignored_row.bars, height: 18)[:bars] %>"/>
-            <% end %>
-          </svg>
-          <span class="text-right text-xs tabular-nums text-gray-500 dark:text-gray-400"><%= pluralize(number_with_delimiter(ignored_events), "event") %></span>
-        </div>
+      <% [["ignored", t.ignored_fold], ["resolved", t.resolved_fold]].each do |status, (issues, count, fold_row)| %>
+        <% next if issues.empty? %>
+        <%= render "projects/timeline/fold", status: status, issues: issues, count: count, row: fold_row, timeline: t, project: project, lane: row %>
       <% end %>
       <% hidden = t.open_issues_with_events - t.issue_rows.size %>
       <div class="<%= row %> py-1.5 text-xs text-gray-500 dark:text-gray-400">

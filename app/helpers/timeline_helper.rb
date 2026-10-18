@@ -135,6 +135,18 @@ module TimelineHelper
     (seconds >= 3600) ? "/ #{seconds / 3600}h" : "/ #{seconds / 60}m"
   end
 
+  # A window as a heading: "18 Oct 10:00–11:00Z", or "17 Oct 11:00Z – 18 Oct
+  # 11:00Z" when it spans days.
+  def timeline_window_label(window)
+    from = window.begin.utc
+    to = window.end.utc
+    if to - from <= 1.day && (from.to_date == to.to_date || to == to.beginning_of_day)
+      "#{from.strftime("%-d %b %H:%M")}–#{to.strftime("%H:%M")}Z"
+    else
+      "#{from.strftime("%-d %b %H:%MZ")} – #{to.strftime("%-d %b %H:%MZ")}"
+    end
+  end
+
   # "hour", "15-minute bucket", "day": what the cursor reads out at a time.
   def timeline_bucket_noun(timeline)
     seconds = timeline.bucket_seconds

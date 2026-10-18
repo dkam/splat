@@ -83,4 +83,21 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     assert_match "controller test log", response.body
     assert_match "Attributes", response.body
   end
+
+  # What a click on the project timeline's Logs row opens.
+  test "index narrows to a window, and keeps it through the other filters" do
+    from = 2.hours.ago.utc.beginning_of_hour
+    Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: from - 1.minute,
+      level: :info, source: "sentry", body: "a line before the window", payload: {})
+    Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: from + 5.minutes,
+      level: :info, source: "sentry", body: "a line inside the window", payload: {})
+
+    get project_logs_url(@project.slug, from: from.iso8601, to: (from + 1.hour).iso8601)
+    assert_response :success
+    assert_match "a line inside the window", response.body
+    refute_match "a line before the window", response.body
+    refute_match "controller test log", response.body
+    assert_select "input[type=hidden][name=from][value=?]", from.iso8601
+    assert_select "input[type=hidden][name=to][value=?]", (from + 1.hour).iso8601
+  end
 end

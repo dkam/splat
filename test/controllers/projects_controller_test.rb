@@ -89,6 +89,31 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     refute_match "too little to draw", response.body
   end
 
+  # GR's four Tuber issues: resolved by the time the page was read, so their
+  # 13 events were in the Events row and in no issue row.
+  test "show folds the resolved issues that had events, so every event has a row" do
+    event = Event.create_from_sentry_payload!("evt-resolved",
+      {"message" => "Connection to beanstalk is closed", "timestamp" => 1.hour.ago.iso8601}, @project)
+    event.issue.resolved!
+
+    get project_url(@project.slug, window: "24h")
+    assert_response :success
+    assert_match "1 resolved issue, folded", response.body
+    assert_select "[data-timeline-href=?]", project_events_path(@project.slug, status: "resolved")
+  end
+
+  test "show's events, issue and logs rows open their lists for the bucket clicked" do
+    issue = Event.create_from_sentry_payload!("evt-click",
+      {"message" => "Click me", "timestamp" => 1.hour.ago.iso8601}, @project).issue
+    Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 1.hour.ago,
+      level: :info, source: "sentry", body: "x", payload: {})
+
+    get project_url(@project.slug, window: "24h")
+    assert_select "[data-timeline-href=?]", project_events_path(@project.slug)
+    assert_select "[data-timeline-href=?]", project_events_path(@project.slug, issue_id: issue.id)
+    assert_select "[data-timeline-href=?]", project_logs_path(@project.slug)
+  end
+
   test "show draws every window" do
     ProjectTimeline::WINDOWS.each_key do |key|
       get project_url(@project.slug, window: key)
