@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **Monitor run history.** Every check-in is now kept as a run in
+  `cron_check_ins`, as well as in the monitor's latest state. A run's
+  `in_progress` and its `ok` or `error` fill in one row, with its start, end
+  and duration. A missed check-in gets a row too, at the time it was due.
+  Booko's 19 monitors write about 6,000 rows a day. They're retired on the
+  events clock.
+
 ### Fixed
 
 - **Time spent is scaled by the sample rate.** An SDK sends only a sampled

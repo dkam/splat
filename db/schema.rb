@@ -10,7 +10,21 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_14_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_18_000002) do
+  create_table "cron_check_ins", force: :cascade do |t|
+    t.string "check_in_id"
+    t.datetime "created_at", null: false
+    t.integer "cron_monitor_id", null: false
+    t.float "duration"
+    t.datetime "finished_at"
+    t.integer "project_id", null: false
+    t.datetime "started_at", null: false
+    t.string "status", null: false
+    t.index ["cron_monitor_id", "check_in_id"], name: "index_cron_check_ins_on_cron_monitor_id_and_check_in_id"
+    t.index ["project_id", "started_at"], name: "index_cron_check_ins_on_project_id_and_started_at"
+    t.index ["started_at"], name: "index_cron_check_ins_on_started_at"
+  end
+
   create_table "cron_monitors", force: :cascade do |t|
     t.integer "checkin_margin"
     t.json "config"
@@ -129,6 +143,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_000002) do
     t.string "webhook_secret"
     t.string "webhook_url"
   end
+  add_foreign_key "cron_check_ins", "cron_monitors", on_delete: :cascade
   add_foreign_key "cron_monitors", "projects"
   add_foreign_key "facets", "projects"
   add_foreign_key "releases", "projects"

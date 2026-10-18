@@ -70,13 +70,15 @@ module Maintenance
       facets_deleted = retire_facets(setting)
       # Lives on issues_events, so it must be deleted before that DB is vacuumed.
       issue_facets_deleted = retire_issue_facets(setting.events_data_cutoff_date)
+      # Monitor runs sit beside the issues they raise, so they share its clock.
+      check_ins_deleted = retire_check_ins(setting.events_data_cutoff_date)
 
       vacuum(IssuesEventsRecord)
       vacuum(TransactionsSpansRecord)
       vacuum(LogsRecord)
 
       duration = (Time.current - start).round(2)
-      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, span_trees:#{span_trees_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}, facets:#{facets_deleted}, issue_facets:#{issue_facets_deleted}"
+      Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, span_trees:#{span_trees_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}, facets:#{facets_deleted}, issue_facets:#{issue_facets_deleted}, check_ins:#{check_ins_deleted}"
       {
         duration: duration,
         events_deleted: events_deleted,
@@ -87,7 +89,8 @@ module Maintenance
         histograms_deleted: histograms_deleted,
         hourly_stats_deleted: hourly_stats_deleted,
         facets_deleted: facets_deleted,
-        issue_facets_deleted: issue_facets_deleted
+        issue_facets_deleted: issue_facets_deleted,
+        check_ins_deleted: check_ins_deleted
       }
     end
 
@@ -109,6 +112,10 @@ module Maintenance
     # rather than being the primary DB's small closed set of dropdown options.
     def retire_issue_facets(cutoff)
       batched_delete_all(IssueFacet.where("last_seen_at < ?", cutoff))
+    end
+
+    def retire_check_ins(cutoff)
+      batched_delete_all(CronCheckIn.where("started_at < ?", cutoff))
     end
 
     def retire_logs(cutoff)
