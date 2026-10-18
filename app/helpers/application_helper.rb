@@ -153,6 +153,15 @@ module ApplicationHelper
     ))
   end
 
+  # Whether an issue's row offers "resolve in next release", which needs a
+  # release to come after. Asked once per project per page, not once a row.
+  def next_release_resolvable?(issue)
+    @next_release_resolvable ||= {}
+    return @next_release_resolvable[issue.project_id] if @next_release_resolvable.key?(issue.project_id)
+
+    @next_release_resolvable[issue.project_id] = issue.next_release_resolvable?
+  end
+
   # One hover label per bucket, for sparkline(bar_titles:). Buckets are evenly
   # spaced across `range`, so bucket i starts at range.begin + i * bucket_seconds
   # — no bucket timestamps need carrying through the query layer. The block turns

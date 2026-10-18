@@ -1,0 +1,214 @@
+<%# The one clock (ProjectTimeline): rows that share one time axis. Every row is
+    label | strip | value. Each strip is an SVG drawn in a 480-wide box and
+    stretched to its column (TimelineHelper), and the overlay — deploys and the
+    cursor — lies over exactly that column, so a line drawn there crosses every
+    row at the same moment. The column widths are the --lbl / --val / --gap
+    variables, so the overlay and the rows can't disagree. %>
+<% t = timeline %>
+<% lane = "grid grid-cols-[var(--lbl)_minmax(0,1fr)_var(--val)] gap-x-(--gap) items-center" %>
+<% row = "#{lane} border-t border-gray-100 dark:border-gray-800" %>
+<% head = "#{lane} pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400" %>
+<% aside = "normal-case tracking-normal font-normal text-orange-700 dark:text-orange-300" %>
+<% per = timeline_per_bucket(t) %>
+<% axis = timeline_axis(t) %>
+<% partial = t.partial_last_bucket? %>
+
+<div data-controller="timeline"
+     data-timeline-buckets-value="<%= t.cursor_buckets.to_json %>"
+     data-timeline-bucket-seconds-value="<%= t.bucket_seconds %>">
+  <%# Sticky under the fixed header, so it can still be read while pointing at
+      the monitors far below; two lines tall whatever it says, so filling it
+      doesn't push the timeline down under the pointer. %>
+  <div data-timeline-target="readout"
+       class="sticky top-16 z-30 mb-2 h-[3.25rem] overflow-hidden flex flex-wrap content-center items-center gap-x-4 gap-y-0.5 px-3 rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950 font-mono text-xs tabular-nums text-blue-950 dark:text-blue-100 shadow-sm">
+    <span class="text-blue-700 dark:text-blue-300">Point at the timeline to read one <%= timeline_bucket_noun(t) %> across every row.</span>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm px-3 pb-3 overflow-x-auto [--lbl:8rem] md:[--lbl:13rem] [--val:7.5rem] md:[--val:10.5rem] [--gap:0.75rem]">
+    <div class="relative min-w-[38rem]">
+
+      <div aria-hidden="true" data-timeline-target="overlay"
+           class="pointer-events-none absolute inset-y-0 z-10 left-[calc(var(--lbl)+var(--gap))] right-[calc(var(--val)+var(--gap))]">
+        <% t.deploys.each do |deploy| %>
+          <div class="absolute inset-y-0 border-l border-dashed border-violet-400 dark:border-violet-400/80" style="left: <%= timeline_pct(t.frac(deploy.at)) %>"></div>
+        <% end %>
+        <div data-timeline-target="cursor" class="hidden absolute inset-y-0 bg-blue-500/10 border-x border-blue-500/40"></div>
+      </div>
+
+      <div class="<%= lane %> h-6">
+        <span class="text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">UTC</span>
+        <div class="relative h-full overflow-hidden font-mono text-[11px] tabular-nums text-gray-700 dark:text-gray-300">
+          <% axis.each do |frac, label, _| %>
+            <span class="absolute inset-y-0 pl-1 leading-6 border-l border-gray-300 dark:border-gray-700 whitespace-nowrap" style="left: <%= timeline_pct(frac) %>"><%= label %></span>
+          <% end %>
+        </div>
+        <span class="font-mono text-[11px] text-gray-500 dark:text-gray-400">now <%= t.now.utc.strftime("%H:%MZ") %></span>
+      </div>
+      <div class="<%= lane %> h-5">
+        <span class="text-right font-mono text-[11px] text-gray-500 dark:text-gray-400" data-timeline-target="zone">local</span>
+        <div class="relative h-full overflow-hidden font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+          <% axis.each do |frac, _, epoch| %>
+            <span class="absolute inset-y-0 pl-1 leading-5 border-l border-gray-200 dark:border-gray-800 whitespace-nowrap" style="left: <%= timeline_pct(frac) %>"
+                  data-timeline-target="localTick" data-epoch="<%= epoch %>"></span>
+          <% end %>
+          <% if t.deploys.size <= 6 %>
+            <% t.deploys.each do |deploy| %>
+              <span class="absolute top-0 z-20 pl-1 leading-5 whitespace-nowrap bg-white/80 dark:bg-gray-900/80 text-violet-700 dark:text-violet-300"
+                    style="left: <%= timeline_pct(t.frac(deploy.at)) %>" title="<%= deploy.version %> · first seen <%= deploy.at.utc.strftime("%-d %b %H:%MZ") %>">▾ <%= timeline_release(deploy.version) %></span>
+            <% end %>
+          <% end %>
+        </div>
+        <span class="font-mono text-[11px] text-violet-700 dark:text-violet-300"><%= pluralize(t.deploys.size, "deploy") if t.deploys.any? %></span>
+      </div>
+
+      <div class="<%= head %>"><span>Signals</span><span></span><span class="text-right"><%= t.window.key %></span></div>
+
+      <% tx = t.throughput %>
+      <% settled = partial ? tx[0...-1] : tx %>
+      <div class="<%= row %> py-1">
+        <div class="min-w-0"><div class="text-sm font-semibold">Throughput</div><div class="text-[11px] text-gray-500 dark:text-gray-400">transactions <%= per %>, as received</div></div>
+        <% if tx.sum.positive? %>
+          <% bars = timeline_bars(tx, height: 40, partial: partial) %>
+          <svg viewBox="0 0 480 40" class="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+            <path class="fill-gray-200 dark:fill-gray-800" d="<%= bars[:empty] %>"/>
+            <path class="fill-blue-500 dark:fill-blue-400" d="<%= bars[:bars] %>"/>
+            <path class="fill-blue-200 dark:fill-blue-900" d="<%= bars[:partial] %>"/>
+          </svg>
+        <% else %>
+          <span class="text-xs text-gray-500 dark:text-gray-400">no transactions in this window</span>
+        <% end %>
+        <div class="text-right tabular-nums">
+          <div class="text-[15px] font-bold"><%= number_with_delimiter(tx.sum) %></div>
+          <div class="text-[11px] text-gray-500 dark:text-gray-400">pk <%= timeline_k(settled.max) %> · lo <%= timeline_k(settled.min) %></div>
+        </div>
+      </div>
+
+      <% pcts = t.percentiles %>
+      <div class="<%= row %> py-1">
+        <div class="min-w-0"><div class="text-sm font-semibold">Latency</div><div class="text-[11px] text-gray-500 dark:text-gray-400">p95 <%= per %>, every endpoint</div></div>
+        <% if t.latency.compact.any? %>
+          <% line = timeline_line(t.latency, height: 40) %>
+          <svg viewBox="0 0 480 40" class="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+            <path class="fill-amber-500/15" d="<%= line[:area] %>"/>
+            <path class="fill-none stroke-amber-500" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" d="<%= line[:line] %>"/>
+          </svg>
+        <% else %>
+          <span class="text-xs text-gray-500 dark:text-gray-400">no requests to time</span>
+        <% end %>
+        <div class="text-right tabular-nums">
+          <div class="text-[15px] font-bold"><%= format_duration(pcts[:p50]) %> <span class="text-[11px] font-medium text-gray-500 dark:text-gray-400">p50</span></div>
+          <div class="text-[11px] text-gray-500 dark:text-gray-400">p95 <%= format_duration(pcts[:p95]) %> · p99 <%= format_duration(pcts[:p99]) %></div>
+        </div>
+      </div>
+
+      <% ev = t.events_per_bucket %>
+      <div class="<%= row %> py-1">
+        <div class="min-w-0"><div class="text-sm font-semibold">Events</div><div class="text-[11px] text-gray-500 dark:text-gray-400">errors and messages <%= per %></div></div>
+        <% if ev.sum.positive? %>
+          <% bars = timeline_bars(ev, height: 40) %>
+          <svg viewBox="0 0 480 40" class="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+            <path class="fill-gray-200 dark:fill-gray-800" d="<%= bars[:empty] %>"/>
+            <path class="fill-red-500 dark:fill-red-400" d="<%= bars[:bars] %>"/>
+          </svg>
+        <% else %>
+          <span class="text-xs text-gray-500 dark:text-gray-400">no events in this window</span>
+        <% end %>
+        <div class="text-right tabular-nums">
+          <div class="text-[15px] font-bold"><%= number_with_delimiter(ev.sum) %></div>
+          <div class="text-[11px] text-gray-500 dark:text-gray-400">pk <%= number_with_delimiter(ev.max) %> <%= per %></div>
+        </div>
+      </div>
+
+      <% logs = t.logs_per_bucket %>
+      <% if logs.sum.positive? %>
+        <div class="<%= row %> py-1">
+          <div class="min-w-0">
+            <%= link_to "Logs", project_logs_path(project.slug), class: "text-sm font-semibold hover:underline" %>
+            <div class="text-[11px] text-gray-500 dark:text-gray-400">lines <%= per %></div>
+          </div>
+          <% bars = timeline_bars(logs, height: 28, partial: partial) %>
+          <svg viewBox="0 0 480 28" class="w-full h-7" preserveAspectRatio="none" aria-hidden="true">
+            <path class="fill-gray-200 dark:fill-gray-800" d="<%= bars[:empty] %>"/>
+            <path class="fill-slate-400 dark:fill-slate-500" d="<%= bars[:bars] %>"/>
+            <path class="fill-slate-200 dark:fill-slate-700" d="<%= bars[:partial] %>"/>
+          </svg>
+          <div class="text-right text-sm font-bold tabular-nums"><%= number_with_delimiter(logs.sum) %></div>
+        </div>
+      <% end %>
+
+      <div class="<%= head %>">
+        <span>Issues</span>
+        <span class="normal-case tracking-normal font-normal"><%= t.open_issues_with_events %> of <%= t.open_issue_count %> open had events</span>
+        <span class="text-right">window / all</span>
+      </div>
+      <% t.issue_rows.each do |issue_row| %>
+        <%= render "projects/timeline/issue", row: issue_row, timeline: t, project: project, lane: row %>
+      <% end %>
+      <% ignored, ignored_events, ignored_row = t.ignored_fold %>
+      <% if ignored.any? %>
+        <div class="<%= row %> py-1">
+          <div class="min-w-0">
+            <div class="text-xs text-gray-500 dark:text-gray-400"><%= pluralize(ignored.size, "ignored issue") %>, folded</div>
+            <div class="truncate font-mono text-[11px] text-gray-400 dark:text-gray-500"><%= ignored.first(3).map { "##{it.id} #{it.exception_type.to_s.demodulize}" }.join(" · ") %></div>
+          </div>
+          <svg viewBox="0 0 480 18" class="w-full h-[18px]" preserveAspectRatio="none" aria-hidden="true">
+            <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 17.5H480"/>
+            <% if ignored_row.times %>
+              <path class="stroke-gray-400 dark:stroke-gray-500" stroke-width="1.5" vector-effect="non-scaling-stroke" d="<%= timeline_ticks(ignored_row.times.map { t.frac(it) }, top: 3, bottom: 17) %>"/>
+            <% else %>
+              <path class="fill-gray-400 dark:fill-gray-500" d="<%= timeline_bars(ignored_row.bars, height: 18)[:bars] %>"/>
+            <% end %>
+          </svg>
+          <span class="text-right text-xs tabular-nums text-gray-500 dark:text-gray-400"><%= pluralize(number_with_delimiter(ignored_events), "event") %></span>
+        </div>
+      <% end %>
+      <% hidden = t.open_issues_with_events - t.issue_rows.size %>
+      <div class="<%= row %> py-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <span class="col-span-2">
+          <% if t.open_issue_count.zero? %>
+            No open issues.
+          <% else %>
+            <%= t.quiet_open_issue_count.zero? ? "Every open issue had events." : "#{pluralize(t.quiet_open_issue_count, "other open issue")}: no events in this window." %>
+            <% if hidden.positive? %><%= hidden %> more with events aren't drawn.<% end %>
+          <% end %>
+        </span>
+        <%= link_to "all issues →", project_issues_path(project.slug), class: "text-right text-blue-600 dark:text-blue-400 hover:underline" %>
+      </div>
+
+      <% scaled = t.endpoints.any? { it.stats["rated_count"].to_i.positive? } %>
+      <div class="<%= head %>">
+        <span>Where the time went</span>
+        <span class="<%= aside %>">p95 <%= per %> · time <%= scaled ? "scaled by each SDK's sample rate" : "as recorded" %></span>
+        <span class="text-right">time · p95</span>
+      </div>
+      <% if t.endpoints.any? %>
+        <% t.endpoints.each do |endpoint| %>
+          <%= render "projects/timeline/endpoint", endpoint: endpoint, timeline: t, project: project, lane: row, per: per %>
+        <% end %>
+      <% else %>
+        <div class="<%= row %> py-1.5 text-xs text-gray-500 dark:text-gray-400"><span class="col-span-3">No transactions in this window.</span></div>
+      <% end %>
+
+      <% if t.monitor_rows.any? %>
+        <% failing = t.monitor_rows.count(&:failing?) %>
+        <div class="<%= head %>">
+          <span>Monitors</span>
+          <span class="normal-case tracking-normal font-normal"><%= t.monitor_rows.size - failing %> ok<% if failing.positive? %> · <span class="text-red-600 dark:text-red-400"><%= failing %> failing</span><% end %></span>
+          <span class="text-right">schedule · last run</span>
+        </div>
+        <% t.monitor_rows.each do |monitor_row| %>
+          <%= render "projects/timeline/monitor", row: monitor_row, timeline: t, lane: row %>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 bg-blue-500 dark:bg-blue-400"></span>count <%= per %></span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 bg-blue-200 dark:bg-blue-900"></span><%= timeline_bucket_noun(t) %> still running, left out of the low</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-px h-3 bg-red-500"></span>one event</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-0.5 bg-amber-500"></span>p95 · dots when too few to say</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-1.5 bg-emerald-500"></span>monitor run</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-3 border-l border-dashed border-violet-400"></span>deploy</span>
+  </div>
+</div>

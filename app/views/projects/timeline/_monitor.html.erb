@@ -1,0 +1,41 @@
+<%# A monitor's runs from cron_check_ins: one bar per run, start to finish, when
+    there are few enough (ProjectTimeline::TICK_LIMIT); otherwise one segment
+    per bucket that had a run, which is what an every-minute heartbeat needs.
+    A monitor with no runs kept in the window yet shows its last check-in. A
+    failing one is hatched, and says what's wrong. %>
+<% monitor = row.monitor %>
+<div class="<%= lane %> py-1">
+  <span class="truncate font-mono text-xs <%= row.failing? ? "font-semibold text-red-700 dark:text-red-300" : "text-gray-800 dark:text-gray-200" %>" title="<%= monitor.slug %>"><%= monitor.slug %></span>
+  <div class="relative h-5 <%= "rounded overflow-hidden bg-red-50 dark:bg-red-950/40" if row.failing? %>">
+    <svg viewBox="0 0 480 20" class="absolute inset-0 w-full h-full" preserveAspectRatio="none" aria-hidden="true">
+      <% if row.failing? %>
+        <path class="stroke-red-200 dark:stroke-red-900" stroke-width="1.2" vector-effect="non-scaling-stroke" d="<%= timeline_hatch(20) %>"/>
+      <% end %>
+      <% if row.runs %>
+        <% runs = timeline_runs(timeline, row.runs).group_by(&:last) %>
+        <path class="fill-emerald-500 dark:fill-emerald-400" d="<%= timeline_spans(Array(runs["ok"]), top: 5, bottom: 15) %>"/>
+        <path class="fill-amber-400" d="<%= timeline_spans(Array(runs["in_progress"]), top: 5, bottom: 15) %>"/>
+        <path class="fill-red-500 dark:fill-red-400" d="<%= timeline_spans(Array(runs["error"]), top: 3, bottom: 17) %>"/>
+        <path class="stroke-red-500 dark:stroke-red-400" stroke-width="2" vector-effect="non-scaling-stroke" d="<%= timeline_ticks(Array(runs["missed"]).map(&:first), top: 0, bottom: 20) %>"/>
+      <% elsif row.coverage %>
+        <% n = timeline.buckets.to_f %>
+        <% segments = ->(status) { (0...timeline.buckets).select { row.coverage[it][status].positive? }.map { [it / n, (it + 1) / n] } } %>
+        <path class="fill-emerald-500 dark:fill-emerald-400" d="<%= timeline_spans(segments.call("ok"), top: 7, bottom: 13) %>"/>
+        <path class="fill-red-500 dark:fill-red-400" d="<%= timeline_spans(segments.call("error"), top: 4, bottom: 16) %>"/>
+        <path class="stroke-red-500 dark:stroke-red-400" stroke-width="2" vector-effect="non-scaling-stroke"
+              d="<%= timeline_ticks(segments.call("missed").map(&:first), top: 0, bottom: 20) %>"/>
+      <% elsif !row.failing? %>
+        <path class="stroke-gray-300 dark:stroke-gray-700" stroke-width="1" stroke-dasharray="1 4" vector-effect="non-scaling-stroke" d="M0 10H480"/>
+        <% if monitor.last_checkin_at && monitor.last_checkin_at >= timeline.range.begin %>
+          <path class="stroke-emerald-500 dark:stroke-emerald-400" stroke-width="2" vector-effect="non-scaling-stroke" d="<%= timeline_ticks([timeline.frac(monitor.last_checkin_at)], top: 2, bottom: 18) %>"/>
+        <% end %>
+      <% end %>
+    </svg>
+    <% if row.failing? %>
+      <span class="relative block truncate px-2 font-mono text-[11px] leading-5 text-red-800 dark:text-red-200"><%= timeline_monitor_note(monitor) %></span>
+    <% end %>
+  </div>
+  <div class="truncate text-right font-mono text-[11px] text-gray-500 dark:text-gray-400" title="<%= monitor.schedule_description %>">
+    <%= timeline_schedule(monitor) %><% if monitor.last_duration %> · <%= format_time_spent(monitor.last_duration * 1000) %><% end %>
+  </div>
+</div>

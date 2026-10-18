@@ -79,103 +79,13 @@ class ProjectsController < ApplicationController
     head :no_content
   end
 
-  # Show is a dashboard — the metrics bundle runs a handful of aggregate
-  # queries (hourly stats, histograms, event counts) per page load, so it's
-  # computed once per cache window per project and stashed in Rails cache.
-  # Row lookups (recent_issues, recent_events) and the queue depth stay live
-  # since they're cheap.
-  #
-  # TTL is generous (5 min) because a cold miss costs seconds on a busy
-  # instance; the data is for human eyeballs on a dashboard, freshness within
-  # 5 minutes is fine.
-  SHOW_METRICS_TTL = 5.minutes
-
+  # The one clock: every row of the project on one time axis (see
+  # ProjectTimeline). ?window= picks 1h to 30d; without it the page opens at
+  # 24h, or 7d for a project with too little in the last day to draw.
   def show
-    @recent_issues = @project.open_issues.limit(5)
-    @recent_events = @project.recent_events(limit: 5)
+    @timeline = ProjectTimeline.for(@project, window: params[:window])
     @queue_depth = queue_depth
-    @open_issue_count = Rails.cache.fetch("project_#{@project.id}_open_issue_count", expires_in: SHOW_METRICS_TTL) do
-      @project.issues.open.count
-    end
-    @logs_count_24h = Rails.cache.fetch("project_#{@project.id}_logs_count_24h", expires_in: SHOW_METRICS_TTL) do
-      Log.where(project_id: @project.id).where(timestamp: 24.hours.ago..Time.current).count
-    end
-
-    # Hour-aligned, matching the index: it's the granularity
-    # Event.hourly_volume caches at, and it lines every chart on the page up on
-    # the same boundaries instead of on whatever minute the page was loaded.
-    @sparkline_buckets = 24
-    current_hour = Analytics::Histogram.hour_bucket(Time.current)
-    @sparkline_range = (current_hour - (@sparkline_buckets - 1).hours)..(current_hour + 1.hour)
-
-    metrics = Rails.cache.fetch(
-      "project_#{@project.id}_show_metrics/v4",
-      expires_in: SHOW_METRICS_TTL,
-      race_condition_ttl: 10.seconds
-    ) do
-      top_endpoints = @project.top_endpoints_by_impact(limit: 5)
-      {
-        top_endpoints: top_endpoints,
-        event_count_24h: @project.event_count(24.hours.ago..Time.current),
-        transaction_count_24h: @project.transaction_count(24.hours.ago..Time.current),
-        p50_response_time: @project.p50_response_time,
-        # error_rate moved into the cached bundle so it isn't recomputed
-        # multiple times in the view (it was previously called 3x in
-        # show.html.erb's CSS-class ternary).
-        error_rate: @project.error_rate,
-        endpoint_sparklines: Transaction.p95_by_bucket(
-          transaction_names: top_endpoints.map { |e| e["transaction_name"] },
-          time_range: @sparkline_range, buckets: @sparkline_buckets,
-          project_id: @project.id
-        ),
-        # Per-hour cached, same as the index — see Event.hourly_volume.
-        events_by_hour: Event.hourly_volume(
-          project_id: @project.id, hours: @sparkline_buckets
-        ),
-        transactions_by_hour: Transaction.volume_by_bucket(
-          time_range: @sparkline_range, buckets: @sparkline_buckets,
-          project_id: @project.id
-        )
-      }
-    end
-
-    @top_endpoints = metrics[:top_endpoints]
-    @event_count_24h = metrics[:event_count_24h]
-    @transaction_count_24h = metrics[:transaction_count_24h]
-    @p50_response_time = metrics[:p50_response_time]
-    @error_rate = metrics[:error_rate]
-    @endpoint_sparklines = metrics[:endpoint_sparklines]
-    @events_by_hour = metrics[:events_by_hour]
-    @transactions_by_hour = metrics[:transactions_by_hour]
-
-    # Issue sparklines depend on the live @recent_issues ids, so they're
-    # cached separately keyed off the visible issue set. Cheap when warm.
-    issue_ids = @recent_issues.map(&:id)
-    @issue_sparklines = Rails.cache.fetch(
-      "project_#{@project.id}_issue_sparklines/#{issue_ids.sort.join(",")}",
-      expires_in: SHOW_METRICS_TTL
-    ) do
-      Event.event_counts_by_bucket(
-        issue_ids: issue_ids,
-        time_range: @sparkline_range,
-        buckets: @sparkline_buckets,
-        project_id: @project.id
-      )
-    end
-
-    @deploy_markers = @project.releases
-      .where(first_seen_at: @sparkline_range)
-      .pluck(:first_seen_at)
-
-    # The recent issues render the issues list's row, so they need what it
-    # does: the threshold for its burst badge, and environment chips, which
-    # the list leaves off a project that only reports one environment.
-    @burst_threshold = Setting.instance.burst_threshold
-    @issue_environments = if IssueFacet.values_for(@project.id, :environment).many?
-      IssueFacet.values_by_issue(issue_ids, :environment)
-    else
-      {}
-    end
+    @last_event_at = @project.issues.maximum(:last_seen)
   end
 
   def new

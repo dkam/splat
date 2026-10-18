@@ -279,12 +279,13 @@ module TransactionAnalytics
       scope = raw_window_scope(time_range, project_id: project_id, environment: environment, server_name: server_name)
       ranked = scope.group(:project_id, :transaction_name)
         .pluck(:project_id, :transaction_name, Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"),
-          Arel.sql("SUM(duration * COALESCE(1.0 / sample_rate, 1.0))"), Arel.sql("COUNT(sample_rate)"))
-        .map do |pid, name, cnt, sum, mx, est_sum, rated|
+          Arel.sql("SUM(duration * COALESCE(1.0 / sample_rate, 1.0))"), Arel.sql("COUNT(sample_rate)"),
+          Arel.sql("SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END)"))
+        .map do |pid, name, cnt, sum, mx, est_sum, rated, n_plus_one|
           avg = sum.to_f / cnt
           {"project_id" => pid, "transaction_name" => name, "count" => cnt, "avg_duration" => avg.round(1),
            "max_duration" => mx.to_i, "time_spent" => (avg * cnt).round,
-           "est_time_spent" => est_sum.to_f.round, "rated_count" => rated.to_i}
+           "est_time_spent" => est_sum.to_f.round, "rated_count" => rated.to_i, "n_plus_one_count" => n_plus_one.to_i}
         end
         .sort_by { |r| -r["est_time_spent"] }.first(limit)
       return ranked if ranked.empty?
@@ -369,6 +370,15 @@ module TransactionAnalytics
           (counts && counts.any?) ? (Analytics::Histogram.percentile_from_counts(counts, 0.95) || 0).round : 0
         end
       end
+    end
+
+    # Project-wide p95 per bucket, every endpoint's histogram merged. nil for a
+    # bucket with no requests, so a chart can leave a gap rather than drop to 0.
+    def p95_series(project_id:, time_range:, buckets:, environment: nil)
+      bucket_seconds, buckets = bucketing_for(time_range, buckets)
+      counts = bucketed_index_counts(time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds,
+        project_id: project_id, environment: environment)
+      Array.new(buckets) { |b| counts[b] && Analytics::Histogram.percentile_from_counts(counts[b], 0.95)&.round }
     end
 
     # Total transaction volume bucketed by time.

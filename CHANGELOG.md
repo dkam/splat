@@ -15,12 +15,31 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ### Added
 
+- **The project page is one clock.** Throughput, latency, logs, events, the
+  open issues that fired, the endpoints that took the time, and every
+  monitor are rows on one time axis, in UTC and local time. Deploys are
+  drawn down the whole page, and pointing at any row marks that hour (or
+  bucket) in every row and reads it out above. Windows run from 1h to 30d.
+  Each row draws itself from what it has: a tick per event or a bar per
+  bucket, a p95 line or dots when there are too few requests for one, a
+  bar per monitor run or a band for a heartbeat. A project with too little
+  in the last day opens at 7d and says so. Two issues whose events land in
+  the same seconds under the same message are marked as twins. Issue rows
+  keep resolve and ignore, and gain resolve in the next release, as the
+  issues list does.
 - **Monitor run history.** Every check-in is now kept as a run in
   `cron_check_ins`, as well as in the monitor's latest state. A run's
   `in_progress` and its `ok` or `error` fill in one row, with its start, end
   and duration. A missed check-in gets a row too, at the time it was due.
   Booko's 19 monitors write about 6,000 rows a day. They're retired on the
   events clock.
+
+### Changed
+
+- **Pages use the window's width.** `<main>` was a Tailwind `container`,
+  which stops at the breakpoint below the window rather than at the window,
+  and each page then padded itself inside a second `max-w-7xl`. A 953px
+  window got 680px of content. It's fluid now, up to 1536px.
 
 ### Fixed
 

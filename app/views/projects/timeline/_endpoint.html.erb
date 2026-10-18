@@ -1,0 +1,32 @@
+<%# An endpoint's p95 per bucket: a line when it has enough requests a bucket
+    for a p95 to mean something (ProjectTimeline::DENSE_PER_BUCKET), a dot per
+    bucket when it hasn't, since then each "p95" is just the slowest request. %>
+<% stats = endpoint.stats %>
+<div class="<%= lane %> py-1">
+  <div class="flex items-center gap-1.5 min-w-0">
+    <%= link_to endpoint.name, detail_project_endpoints_path(project.slug, name: endpoint.name),
+        class: "truncate font-mono text-xs text-gray-800 dark:text-gray-200 hover:underline", title: endpoint.name %>
+    <% if stats["n_plus_one_count"].to_i.positive? %>
+      <% share = (100.0 * stats["n_plus_one_count"] / stats["count"].to_i.clamp(1, nil)).round %>
+      <span class="shrink-0 px-1 rounded border text-[10px] font-semibold text-orange-700 border-orange-300 dark:text-orange-300 dark:border-orange-800"
+            title="<%= share %>% of its requests repeated a query in a loop">N+1</span>
+    <% end %>
+  </div>
+  <svg viewBox="0 0 480 24" class="w-full h-6" preserveAspectRatio="none" aria-hidden="true">
+    <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 23.5H480"/>
+    <% if endpoint.line? %>
+      <% line = timeline_line(endpoint.p95s.map { it.to_i.positive? ? it : nil }, height: 24) %>
+      <path class="fill-amber-500/15" d="<%= line[:area] %>"/>
+      <path class="fill-none stroke-amber-500" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" d="<%= line[:line] %>"/>
+    <% else %>
+      <path class="fill-amber-500" d="<%= timeline_dots(endpoint.p95s, height: 24) %>"/>
+    <% end %>
+  </svg>
+  <div class="text-right text-xs tabular-nums whitespace-nowrap">
+    <%= time_spent_tag(stats, class: "font-semibold text-gray-900 dark:text-gray-100") %>
+    <span class="inline-block w-14 text-gray-500 dark:text-gray-400"><%= format_duration(stats["p95_duration"]) %></span>
+    <% unless endpoint.line? %>
+      <div class="text-[10px] text-gray-400 dark:text-gray-500">~<%= (stats["count"].to_f / timeline.buckets).round(1) %> <%= per %>: too few for a p95</div>
+    <% end %>
+  </div>
+</div>

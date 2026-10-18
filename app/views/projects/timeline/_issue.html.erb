@@ -1,0 +1,34 @@
+<%# An open issue's row: a tick per event when there are few enough to mark
+    one by one, a bar per bucket when there aren't (ProjectTimeline::TICK_LIMIT).
+    A twin is drawn paler, under the issue it repeats. %>
+<% issue = row.issue %>
+<div class="<%= lane %> py-1">
+  <div class="min-w-0 py-0.5">
+    <div class="flex items-center gap-1.5 min-w-0 font-mono text-[11.5px]">
+      <%= link_to "##{issue.id}", project_issue_path(project.slug, issue), class: "shrink-0 text-gray-900 dark:text-gray-100 hover:underline" %>
+      <span class="truncate text-gray-500 dark:text-gray-400"><%= issue.exception_type.presence || "Message" %></span>
+      <% if row.twin_of %>
+        <span class="shrink-0 px-1 rounded border text-[10px] font-semibold text-violet-700 border-violet-300 dark:text-violet-300 dark:border-violet-800"
+              title="Every event landed in the same second as one of #<%= row.twin_of %>'s, under the same message: probably one failure reported twice">twin of #<%= row.twin_of %></span>
+      <% end %>
+      <% if issue.first_seen >= timeline.range.begin %>
+        <span class="shrink-0 px-1 rounded border text-[10px] font-semibold text-emerald-700 border-emerald-300 dark:text-emerald-300 dark:border-emerald-800">new</span>
+      <% end %>
+    </div>
+    <%= link_to issue.title.lines.first.to_s.strip, project_issue_path(project.slug, issue),
+        class: "block truncate text-xs text-gray-700 dark:text-gray-300 hover:underline", title: issue.title %>
+  </div>
+  <svg viewBox="0 0 480 26" class="w-full h-[26px]" preserveAspectRatio="none" aria-hidden="true">
+    <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 25.5H480"/>
+    <% if row.times %>
+      <path class="<%= row.twin_of ? "stroke-red-300 dark:stroke-red-800" : "stroke-red-500 dark:stroke-red-400" %>" stroke-width="1.5" vector-effect="non-scaling-stroke"
+            d="<%= timeline_ticks(row.times.map { timeline.frac(it) }, top: 3, bottom: 25) %>"/>
+    <% else %>
+      <path class="<%= row.twin_of ? "fill-red-300 dark:fill-red-800" : "fill-red-500 dark:fill-red-400" %>" d="<%= timeline_bars(row.bars, height: 26)[:bars] %>"/>
+    <% end %>
+  </svg>
+  <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+    <span class="whitespace-nowrap text-xs tabular-nums"><b class="text-sm"><%= number_with_delimiter(row.in_window) %></b><span class="text-gray-500 dark:text-gray-400"> / <%= number_with_delimiter(issue.count) %></span></span>
+    <%= render "issues/row_actions", project: project, issue: issue %>
+  </div>
+</div>
