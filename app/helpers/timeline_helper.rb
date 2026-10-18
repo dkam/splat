@@ -101,6 +101,25 @@ module TimelineHelper
       .map { |t| [timeline.frac(t), t.strftime(format), t.to_i] }.to_a
   end
 
+  # A release label is about a third of the strip wide at 953px.
+  DEPLOY_LABEL_SPAN = 0.3
+
+  # The deploys that get a label, so that no two labels print over each other;
+  # the rest keep their line. A label too near the right edge to fit hangs to
+  # the left of its line, so it's the span it covers, not where its line is,
+  # that has to clear the last label's.
+  def timeline_deploy_labels(timeline)
+    clear_from = 0.0
+    timeline.deploys.filter_map do |deploy|
+      frac = timeline.frac(deploy.at)
+      hang_left = frac > 1 - DEPLOY_LABEL_SPAN
+      from, to = hang_left ? [frac - DEPLOY_LABEL_SPAN, frac] : [frac, frac + DEPLOY_LABEL_SPAN]
+      next if from < clear_from
+      clear_from = to
+      {deploy: deploy, frac: frac, hang_left: hang_left}
+    end
+  end
+
   # "19.12.3+5a6f4862…" → "19.12.3 · 5a6f486"; anything else, shortened.
   def timeline_release(version)
     name, _, build = version.to_s.partition("+")
@@ -116,12 +135,12 @@ module TimelineHelper
     (seconds >= 3600) ? "/ #{seconds / 3600}h" : "/ #{seconds / 60}m"
   end
 
-  # "hour", "15 minutes", "day": what the cursor reads out at a time.
+  # "hour", "15-minute bucket", "day": what the cursor reads out at a time.
   def timeline_bucket_noun(timeline)
     seconds = timeline.bucket_seconds
     return "day" if seconds == 86_400
     return "hour" if seconds == 3600
-    (seconds >= 3600) ? "#{seconds / 3600} hours" : "#{seconds / 60} minutes"
+    (seconds >= 3600) ? "#{seconds / 3600}-hour bucket" : "#{seconds / 60}-minute bucket"
   end
 
   # 24165 → "24.2k", for the peak and low under a row's total.

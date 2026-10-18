@@ -65,6 +65,7 @@ export default class extends Controller {
     const from = new Date(bucket.t * 1000)
     const to = new Date((bucket.t + this.bucketSecondsValue) * 1000)
     const parts = [[`${this.utc(from)}–${this.utc(to)}Z · ${this.local(from)} local`, "text-blue-700 dark:text-blue-300"]]
+    for (const version of bucket.deploys) parts.push([`deploy ${this.release(version)}`, "text-violet-700 dark:text-violet-300"])
 
     parts.push([`${this.number(bucket.txn)} txn`])
     if (bucket.p95) parts.push([`p95 ${this.duration(bucket.p95)}`])
@@ -91,6 +92,13 @@ export default class extends Controller {
 
   local(date) {
     return date.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })
+  }
+
+  // "19.12.3+5a6f4862…" → "19.12.3 · 5a6f486", as TimelineHelper#timeline_release
+  // labels the deploy row.
+  release(version) {
+    const [name, build] = version.split("+")
+    return build && /^[0-9a-f]{7,}$/i.test(build) ? `${name} · ${build.slice(0, 7)}` : version
   }
 
   number(value) {

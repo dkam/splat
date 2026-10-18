@@ -32,6 +32,8 @@ class ProjectTimeline
   ENDPOINT_ROWS = 8
   ISSUE_ROWS = 12
   TWIN_TITLE_PREFIX = 20
+  # Two reports of one request can land either side of a second boundary.
+  TWIN_SECONDS = 2
 
   # The transaction half is aggregate reads over hours of data; issues and
   # monitors stay live, since resolving an issue on this page should show.
@@ -186,7 +188,9 @@ class ProjectTimeline
         events: events_per_bucket[i],
         issues: issue_rows.filter_map { |row| (n = events_in_bucket(row, i)).positive? ? ["##{row.issue.id}", n] : nil }.first(4),
         endpoints: lines.filter_map { |e| [e.name, e.p95s[i]] if e.p95s[i].to_i.positive? },
-        monitors: monitors_in_bucket(i)
+        monitors: monitors_in_bucket(i),
+        # Named here because a crowded window drops some deploys' labels.
+        deploys: deploys.select { it.at >= bucket_start(i) && it.at < bucket_start(i) + bucket_seconds }.map(&:version)
       }
     end
   end
@@ -286,24 +290,31 @@ class ProjectTimeline
     end
   end
 
-  # Two open issues whose events landed in the same seconds, under titles that
-  # start the same way (TWIN_TITLE_PREFIX characters), are one failure
-  # reported twice: an exception and the error that wrapped it, say. The twin
-  # is drawn under the issue with more events overall, and says whose twin it
-  # is.
+  # Two open issues whose events landed together, each within TWIN_SECONDS of
+  # its counterpart, under titles that start the same way (TWIN_TITLE_PREFIX
+  # characters), are one failure reported twice: an exception and the error
+  # that wrapped it, say. The twin is drawn under the issue with more events
+  # overall, and says whose twin it is.
   def pair_twins(rows)
     twin_of = {}
-    rows.select(&:times).group_by { |row| row.times.map(&:to_i) }.each_value do |group|
-      next if group.size < 2
-      primary, *others = group.sort_by { |row| [-row.issue.count.to_i, row.issue.id] }
-      others.each do |row|
-        twin_of[row.issue.id] = primary.issue.id if common_prefix(row.issue.title, primary.issue.title) >= TWIN_TITLE_PREFIX
+    candidates = rows.select(&:times).sort_by { |row| [-row.issue.count.to_i, row.issue.id] }
+    candidates.each_with_index do |primary, i|
+      next if twin_of.key?(primary.issue.id)
+      candidates.drop(i + 1).each do |row|
+        next if twin_of.key?(row.issue.id) || !twins?(primary, row)
+        twin_of[row.issue.id] = primary.issue.id
       end
     end
 
     rows.reject { twin_of.key?(it.issue.id) }.flat_map do |row|
       [row] + rows.select { twin_of[it.issue.id] == row.issue.id }.map { it.with(twin_of: row.issue.id) }
     end
+  end
+
+  def twins?(a, b)
+    a.times.size == b.times.size &&
+      a.times.zip(b.times).all? { |x, y| (x - y).abs <= TWIN_SECONDS } &&
+      common_prefix(a.issue.title, b.issue.title) >= TWIN_TITLE_PREFIX
   end
 
   def common_prefix(a, b)

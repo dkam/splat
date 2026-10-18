@@ -67,11 +67,16 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
   test "show marks a deploy in the window with its release" do
     @project.releases.create!(version: "19.12.3+5a6f4862b90cc623eaa52a546b30453b52f36a13",
-      first_seen_at: 2.hours.ago, last_seen_at: 1.hour.ago)
+      first_seen_at: 12.hours.ago, last_seen_at: 1.hour.ago)
 
     get project_url(@project.slug, window: "24h")
     assert_response :success
-    assert_select "span", text: "▾ 19.12.3 · 5a6f486"
+    # On a row of its own: sharing the local-time row, it covered the times.
+    assert_select "[data-timeline-row=deploys] span", text: "▾ 19.12.3 · 5a6f486"
+    assert_select "[data-timeline-target=localTick]" do |ticks|
+      ticks.each { |tick| assert_equal "", tick.text }
+    end
+    assert_select "[data-timeline-row=local] span", text: /19\.12\.3/, count: 0
   end
 
   test "show opens a quiet project at 7d, says so, and keeps a window it's asked for" do

@@ -63,6 +63,28 @@ class ProjectTimelineTest < ActiveSupport::TestCase
     assert_equal [nil, wrapper.id, nil], rows.map(&:twin_of)
   end
 
+  # Booko's #819 and #974: the same three requests, but one reported at
+  # 10:42:01 by one path and 10:42:02 by the other.
+  test "twins whose events straddle a second boundary are still twins" do
+    helper = "undefined method 'admin_headline_setting_path' for an instance of #<Class:0x00007493dffd10f0>"
+    wrapper = issue("#{helper} (ActionView::Template::Error)", count: 3)
+    cause = issue("#{helper} (NoMethodError)", count: 3)
+    at = Time.utc(2026, 10, 18, 9, 42, 1)
+    events(wrapper, at - 3.hours, at + 0.9, at + 12)
+    events(cause, at - 3.hours, at + 1.1, at + 12)
+
+    assert_equal [nil, wrapper.id], timeline.issue_rows.map(&:twin_of)
+  end
+
+  test "issues a few seconds apart are not twins" do
+    a = issue("undefined method 'email' for nil (ActionView::Template::Error)")
+    b = issue("undefined method 'email' for nil (NoMethodError)")
+    events(a, @now - 2.hours)
+    events(b, @now - 2.hours + 5.seconds)
+
+    assert_equal [nil, nil], timeline.issue_rows.map(&:twin_of)
+  end
+
   test "an issue with more events than can be ticked is drawn as bars" do
     flood = issue("Flood", count: 400)
     events(flood, *Array.new(ProjectTimeline::TICK_LIMIT + 1) { |i| @now - 1.hour + i.seconds })
@@ -133,5 +155,6 @@ class ProjectTimelineTest < ActiveSupport::TestCase
     last = tl.cursor_buckets.last
     assert_equal [Time.utc(2026, 10, 18, 10).to_i, 2, [["##{a.id}", 2]]], last.values_at(:t, :events, :issues)
     assert_equal ["1.2.3+abcdef1234"], tl.deploys.map(&:version)
+    assert_equal [["1.2.3+abcdef1234"], []], tl.cursor_buckets.values_at(-3, -1).map { it[:deploys] }
   end
 end

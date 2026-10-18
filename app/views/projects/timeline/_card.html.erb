@@ -44,22 +44,32 @@
         </div>
         <span class="font-mono text-[11px] text-gray-500 dark:text-gray-400">now <%= t.now.utc.strftime("%H:%MZ") %></span>
       </div>
-      <div class="<%= lane %> h-5">
+      <div class="<%= lane %> h-5" data-timeline-row="local">
         <span class="text-right font-mono text-[11px] text-gray-500 dark:text-gray-400" data-timeline-target="zone">local</span>
         <div class="relative h-full overflow-hidden font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
           <% axis.each do |frac, _, epoch| %>
             <span class="absolute inset-y-0 pl-1 leading-5 border-l border-gray-200 dark:border-gray-800 whitespace-nowrap" style="left: <%= timeline_pct(frac) %>"
                   data-timeline-target="localTick" data-epoch="<%= epoch %>"></span>
           <% end %>
-          <% if t.deploys.size <= 6 %>
-            <% t.deploys.each do |deploy| %>
-              <span class="absolute top-0 z-20 pl-1 leading-5 whitespace-nowrap bg-white/80 dark:bg-gray-900/80 text-violet-700 dark:text-violet-300"
-                    style="left: <%= timeline_pct(t.frac(deploy.at)) %>" title="<%= deploy.version %> · first seen <%= deploy.at.utc.strftime("%-d %b %H:%MZ") %>">▾ <%= timeline_release(deploy.version) %></span>
-            <% end %>
-          <% end %>
         </div>
-        <span class="font-mono text-[11px] text-violet-700 dark:text-violet-300"><%= pluralize(t.deploys.size, "deploy") if t.deploys.any? %></span>
+        <span></span>
       </div>
+      <%# Release labels on a row of their own: on the local-time row they
+          covered the times they fell between. %>
+      <% if t.deploys.any? %>
+        <div class="<%= lane %> h-5" data-timeline-row="deploys">
+          <span class="text-right font-mono text-[11px] text-violet-700 dark:text-violet-300">deploys</span>
+          <div class="relative h-full overflow-hidden font-mono text-[11px] text-violet-700 dark:text-violet-300">
+            <% timeline_deploy_labels(t).each do |label| %>
+              <% deploy = label[:deploy] %>
+              <span class="absolute top-0 leading-5 whitespace-nowrap <%= label[:hang_left] ? "-translate-x-full pr-1" : "pl-1" %>"
+                    style="left: <%= timeline_pct(label[:frac]) %>"
+                    title="<%= deploy.version %> · first seen <%= deploy.at.utc.strftime("%-d %b %H:%MZ") %>"><%= label[:hang_left] ? "#{timeline_release(deploy.version)} ▾" : "▾ #{timeline_release(deploy.version)}" %></span>
+            <% end %>
+          </div>
+          <span class="font-mono text-[11px] text-violet-700 dark:text-violet-300"><%= pluralize(t.deploys.size, "deploy") %></span>
+        </div>
+      <% end %>
 
       <div class="<%= head %>"><span>Signals</span><span></span><span class="text-right"><%= t.window.key %></span></div>
 
