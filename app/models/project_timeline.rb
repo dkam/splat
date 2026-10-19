@@ -71,14 +71,19 @@ class ProjectTimeline
     new(project, WINDOWS.fetch(WIDER_WINDOW), now: now, widened_from: DEFAULT_WINDOW)
   end
 
-  def initialize(project, window, now: Time.current, widened_from: nil)
+  # range: a window other than the one ending now, such as a bucket another
+  # page was opened for, cut into window.buckets. The performance page's clock
+  # (PerformanceTimeline) is one of these.
+  def initialize(project, window, now: Time.current, widened_from: nil, range: nil)
     @project = project
     @window = window
     @now = now
     @widened_from = widened_from
-    @bucket_seconds = (window.span / window.buckets).to_i
-    finish = window_end
-    @range = (finish - window.span)..finish
+    @bucket_seconds = ((range ? range.end - range.begin : window.span) / window.buckets).to_i
+    @range = range || begin
+      finish = window_end
+      (finish - window.span)..finish
+    end
   end
 
   def buckets = window.buckets
@@ -86,7 +91,7 @@ class ProjectTimeline
   def bucket_start(index) = range.begin + index * bucket_seconds
 
   # Where a time falls across the window, 0 to 1.
-  def frac(time) = ((time - range.begin) / window.span).clamp(0.0, 1.0)
+  def frac(time) = ((time - range.begin) / (range.end - range.begin)).clamp(0.0, 1.0)
 
   # The last bucket is still filling, so its count isn't comparable yet.
   def partial_last_bucket? = now < range.end

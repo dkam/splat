@@ -3,6 +3,9 @@ require "test_helper"
 class EndpointsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @project = projects(:one)
+    # The timeline caches a window's figures by the hour it ends on, which
+    # every test here shares.
+    Rails.cache.clear
   end
 
   test "detail labels every bucket of the p95 trend for hover" do
@@ -30,9 +33,14 @@ class EndpointsControllerTest < ActionDispatch::IntegrationTest
   # green of a fast endpoint, where the helpers already render N/A for nil.
   test "index shows N/A, not 0ms, when the window has no requests" do
     get project_endpoints_url(@project.slug)
-
     assert_response :success
-    assert_select "div.text-3xl", text: "N/A", count: 3
+    assert_select "div", text: "No transactions in this window."
+    refute_match(/>\s*0ms\s*</, response.body)
+
+    # A kind's own tab still draws its rows, with nothing to say in them.
+    get project_endpoints_url(@project.slug, kind: "job")
+    assert_response :success
+    assert_select "[data-latency=job]", text: /N\/A p50/
     refute_match(/>\s*0ms\s*</, response.body)
   end
 
@@ -65,8 +73,8 @@ class EndpointsControllerTest < ActionDispatch::IntegrationTest
 
     get project_endpoints_url(@project.slug, from: hour.iso8601, to: (hour + 1.hour).iso8601)
     assert_response :success
-    assert_select "#impact tbody tr", 1
-    assert_select "#impact td", text: "3"
+    assert_select "[data-endpoint]", 1
+    assert_select "[data-endpoint] [data-count]", text: "3"
     inside.each { assert_select "a[href=?]", project_transaction_path(@project.slug, it) }
     assert_select "a[href=?]", project_transaction_path(@project.slug, after), count: 0
     assert_match hour.utc.strftime("%-d %b %H:%M"), response.body
@@ -81,7 +89,7 @@ class EndpointsControllerTest < ActionDispatch::IntegrationTest
 
     get project_endpoints_url(@project.slug, from: (hour + 15.minutes).iso8601, to: (hour + 30.minutes).iso8601)
     assert_response :success
-    assert_select "#impact td", text: "2"
+    assert_select "[data-endpoint] [data-count]", text: "2"
   end
 
   test "index and detail list a window's transactions slowest first when asked" do
@@ -134,6 +142,80 @@ class EndpointsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href^=?]", "#{detail_project_endpoints_path(@project.slug)}?", text: "Slowest"
     refute_match %r{href="[^"]*//evil\.example}, response.body
     refute_match %r{href="javascript:}, response.body
+  end
+
+  def create_web_and_job_traffic(job_rate: nil, web_rate: nil)
+    Facet.where(project_id: @project.id).delete_all
+    Facet.reset_throttle!
+    TransactionKind.harvest!(project_id: @project.id, transaction_name: "CoverDownloadJob", op: "queue.process")
+    2.times do |i|
+      @project.transactions.create!(transaction_id: "txn-web-#{i}", transaction_name: "ProductsController#show",
+        op: "http.server", timestamp: 2.hours.ago, duration: 100, http_status: "200", sample_rate: web_rate)
+    end
+    @project.transactions.create!(transaction_id: "txn-job", transaction_name: "CoverDownloadJob",
+      op: "queue.process", timestamp: 2.hours.ago, duration: 5000, sample_rate: job_rate)
+  end
+
+  test "index draws web requests and background jobs apart, each with its own rows" do
+    create_web_and_job_traffic
+
+    get project_endpoints_url(@project.slug)
+    assert_response :success
+
+    assert_select "nav[aria-label=Kind] a[aria-current=page]", text: /All\s+3/
+    assert_select "nav[aria-label=Kind] a", text: /Web\s+2/
+    assert_select "nav[aria-label=Kind] a", text: /Jobs\s+1/
+    assert_select "nav[aria-label=Kind] a", text: /Other/, count: 0
+    assert_select "[data-signal=web] [data-count]", text: "2"
+    assert_select "[data-signal=job] [data-count]", text: "1"
+    assert_select "#kind-web", text: /web requests/
+    assert_select "#kind-job", text: /background jobs/
+    assert_select "[data-endpoint=?]", "ProductsController#show"
+    assert_select "[data-endpoint=?]", "CoverDownloadJob"
+  end
+
+  test "the jobs tab draws only the jobs, in the timeline and the feed" do
+    create_web_and_job_traffic
+
+    get project_endpoints_url(@project.slug, kind: "job")
+    assert_response :success
+
+    assert_select "nav[aria-label=Kind] a[aria-current=page]", text: /Jobs\s+1/
+    assert_select "[data-signal=job] [data-count]", text: "1"
+    assert_select "[data-latency=job]", text: /5\.\d+s p50/
+    assert_select "[data-signal=web]", count: 0
+    assert_select "[data-endpoint=?]", "CoverDownloadJob"
+    assert_select "[data-endpoint=?]", "ProductsController#show", count: 0
+    assert_equal [@project.transactions.find_by!(transaction_id: "txn-job").id], listed_transaction_ids
+  end
+
+  test "the web tab leaves the jobs out of its percentiles" do
+    create_web_and_job_traffic
+
+    get project_endpoints_url(@project.slug, kind: "web")
+    assert_response :success
+    assert_select "[data-latency=web]", text: /p99 10\dms/
+    assert_select "[data-endpoint=?]", "CoverDownloadJob", count: 0
+  end
+
+  # Booko samples requests at 1% and jobs at 10%. As recorded, the two
+  # requests' 200ms is 4% of the time beside the one job's 5s; scaled up, it's
+  # 20s beside 50s.
+  test "each kind's share of the time is scaled by its sample rate" do
+    create_web_and_job_traffic(web_rate: 0.01, job_rate: 0.1)
+
+    get project_endpoints_url(@project.slug)
+    assert_response :success
+    assert_select "#kind-web", text: /29% of it/
+    assert_select "#kind-job", text: /71% of it/
+  end
+
+  test "an unknown kind reads as all of them" do
+    create_web_and_job_traffic
+
+    get project_endpoints_url(@project.slug, kind: "bogus")
+    assert_response :success
+    assert_select "nav[aria-label=Kind] a[aria-current=page]", text: /All\s+3/
   end
 
   private

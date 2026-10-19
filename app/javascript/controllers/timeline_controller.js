@@ -94,6 +94,14 @@ export default class extends Controller {
     const parts = [[`${this.utc(from)}–${this.utc(to)}Z · ${this.local(from)} local`, "text-blue-700 dark:text-blue-300"]]
     for (const version of bucket.deploys) parts.push([`deploy ${this.release(version)}`, "text-violet-700 dark:text-violet-300"])
 
+    // A page with rows of its own (PerformanceTimeline) says what they read,
+    // as [text, className] pairs formatted on the server.
+    if (bucket.facts) {
+      bucket.facts.forEach((fact) => parts.push(fact))
+      if (lane) parts.push([`· ${lane.dataset.timelineHint}`, "underline decoration-dotted text-blue-700 dark:text-blue-300"])
+      return this.spans(parts)
+    }
+
     parts.push([`${this.number(bucket.txn)} txn`])
     if (bucket.p95) parts.push([`p95 ${this.duration(bucket.p95)}`])
     const issues = bucket.issues.map(([id, n]) => `${id} ×${n}`).join(" ")
@@ -106,6 +114,10 @@ export default class extends Controller {
 
     if (lane) parts.push([`· ${lane.dataset.timelineHint}`, "underline decoration-dotted text-blue-700 dark:text-blue-300"])
 
+    return this.spans(parts)
+  }
+
+  spans(parts) {
     return parts.map(([text, className]) => {
       const span = document.createElement("span")
       span.textContent = text

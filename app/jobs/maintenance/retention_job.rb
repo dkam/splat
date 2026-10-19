@@ -100,9 +100,14 @@ module Maintenance
     # value absent that long points at zero surviving rows, so it should leave the
     # dropdown. facets is on the primary DB (not vacuumed here); the churn is a
     # handful of rows, so incremental_vacuum isn't worth it.
+    #
+    # A transaction kind classifies rollup rows, not raw ones, so it keeps the
+    # rollups' clock: a job pruned with its raw rows would turn the rollups it
+    # still has into web requests.
     def retire_facets(setting)
       batched_delete_all(Facet.where(stream: "log").where("last_seen_at < ?", setting.logs_data_cutoff_date)) +
-        batched_delete_all(Facet.where(stream: "transaction").where("last_seen_at < ?", setting.transactions_data_cutoff_date))
+        batched_delete_all(Facet.where(stream: "transaction").where("last_seen_at < ?", setting.transactions_data_cutoff_date)) +
+        batched_delete_all(Facet.where(stream: TransactionKind::STREAM).where("last_seen_at < ?", setting.histograms_cutoff_date))
     end
 
     # Same rule as retire_facets, on the events clock: once every event carrying

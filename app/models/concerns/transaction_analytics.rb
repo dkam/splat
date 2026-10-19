@@ -67,9 +67,10 @@ module TransactionAnalytics
 
     # ---- Aggregate percentiles + simple stats. ----
 
-    def percentiles(time_range, project_id: nil, environment: nil, name_query: nil)
-      row = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
-      pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query)
+    # kind narrows to one TransactionKind ("web", "job", "other"); nil is all.
+    def percentiles(time_range, project_id: nil, environment: nil, name_query: nil, kind: nil)
+      row = hourly_stats_row(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query, kind: kind)
+      pcts = merged_percentiles(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query, kind: kind)
       cnt = row[:count]
       # nil, not 0, for an empty window: a 0ms average reads as a fast one.
       {
@@ -77,6 +78,8 @@ module TransactionAnalytics
         max: cnt.zero? ? nil : row[:max_duration],
         min: cnt.zero? ? nil : row[:min_duration].to_i,
         count: cnt,
+        time_spent: row[:sum_duration],
+        error_count: row[:error_count],
         p50: pcts[:p50],
         p95: pcts[:p95],
         p99: pcts[:p99]
@@ -143,32 +146,37 @@ module TransactionAnalytics
     # histogram-backed p50/p95/p99 are computed only for the returned top-N.
     # Rows are per project and endpoint: unscoped, two projects' same-named
     # endpoints rank (and get percentiles) separately rather than as one blend.
-    def stats_by_endpoint_with_impact(time_range, project_id: nil, environment: nil, name_query: nil, limit: 20)
-      ranked = hourly_stats_grouped(time_range: time_range, project_id: project_id, environment: environment, name_query: name_query).map do |r|
-        cnt = r["count"].to_i
-        avg = cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt)
-        {
-          "project_id" => r["project_id"].to_i,
-          "transaction_name" => r["transaction_name"],
-          "avg_duration" => avg.round(1),
-          "count" => cnt,
-          "max_duration" => r["max_duration"].to_i,
-          "time_spent" => (avg * cnt).round,
-          "est_time_spent" => r["est_sum_duration"].to_f.round,
-          "est_count" => r["est_count"].to_f,
-          "rated_count" => r["rated_count"].to_i,
-          "avg_queries" => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
-          "max_queries" => r["max_query_count"].to_i,
-          "n_plus_one_count" => r["n_plus_one_count"].to_i
-        }
-      end.sort_by { |r| -r["est_time_spent"] }
+    def stats_by_endpoint_with_impact(time_range, project_id: nil, environment: nil, name_query: nil, kind: nil, limit: 20)
+      ranked = impact_rows(time_range, project_id: project_id, environment: environment, name_query: name_query, kind: kind)
       ranked = ranked.first(limit) if limit
+      merge_endpoint_percentiles!(ranked, time_range, project_id: project_id, environment: environment)
+    end
 
-      pcts = endpoint_percentiles_by_name(
-        ranked.map { |r| r["transaction_name"] }.uniq, time_range, project_id: project_id, environment: environment
-      )
-      ranked.each { |r| r.merge!(pcts[[r["project_id"], r["transaction_name"]]] || {}) }
-      ranked
+    # The same rows split by TransactionKind, from the same one grouped scan:
+    # { kind => rows } with each kind ranked and cut to `limit` on its own, so
+    # a busy queue can't push every web endpoint off the page. Percentiles
+    # come in one query for every row kept. Also returns each kind's totals,
+    # { kind => { count:, time_spent: } }, over all its rows, not only those
+    # kept, { kind => { count:, time_spent:, est_time_spent: } }. Kinds with
+    # no rows are absent from both. `only` keeps one kind's rows, for a page
+    # showing one kind and counting the others. `raw` reads the raw rows
+    # (stats_by_endpoint_raw), for a window the hourly rollups can't answer.
+    def stats_by_endpoint_by_kind(time_range, project_id:, environment: nil, name_query: nil, limit: 10, only: nil, raw: false)
+      lookup = TransactionKind.lookup(project_id)
+      rows = if raw
+        stats_by_endpoint_raw(time_range, project_id: project_id, environment: environment, name_query: name_query, limit: nil)
+      else
+        impact_rows(time_range, project_id: project_id, environment: environment, name_query: name_query)
+      end
+      grouped = rows.group_by { |r| lookup.kind_of(r["transaction_name"]) }
+      totals = grouped.transform_values do |kind_rows|
+        {count: kind_rows.sum { |r| r["count"] }, time_spent: kind_rows.sum { |r| r["time_spent"] },
+         est_time_spent: kind_rows.sum { |r| r["est_time_spent"] }}
+      end
+      kept = only ? grouped.slice(only) : grouped
+      kept = kept.transform_values { |kind_rows| limit ? kind_rows.first(limit) : kind_rows }
+      merge_endpoint_percentiles!(kept.values.flatten, time_range, project_id: project_id, environment: environment) unless raw
+      [kept, totals]
     end
 
     def stats_by_endpoint(time_range, project_id: nil, limit: 20)
@@ -256,9 +264,10 @@ module TransactionAnalytics
     # counterparts, and percentiles go through the same DDSketch reducer.
 
     # Same keys as #percentiles.
-    def percentiles_raw(time_range, project_id: nil, environment: nil, server_name: nil, transaction_name: nil)
+    def percentiles_raw(time_range, project_id: nil, environment: nil, server_name: nil, transaction_name: nil,
+      name_query: nil, kind: nil)
       scope = raw_window_scope(time_range, project_id: project_id, environment: environment,
-        server_name: server_name, transaction_name: transaction_name)
+        server_name: server_name, transaction_name: transaction_name, name_query: name_query, kind: kind)
       cnt, sum, mx, mn = scope.pick(
         Arel.sql("COUNT(*)"), Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"), Arel.sql("MIN(duration)")
       )
@@ -380,18 +389,18 @@ module TransactionAnalytics
 
     # Project-wide p95 per bucket, every endpoint's histogram merged. nil for a
     # bucket with no requests, so a chart can leave a gap rather than drop to 0.
-    def p95_series(project_id:, time_range:, buckets:, environment: nil)
+    def p95_series(project_id:, time_range:, buckets:, environment: nil, name_query: nil, kind: nil)
       bucket_seconds, buckets = bucketing_for(time_range, buckets)
       counts = bucketed_index_counts(time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds,
-        project_id: project_id, environment: environment)
+        project_id: project_id, environment: environment, name_query: name_query, kind: kind)
       Array.new(buckets) { |b| counts[b] && Analytics::Histogram.percentile_from_counts(counts[b], 0.95)&.round }
     end
 
     # Total transaction volume bucketed by time.
-    def volume_by_bucket(project_id:, time_range:, buckets:, environment: nil)
+    def volume_by_bucket(project_id:, time_range:, buckets:, environment: nil, name_query: nil, kind: nil)
       bucket_seconds, buckets = bucketing_for(time_range, buckets)
       rows = bucketed_volume(time_range: time_range, buckets: buckets, bucket_seconds: bucket_seconds,
-        project_id: project_id, environment: environment)
+        project_id: project_id, environment: environment, name_query: name_query, kind: kind)
       Array.new(buckets, 0).tap do |result|
         rows.each { |b, r| result[b] = r[:count] if b >= 0 && b < buckets }
       end
@@ -444,23 +453,61 @@ module TransactionAnalytics
       end
     end
 
+    # Per-endpoint scalar stats for every endpoint in the window, ranked by
+    # time spent scaled by sample rate (est_time_spent).
+    def impact_rows(time_range, project_id:, environment:, name_query:, kind: nil)
+      hourly_stats_grouped(time_range: time_range, project_id: project_id, environment: environment,
+        name_query: name_query, kind: kind).map do |r|
+        cnt = r["count"].to_i
+        avg = cnt.zero? ? 0.0 : (r["sum_duration"].to_f / cnt)
+        {
+          "project_id" => r["project_id"].to_i,
+          "transaction_name" => r["transaction_name"],
+          "avg_duration" => avg.round(1),
+          "count" => cnt,
+          "max_duration" => r["max_duration"].to_i,
+          "time_spent" => (avg * cnt).round,
+          "est_time_spent" => r["est_sum_duration"].to_f.round,
+          "est_count" => r["est_count"].to_f,
+          "rated_count" => r["rated_count"].to_i,
+          "avg_queries" => cnt.zero? ? 0.0 : (r["sum_query_count"].to_f / cnt).round(1),
+          "max_queries" => r["max_query_count"].to_i,
+          "n_plus_one_count" => r["n_plus_one_count"].to_i
+        }
+      end.sort_by { |r| -r["est_time_spent"] }
+    end
+
+    def merge_endpoint_percentiles!(rows, time_range, project_id:, environment:)
+      pcts = endpoint_percentiles_by_name(
+        rows.map { |r| r["transaction_name"] }.uniq, time_range, project_id: project_id, environment: environment
+      )
+      rows.each { |r| r.merge!(pcts[[r["project_id"], r["transaction_name"]]] || {}) }
+    end
+
+    # [sql, binds] for a TransactionKind filter, or nil for none. The lookup
+    # is a covered read of a few dozen primary-DB rows, so it isn't carried
+    # between calls.
+    def kind_clause(kind, project_id)
+      TransactionKind.lookup(project_id).clause(kind) if kind.present?
+    end
+
     def round_or_nil(value)
       value&.round
     end
 
     # ---- transaction_hourly_stats scalar reads. ----
 
-    def hourly_stats_row(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil)
+    def hourly_stats_row(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil, kind: nil)
       where_sql, binds = hourly_filters(time_range: time_range, project_id: project_id, environment: environment,
-        transaction_name: transaction_name, name_query: name_query)
+        transaction_name: transaction_name, name_query: name_query, kind: kind)
       sql = "SELECT #{HOURLY_AGG} FROM transaction_hourly_stats WHERE #{where_sql}"
       r = connection.select_one(sanitize_sql_array([sql, *binds])) || {}
       symbolize_hourly_row(r)
     end
 
-    def hourly_stats_grouped(time_range:, project_id: nil, environment: nil, name_query: nil)
+    def hourly_stats_grouped(time_range:, project_id: nil, environment: nil, name_query: nil, kind: nil)
       where_sql, binds = hourly_filters(time_range: time_range, project_id: project_id, environment: environment,
-        name_query: name_query)
+        name_query: name_query, kind: kind)
       sql = "SELECT project_id, transaction_name, #{HOURLY_AGG} FROM transaction_hourly_stats " \
             "WHERE #{where_sql} GROUP BY project_id, transaction_name"
       connection.select_all(sanitize_sql_array([sql, *binds])).to_a
@@ -487,7 +534,7 @@ module TransactionAnalytics
       }
     end
 
-    def hourly_filters(time_range:, project_id:, environment:, transaction_name: nil, name_query: nil)
+    def hourly_filters(time_range:, project_id:, environment:, transaction_name: nil, name_query: nil, kind: nil)
       lo = Analytics::Histogram.hour_bucket(time_range.begin)
       hi = Analytics::Histogram.hour_bucket(time_range.end)
       upto = (time_range.exclude_end? && hi == time_range.end) ? "<" : "<="
@@ -508,15 +555,23 @@ module TransactionAnalytics
         clauses << "environment = ?"
         binds << environment
       end
+      kind_sql, kind_binds = kind_clause(kind, project_id)
+      if kind_sql
+        clauses << kind_sql
+        binds.concat(kind_binds)
+      end
       [clauses.join(" AND "), binds]
     end
 
-    def raw_window_scope(time_range, project_id:, environment:, server_name:, transaction_name: nil)
+    def raw_window_scope(time_range, project_id:, environment:, server_name:, transaction_name: nil, name_query: nil, kind: nil)
       scope = where(timestamp: time_range)
       scope = scope.where(project_id: project_id) if project_id
       scope = scope.where(environment: environment) if environment.present?
       scope = scope.where(server_name: server_name) if server_name.present?
       scope = scope.where(transaction_name: transaction_name) if transaction_name.present?
+      scope = scope.where("transaction_name LIKE ?", "%#{name_query}%") if name_query.present?
+      kind_sql, kind_binds = kind_clause(kind, project_id)
+      scope = scope.where(kind_sql, *kind_binds) if kind_sql
       scope
     end
 
@@ -561,7 +616,7 @@ module TransactionAnalytics
     # histogram). Both branches share the same filter columns and feed the same
     # Analytics::Histogram.percentile_from_counts reducer.
     def bucketed_index_counts(time_range:, buckets:, bucket_seconds:, project_id: nil, environment: nil,
-      transaction_name: nil, transaction_names: nil, include_name: false, release: nil)
+      transaction_name: nil, transaction_names: nil, include_name: false, release: nil, name_query: nil, kind: nil)
       origin = time_range.begin.to_i
       use_histogram = (bucket_seconds % 3600).zero? && release.blank?
 
@@ -584,7 +639,8 @@ module TransactionAnalytics
       where_sql, binds = bucket_filters(
         source: source, time_col: time_col, time_range: time_range,
         project_id: project_id, environment: environment,
-        transaction_name: transaction_name, transaction_names: transaction_names, release: release
+        transaction_name: transaction_name, transaction_names: transaction_names, release: release,
+        name_query: name_query, kind: kind
       )
 
       sql = "SELECT #{name_select}#{tb} AS tb, #{index_expr} AS bi, #{count_expr} AS c " \
@@ -613,7 +669,7 @@ module TransactionAnalytics
     # Per-time-bucket volume (+ duration sum) for the count/avg charts.
     # { time_bucket => { count:, sum: } }. Hour-aligned → hourly_stats; sub-hour
     # → raw. Mirrors bucketed_index_counts' source-selection.
-    def bucketed_volume(time_range:, buckets:, bucket_seconds:, project_id: nil, environment: nil)
+    def bucketed_volume(time_range:, buckets:, bucket_seconds:, project_id: nil, environment: nil, name_query: nil, kind: nil)
       origin = time_range.begin.to_i
 
       if (bucket_seconds % 3600).zero?
@@ -627,7 +683,7 @@ module TransactionAnalytics
       tb = Analytics::Histogram.time_bucket_sql(origin_epoch: origin, bucket_seconds: bucket_seconds, column: time_col)
       where_sql, binds = bucket_filters(
         source: source, time_col: time_col, time_range: time_range,
-        project_id: project_id, environment: environment
+        project_id: project_id, environment: environment, name_query: name_query, kind: kind
       )
 
       sql = "SELECT #{tb} AS tb, #{count_expr} AS c, #{sum_expr} AS s FROM #{source} WHERE #{where_sql} GROUP BY tb"
@@ -642,7 +698,7 @@ module TransactionAnalytics
     # column is hour_bucket and the upper bound is inclusive of the current hour
     # (live-bumped); for raw it's the half-open [begin, end) timestamp window.
     def bucket_filters(source:, time_col:, time_range:, project_id: nil, environment: nil,
-      transaction_name: nil, transaction_names: nil, release: nil)
+      transaction_name: nil, transaction_names: nil, release: nil, name_query: nil, kind: nil)
       aggregate = (time_col == "hour_bucket")
       if aggregate
         clauses = ["#{time_col} >= ?", "#{time_col} <= ?"]
@@ -661,6 +717,9 @@ module TransactionAnalytics
       elsif transaction_name
         clauses << "transaction_name = ?"
         binds << transaction_name
+      elsif name_query.present?
+        clauses << "transaction_name LIKE ?"
+        binds << "%#{name_query}%"
       end
       if environment.present?
         clauses << "environment = ?"
@@ -669,6 +728,11 @@ module TransactionAnalytics
       if release.present? # only ever set on the raw source
         clauses << "release = ?"
         binds << release
+      end
+      kind_sql, kind_binds = kind_clause(kind, project_id)
+      if kind_sql
+        clauses << kind_sql
+        binds.concat(kind_binds)
       end
       [clauses.join(" AND "), binds]
     end
@@ -689,11 +753,13 @@ module TransactionAnalytics
     # for a substring (LIKE) match across endpoints; omit both for project-wide.
     # transaction_histograms stores env as '' for NULL-env sources, so an explicit
     # environment filter never matches the no-env bucket (by design).
-    def merged_percentiles(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil)
+    def merged_percentiles(time_range:, project_id: nil, environment: nil, transaction_name: nil, name_query: nil, kind: nil)
       hour_start = Analytics::Histogram.hour_bucket(time_range.begin)
       until_hour = Analytics::Histogram.hour_bucket(time_range.end)
       proj_filter = project_id.present? ? "AND project_id = ?" : ""
       env_filter = environment.present? ? "AND environment = ?" : ""
+      kind_sql, kind_binds = kind_clause(kind, project_id)
+      kind_filter = kind_sql ? "AND #{kind_sql}" : ""
       name_filter =
         if transaction_name.present? then "AND transaction_name = ?"
         elsif name_query.present? then "AND transaction_name LIKE ?"
@@ -710,6 +776,7 @@ module TransactionAnalytics
              #{proj_filter}
              #{name_filter}
              #{env_filter}
+             #{kind_filter}
            GROUP BY bucket_index
           UNION ALL
           SELECT #{bucket_sql} AS bucket_index, COUNT(*) AS c
@@ -718,6 +785,7 @@ module TransactionAnalytics
              #{proj_filter}
              #{name_filter}
              #{env_filter}
+             #{kind_filter}
            GROUP BY 1
         ), reduced AS (
           SELECT bucket_index, SUM(c) AS c FROM merged GROUP BY bucket_index
@@ -739,10 +807,12 @@ module TransactionAnalytics
       binds << project_id if project_id.present?
       binds << name_bind if name_bind
       binds << environment if environment.present?
+      binds.concat(kind_binds) if kind_sql
       binds.push(raw_lower, time_range.end)
       binds << project_id if project_id.present?
       binds << name_bind if name_bind
       binds << environment if environment.present?
+      binds.concat(kind_binds) if kind_sql
 
       p50, p95, p99 = connection.select_rows(sanitize_sql_array([sql, *binds])).first || []
       {

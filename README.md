@@ -57,6 +57,7 @@ See [Deployment](#deployment) for running it for real, and [Authentication](#aut
 - ✅ **Span Waterfall** - Per-transaction span tree rendered as a tiered timeline on the transaction detail page
 - ✅ **Latency Percentiles** - p50 / p95 / p99 via DDSketch histograms (±1% error), not naive array indexing
 - ✅ **Endpoint Impact Ranking** - Surfaces controllers ranked by total time spent (avg × count) plus p95, so you optimise where it actually pays back
+- ✅ **Web Requests vs Background Jobs** - The op the SDK sends (`http.server`, `queue.*`) splits requests from jobs on the Performance page, each with its own throughput, p95 and share of the time (scaled by sample rate), so slow jobs don't inflate your site's p95
 - ✅ **N+1 Query Detection** - Mines `measurements.query_analysis` from the transaction span analyzer, ranks endpoints by N+1 prevalence, exposes a dedicated worklist and an MCP tool
 - ✅ **Trends & Comparison** - Hourly pre-aggregates power time-series charts and release-over-release endpoint comparison
 

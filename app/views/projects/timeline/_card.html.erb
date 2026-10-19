@@ -2,75 +2,17 @@
     label | strip | value. Each strip is an SVG drawn in a 480-wide box and
     stretched to its column (TimelineHelper), and the overlay — deploys and the
     cursor — lies over exactly that column, so a line drawn there crosses every
-    row at the same moment. The column widths are the --lbl / --val / --gap
-    variables, so the overlay and the rows can't disagree. %>
+    row at the same moment. The axes, the deploys and the cursor are the frame
+    (_frame), which the performance page draws its rows in too. %>
 <% t = timeline %>
 <% lane = "grid grid-cols-[var(--lbl)_minmax(0,1fr)_var(--val)] gap-x-(--gap) items-center" %>
 <% row = "#{lane} border-t border-gray-100 dark:border-gray-800" %>
 <% head = "#{lane} pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400" %>
 <% aside = "normal-case tracking-normal font-normal text-orange-700 dark:text-orange-300" %>
 <% per = timeline_per_bucket(t) %>
-<% axis = timeline_axis(t) %>
 <% partial = t.partial_last_bucket? %>
 
-<div data-controller="timeline"
-     data-timeline-buckets-value="<%= t.cursor_buckets.to_json %>"
-     data-timeline-bucket-seconds-value="<%= t.bucket_seconds %>">
-  <%# Sticky under the fixed header, so it can still be read while pointing at
-      the monitors far below; two lines tall whatever it says, so filling it
-      doesn't push the timeline down under the pointer. %>
-  <div data-timeline-target="readout"
-       class="sticky top-16 z-30 mb-2 h-[3.25rem] overflow-hidden flex flex-wrap content-center items-center gap-x-4 gap-y-0.5 px-3 rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950 font-mono text-xs tabular-nums text-blue-950 dark:text-blue-100 shadow-sm">
-    <span class="text-blue-700 dark:text-blue-300">Point at the timeline to read one <%= timeline_bucket_noun(t) %> across every row.</span>
-  </div>
-
-  <div class="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm px-3 pb-3 overflow-x-auto [--lbl:8rem] md:[--lbl:13rem] [--val:7.5rem] md:[--val:10.5rem] [--gap:0.75rem]">
-    <div class="relative min-w-[38rem]">
-
-      <div aria-hidden="true" data-timeline-target="overlay"
-           class="pointer-events-none absolute inset-y-0 z-10 left-[calc(var(--lbl)+var(--gap))] right-[calc(var(--val)+var(--gap))]">
-        <% t.deploys.each do |deploy| %>
-          <div class="absolute inset-y-0 border-l border-dashed border-violet-400 dark:border-violet-400/80" style="left: <%= timeline_pct(t.frac(deploy.at)) %>"></div>
-        <% end %>
-        <div data-timeline-target="cursor" class="hidden absolute inset-y-0 bg-blue-500/10 border-x border-blue-500/40"></div>
-      </div>
-
-      <div class="<%= lane %> h-6">
-        <span class="text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">UTC</span>
-        <div class="relative h-full overflow-hidden font-mono text-[11px] tabular-nums text-gray-700 dark:text-gray-300">
-          <% axis.each do |frac, label, _| %>
-            <span class="absolute inset-y-0 pl-1 leading-6 border-l border-gray-300 dark:border-gray-700 whitespace-nowrap" style="left: <%= timeline_pct(frac) %>"><%= label %></span>
-          <% end %>
-        </div>
-        <span class="font-mono text-[11px] text-gray-500 dark:text-gray-400">now <%= t.now.utc.strftime("%H:%MZ") %></span>
-      </div>
-      <div class="<%= lane %> h-5" data-timeline-row="local">
-        <span class="text-right font-mono text-[11px] text-gray-500 dark:text-gray-400" data-timeline-target="zone">local</span>
-        <div class="relative h-full overflow-hidden font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-          <% axis.each do |frac, _, epoch| %>
-            <span class="absolute inset-y-0 pl-1 leading-5 border-l border-gray-200 dark:border-gray-800 whitespace-nowrap" style="left: <%= timeline_pct(frac) %>"
-                  data-timeline-target="localTick" data-epoch="<%= epoch %>"></span>
-          <% end %>
-        </div>
-        <span></span>
-      </div>
-      <%# Release labels on a row of their own: on the local-time row they
-          covered the times they fell between. %>
-      <% if t.deploys.any? %>
-        <div class="<%= lane %> h-5" data-timeline-row="deploys">
-          <span class="text-right font-mono text-[11px] text-violet-700 dark:text-violet-300">deploys</span>
-          <div class="relative h-full overflow-hidden font-mono text-[11px] text-violet-700 dark:text-violet-300">
-            <% timeline_deploy_labels(t).each do |label| %>
-              <% deploy = label[:deploy] %>
-              <span class="absolute top-0 leading-5 whitespace-nowrap <%= label[:hang_left] ? "-translate-x-full pr-1" : "pl-1" %>"
-                    style="left: <%= timeline_pct(label[:frac]) %>"
-                    title="<%= deploy.version %> · first seen <%= deploy.at.utc.strftime("%-d %b %H:%MZ") %>"><%= label[:hang_left] ? "#{timeline_release(deploy.version)} ▾" : "▾ #{timeline_release(deploy.version)}" %></span>
-            <% end %>
-          </div>
-          <span class="font-mono text-[11px] text-violet-700 dark:text-violet-300"><%= pluralize(t.deploys.size, "deploy") %></span>
-        </div>
-      <% end %>
-
+<%= render layout: "projects/timeline/frame", locals: {timeline: t, buckets: t.cursor_buckets} do %>
       <div class="<%= head %>"><span>Signals</span><span></span><span class="text-right"><%= t.window.key %></span></div>
 
       <% tx = t.throughput %>
@@ -200,8 +142,7 @@
           <%= render "projects/timeline/monitor", row: monitor_row, timeline: t, lane: row %>
         <% end %>
       <% end %>
-    </div>
-  </div>
+<% end %>
 
   <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
     <span class="inline-flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 bg-blue-500 dark:bg-blue-400"></span>count <%= per %></span>
@@ -211,4 +152,3 @@
     <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-1.5 bg-emerald-500"></span>monitor run</span>
     <span class="inline-flex items-center gap-1.5"><span class="inline-block h-3 border-l border-dashed border-violet-400"></span>deploy</span>
   </div>
-</div>

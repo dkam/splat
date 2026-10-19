@@ -46,6 +46,23 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
     assert_equal 1, surviving, "aggregate history (within 540d) survives"
   end
 
+  # A kind classifies the rollups, so it lasts as long as they do: pruned
+  # with the raw rows, a job's year of history would turn into web requests.
+  test "transaction kinds are kept on the rollup clock, environments on the raw one" do
+    seen = 200.days.ago
+    Facet.create!(project: @project, stream: "transaction", name: "environment", value: "staging",
+      last_seen_at: seen)
+    Facet.create!(project: @project, stream: TransactionKind::STREAM, name: "job", value: "OldJob",
+      last_seen_at: seen)
+    Facet.create!(project: @project, stream: TransactionKind::STREAM, name: "job", value: "AncientJob",
+      last_seen_at: 600.days.ago)
+
+    Maintenance::RetentionJob.new.perform
+
+    assert_empty Facet.values_for(@project.id, :transaction, :environment)
+    assert_equal %w[OldJob], TransactionKind.lookup(@project.id).job_names
+  end
+
   def create_span_tree(transaction_id:, timestamp:)
     SpanTree.create_from_tree!(project_id: @project.id, transaction_id: transaction_id,
       timestamp: timestamp, tree: {"trace_id" => "t", "spans" => []},

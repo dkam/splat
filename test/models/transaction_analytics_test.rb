@@ -292,4 +292,73 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     npo = Transaction.endpoints_by_n_plus_one(@range).select { |r| r["transaction_name"] == "GET /x" }
     assert_equal [[@project.id, 20], [other.id, 50]], npo.map { |r| [r["project_id"], r["n_plus_one_count"]] }.sort
   end
+
+  # ---- TransactionKind: web requests and background jobs apart. ----
+
+  def classify_job(name)
+    Facet.reset_throttle!
+    TransactionKind.harvest!(project_id: @project.id, transaction_name: name, op: "queue.process")
+  end
+
+  test "a kind filter scopes the headline figures to requests or jobs" do
+    classify_job("CoverDownloadJob")
+    90.times { create_txn(name: "GET /x", duration: 100) }
+    # Current-hour jobs as well as completed-hour ones, so both arms of the
+    # merged percentile (histogram and raw) carry the filter.
+    5.times { create_txn(name: "CoverDownloadJob", duration: 5000) }
+    5.times { create_txn(name: "CoverDownloadJob", duration: 5000, at: 1.minute.ago) }
+
+    web = Transaction.percentiles(@range, project_id: @project.id, kind: "web")
+    jobs = Transaction.percentiles(@range, project_id: @project.id, kind: "job")
+    all = Transaction.percentiles(@range, project_id: @project.id)
+
+    assert_equal [90, 10, 100], [web[:count], jobs[:count], all[:count]]
+    assert_in_delta 100, web[:p99], 2, "no job reaches the requests' tail"
+    assert_in_delta 5000, jobs[:p50], 50
+    assert_equal 9000, web[:time_spent]
+    assert_equal 50_000, jobs[:time_spent]
+
+    assert_equal 10, Transaction.volume_by_bucket(project_id: @project.id, time_range: @range, buckets: 24, kind: "job").sum
+    assert_equal 90, Transaction.volume_by_bucket(project_id: @project.id, time_range: @range, buckets: 24, kind: "web").sum
+  end
+
+  test "a kind with no names classified matches nothing" do
+    10.times { create_txn(name: "GET /x", duration: 100) }
+
+    jobs = Transaction.percentiles(@range, project_id: @project.id, kind: "job")
+    assert_equal 0, jobs[:count]
+    assert_nil jobs[:p95]
+  end
+
+  test "stats_by_endpoint_by_kind ranks each kind on its own" do
+    classify_job("CoverDownloadJob")
+    classify_job("CleanupJob")
+    10.times { create_txn(name: "GET /x", duration: 100) }
+    5.times { create_txn(name: "GET /y", duration: 50) }
+    10.times { create_txn(name: "CoverDownloadJob", duration: 9000) }
+    10.times { create_txn(name: "CleanupJob", duration: 8000) }
+
+    rows, totals = Transaction.stats_by_endpoint_by_kind(@range, project_id: @project.id, limit: 1)
+
+    # Overall the two jobs outrank every request; split, each kind keeps its top.
+    assert_equal ["GET /x"], rows["web"].map { |r| r["transaction_name"] }
+    assert_equal ["CoverDownloadJob"], rows["job"].map { |r| r["transaction_name"] }
+    assert_in_delta 100, rows["web"].first["p95_duration"], 2
+    assert_equal({count: 15, time_spent: 1250, est_time_spent: 1250}, totals["web"])
+    assert_equal({count: 20, time_spent: 170_000, est_time_spent: 170_000}, totals["job"])
+    refute rows.key?("other")
+
+    only_jobs, totals_again = Transaction.stats_by_endpoint_by_kind(@range, project_id: @project.id, limit: 1, only: "job")
+    assert_equal ["job"], only_jobs.keys
+    assert_equal totals, totals_again, "the other kinds are still counted"
+  end
+
+  test "a job's rollups keep their kind after its raw rows are deleted" do
+    classify_job("CoverDownloadJob")
+    10.times { create_txn(name: "CoverDownloadJob", duration: 5000) }
+    Transaction.where(project_id: @project.id).delete_all
+
+    assert_equal 10, Transaction.percentiles(@range, project_id: @project.id, kind: "job")[:count]
+    assert_equal 0, Transaction.percentiles(@range, project_id: @project.id, kind: "web")[:count]
+  end
 end

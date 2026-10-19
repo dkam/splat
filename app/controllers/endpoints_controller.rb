@@ -3,7 +3,8 @@
 # The performance dashboard's grouped surface — endpoints (= transaction_name)
 # is to transactions what an Issue is to events. Three actions:
 #
-#   index       — all endpoints in the project, ranked by impact (avg × count)
+#   index       — the project's endpoints on one clock (PerformanceTimeline),
+#                 web requests and background jobs apart, ranked by impact
 #   show        — one endpoint's detail (percentiles, recent transactions)
 #   n_plus_one  — endpoints with detected N+1 query patterns, ranked
 #
@@ -23,53 +24,27 @@ class EndpointsController < ApplicationController
 
   SORTS = %w[recent slowest].freeze
 
-  # The longest odd-shaped window read from the raw transactions. Timeline
-  # buckets under an hour are 5 or 15 minutes; a longer window that doesn't
-  # fall on the hour is read from the hours it touches instead.
-  RAW_WINDOW_MAX = 6.hours
-
   def index
-    @time_range = params[:time_range] || "24h"
+    @time_range = params[:time_range].presence_in(ProjectTimeline::WINDOWS.keys) || "24h"
     @window = time_window_param
     @sort = params[:sort].presence_in(SORTS) || "recent"
-    time_range = @window || (time_range_lower_bound(@time_range)..Time.current)
     @name_query = params[:name].to_s.strip.presence
+    @environment = params[:environment].presence
+    # Web requests, background jobs or other (TransactionKind); nil is all of
+    # them, each drawn apart.
+    @kind = TransactionKind.normalize(params[:kind])
 
-    base_scope = @project.transactions.where(timestamp: time_range)
-    base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
+    @timeline = PerformanceTimeline.new(@project, window: @time_range, range: @window, kind: @kind,
+      environment: @environment, name_query: @name_query)
+
+    # The feed covers the timeline's window, and the same names as its rows:
+    # a row here is the kind its endpoint is drawn under.
+    @kind_lookup = TransactionKind.lookup(@project.id)
+    base_scope = @project.transactions.where(timestamp: @timeline.range)
+    base_scope = base_scope.where(environment: @environment) if @environment
     base_scope = base_scope.where("transaction_name LIKE ?", "%#{@name_query}%") if @name_query
-
-    pct = Transaction.percentiles(time_range, project_id: @project.id, environment: params[:environment], name_query: @name_query)
-    # nil for a window with no requests: format_duration shows N/A, where a
-    # 0 showed as a fast, green 0ms.
-    @p50_duration = pct[:p50]
-    @p95_duration = pct[:p95]
-    @p99_duration = pct[:p99]
-
-    # When the user has filtered by name we want to see every match, not just
-    # the top 20 by impact.
-    endpoint_args = {project_id: @project.id, environment: params[:environment], name_query: @name_query, limit: @name_query ? nil : 20}
-    @endpoints = if raw_window?(time_range)
-      Transaction.stats_by_endpoint_raw(time_range, **endpoint_args)
-    else
-      Transaction.stats_by_endpoint_with_impact(time_range, **endpoint_args)
-    end
-
-    @sparkline_range = time_range
-    sparkline_names = @endpoints.map { |e| e["transaction_name"] }
-    sparkline_key = [
-      "endpoints_p95_sparklines/v1", @project.id, @window ? [@window.begin.to_i, @window.end.to_i] : @time_range,
-      params[:environment].presence, @name_query, Digest::MD5.hexdigest(sparkline_names.join("\n"))
-    ].join("/")
-    @endpoint_sparklines = Rails.cache.fetch(sparkline_key, expires_in: 30.seconds) do
-      Transaction.p95_by_bucket(
-        transaction_names: sparkline_names,
-        time_range: time_range,
-        buckets: 24,
-        project_id: @project.id,
-        environment: params[:environment]
-      )
-    end
+    kind_sql, kind_binds = @kind_lookup.clause(@kind)
+    base_scope = base_scope.where(kind_sql, *kind_binds) if kind_sql
 
     # Countless: this feed is the whole project's transactions, which runs to
     # thousands of pages. A counted paginator would COUNT(*) the lot on every
@@ -141,15 +116,6 @@ class EndpointsController < ApplicationController
 
   def transaction_order
     (@sort == "slowest") ? {duration: :desc, id: :desc} : {timestamp: :desc}
-  end
-
-  # The hourly rollups answer for whole hours only, so a timeline bucket of 5
-  # or 15 minutes reads its endpoints from the raw rows.
-  def raw_window?(range)
-    return false unless @window
-
-    on_the_hour = (range.begin.to_i % 3600).zero? && (range.end.to_i % 3600).zero?
-    !on_the_hour && range.end - range.begin <= RAW_WINDOW_MAX
   end
 
   def time_range_lower_bound(range)

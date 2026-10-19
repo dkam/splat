@@ -53,6 +53,17 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   and duration. A missed check-in gets a row too, at the time it was due.
   Booko's 19 monitors write about 6,000 rows a day. They're retired on the
   events clock.
+- **Web requests and background jobs, apart.** The Performance page is a
+  one-clock page too, on the project page's axis. Requests, jobs and
+  anything else (Action Cable, say) each get a throughput row and a p95 row,
+  and a list of where their time went, with each kind's share of the whole.
+  So a queue of five-second jobs no longer sets the p95 of a 100ms site.
+  All / Web / Jobs / Other (`?kind=`) narrows the page to one kind. The kind
+  is the op the SDK sends (`http.server`, `queue.*`), recorded per endpoint
+  name at ingest and kept as long as the rollups. After deploying, run
+  `bin/rails splat:backfill_transaction_kinds` once to classify the jobs
+  that haven't run since. A job whose raw transactions have all aged out
+  can't be classified, and is drawn as a request.
 
 ### Changed
 
@@ -60,8 +71,17 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   which stops at the breakpoint below the window rather than at the window,
   and each page then padded itself inside a second `max-w-7xl`. A 953px
   window got 680px of content. It's fluid now, up to 1536px.
+- **The Performance page's tables are gone,** for the timeline's rows: each
+  endpoint's time, count, p50 and p95 sit at the end of its row. Its p99
+  and query counts are in the tooltip over them, and its N+1 share on its
+  N+1 badge.
 
 ### Fixed
+
+- **The first bar of the rollup-backed charts counted two hours** when a
+  window didn't start on the hour: an endpoint's p95 trend, its MCP
+  timeseries, and any series over a window opened from a timeline bucket.
+  Bucketing truncated where it meant to floor.
 
 - **Time spent is scaled by the sample rate.** An SDK sends only a sampled
   share of its transactions and says which share in the envelope header
