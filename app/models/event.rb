@@ -73,7 +73,8 @@ class Event < IssuesEventsRecord
     issue.open! if issue.resolved? && issue.regressed_by?(event.release)
 
     # Best-effort side effects; both throttled, and neither raises into ingest.
-    issue.harvest_facets!(environment: event.environment, release: event.release, seen_at: event.timestamp)
+    issue.harvest_facets!(environment: event.environment, release: event.release,
+      user: SentryProtocol::Payload.user_key(payload), seen_at: event.timestamp)
     issue.maybe_alert_burst!
 
     event

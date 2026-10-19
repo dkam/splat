@@ -48,6 +48,7 @@ See [Deployment](#deployment) for running it for real, and [Authentication](#aut
 - ✅ **Fingerprint Grouping** - Groups events into issues by Sentry fingerprint, or derives one from exception type + location
 - ✅ **Issue Lifecycle** - Open / resolved / ignored, with resolved issues auto-reopening on new events, or resolved in the next release so only a newer release reopens them
 - ✅ **Fast Ingestion** - Errors appear in the UI within seconds
+- ✅ **Users Affected** - How many distinct users an issue has reached, counted from the event's `user` (id, else username, email or IP address) the way Sentry counts them, over the events still kept. Your SDK has to send one: `Sentry.set_user(id: current_user.id)`, or with `send_default_pii`, the client's IP address. Counts start from the release that added it; earlier events aren't backfilled
 - ✅ **Stack Traces & Context** - Full event detail: stack trace, request data, breadcrumbs, user context
 - ✅ **Burst Alerting** - Spike detection with a configurable threshold, plus email, [ntfy.sh](https://ntfy.sh) and webhook notifications (JSON, Slack or Discord) on new and reopened issues
 - ✅ **Release Tracking** - Stamps issues with first/last seen release, overlays deploy markers on issue sparklines so regressions are visible at a glance

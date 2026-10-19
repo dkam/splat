@@ -71,7 +71,7 @@
         <%= render "issues/issue_row", issue: issue, project: @project,
               sparkline: @sparklines[issue.id], deploy_markers: @deploy_markers,
               sparkline_range: @sparkline_range, burst_threshold: @burst_threshold,
-              environments: @issue_environments[issue.id] %>
+              environments: @issue_environments[issue.id], users: @issue_users[issue.id] %>
       <% end %>
     </div>
 

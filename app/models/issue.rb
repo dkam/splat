@@ -177,6 +177,13 @@ class Issue < IssuesEventsRecord
     seen[release] > seen[resolved_in_release]
   end
 
+  # Distinct users across the events still kept: a user's row retires with
+  # their last event here (Maintenance::RetentionJob). Zero where the SDK
+  # doesn't say who the user was.
+  def affected_users_count
+    IssueFacet.where(issue_id: id, name: "user").count
+  end
+
   # The first release this issue was seen in, and the latest. Out of order,
   # an older event doesn't take the latest back.
   def record_release!(release, at:)
@@ -186,15 +193,16 @@ class Issue < IssuesEventsRecord
     Issue.where(id: id).where("last_seen <= ?", at).update_all(last_seen_release: release)
   end
 
-  # Denormalise an event's environment/release onto this issue so the "seen in"
-  # filters don't have to DISTINCT over events. Throttled per (issue, name,
-  # value). Called from Event.create_from_sentry_payload! after the event is
-  # persisted, alongside maybe_alert_burst!.
-  def harvest_facets!(environment:, release:, seen_at:)
+  # Denormalise an event's environment, release and user onto this issue so
+  # the "seen in" filters and the user count don't have to DISTINCT over
+  # events. Throttled per (issue, name, value). Called from
+  # Event.create_from_sentry_payload! after the event is persisted, alongside
+  # maybe_alert_burst!.
+  def harvest_facets!(environment:, release:, seen_at:, user: nil)
     IssueFacet.harvest!(
       project_id: project_id,
       issue_id: id,
-      values: {environment: environment, release: release},
+      values: {environment: environment, release: release, user: user},
       seen_at: seen_at
     )
   rescue => e

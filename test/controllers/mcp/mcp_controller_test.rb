@@ -793,6 +793,15 @@ module Mcp
       assert_match(/### Caused by NoMethodError\n\n.*\n\nSame stack trace as above\./, tool_text)
     end
 
+    test "get_issue counts the users an issue has reached" do
+      IssueFacet.reset_throttle!
+      payload = {"message" => "boom", "timestamp" => Time.current.iso8601, "user" => {"id" => 42}}
+      event = Event.create_from_sentry_payload!(SecureRandom.hex(16), payload, projects(:one))
+
+      call_tool("get_issue", {"issue_id" => event.issue_id})
+      assert_match(/^\*\*Users Affected:\*\* 1$/, tool_text)
+    end
+
     test "get_issue_events does not crash when an event payload is nil" do
       # Old events can have payload purged by retention while the event row stays.
       # format_issue_events used to dig into event.payload['environment'] and

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Ingest-maintained (issue, name, value) pairs — currently environment and
-# release — that make "issues seen in staging" an indexed lookup instead of a
-# DISTINCT over events.
+# Ingest-maintained (issue, name, value) pairs — environment, release and user
+# — that make "issues seen in staging" an indexed lookup instead of a DISTINCT
+# over events, and "users affected" a count of an issue's user rows.
 #
 # Sibling of Facet, with one deliberate difference: Facet lives on primary and
 # only ever feeds options_for_select, so it never joins. This one is joined
@@ -16,10 +16,12 @@ class IssueFacet < IssuesEventsRecord
   belongs_to :issue
 
   # Names we harvest. Kept explicit so a typo'd key is a no-op rather than a new
-  # facet name quietly accumulating rows. Note these double as literal Event
-  # column names in lib/tasks/backfill_issue_facets.rake — adding a facet that
-  # isn't a column there needs that task taught how to source it.
-  NAMES = %w[environment release].freeze
+  # facet name quietly accumulating rows. COLUMNS double as literal Event
+  # column names in lib/tasks/backfill_issue_facets.rake. user isn't a column
+  # (SentryProtocol::Payload.user_key reads it from the payload), so the
+  # backfill leaves it out and users count from ingest onwards.
+  COLUMNS = %w[environment release].freeze
+  NAMES = (COLUMNS + %w[user]).freeze
 
   class << self
     # Read path: distinct values for the filter dropdown, scoped to a project.
@@ -37,6 +39,14 @@ class IssueFacet < IssuesEventsRecord
         .order(:value)
         .pluck(:issue_id, :value)
         .each_with_object({}) { |(issue_id, value), h| (h[issue_id] ||= []) << value }
+    end
+
+    # Read path: {issue_id => distinct values} for a page of issues, leaving out
+    # those with none. Counted from the unique index, never the rows.
+    def counts_by_issue(issue_ids, name)
+      return {} if issue_ids.empty?
+
+      where(issue_id: issue_ids, name: name.to_s).group(:issue_id).count
     end
 
     # Issue ids seen with this value — used as a subquery, not materialised.

@@ -94,10 +94,17 @@
     <% end %>
     <%= turbo_stream_from @issue, "updates" %>
     <!-- Stats -->
-    <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
         <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Events</div>
         <div id="issue-count" class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= @issue.count %></div>
+      </div>
+      <%# A dash rather than 0 where no event said who its user was: the SDK
+          not sending users isn't the same as the issue reaching none. %>
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800"
+           title="<%= @affected_users.positive? ? "Distinct users across the events still kept" : "No event says which user it happened to" %>">
+        <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">Users Affected</div>
+        <div id="issue-users" class="text-3xl font-bold text-gray-900 dark:text-gray-100"><%= @affected_users.positive? ? number_with_delimiter(@affected_users) : "—" %></div>
       </div>
       <div class="bg-white dark:bg-gray-900 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-800">
         <div class="text-sm text-gray-600 dark:text-gray-400 mb-1">First Seen</div>

@@ -1338,6 +1338,8 @@ class SplatMcpTools
     result += "**Exception Type:** #{issue.exception_type}\n"
     result += "**Status:** #{issue.status}\n"
     result += "**Occurrences:** #{issue.count}\n"
+    users = issue.affected_users_count
+    result += "**Users Affected:** #{users.positive? ? users : "unknown — no event says which user it happened to"}\n"
     result += "**First Seen:** #{issue.first_seen.strftime("%Y-%m-%d %H:%M:%S")}\n"
     result += "**Last Seen:** #{issue.last_seen.strftime("%Y-%m-%d %H:%M:%S")}\n"
     result += "**Project:** #{issue.project.name}\n\n"

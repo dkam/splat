@@ -194,6 +194,23 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_select "span", text: "Message"
   end
 
+  test "index and show count the users an issue has reached" do
+    issue = create_issue("users", "Users")
+    other = create_issue("no-users", "No users")
+    [1, 2].each { |id| IssueFacet.harvest!(project_id: @project.id, issue_id: issue.id, values: {user: "id:#{id}"}) }
+
+    get project_issues_url(@project.slug)
+    assert_response :success
+    assert_select "span", text: "2 users", count: 1
+
+    get project_issue_url(@project.slug, issue)
+    assert_select "#issue-users", text: "2"
+
+    # No users known isn't the same as no users reached, so it says so.
+    get project_issue_url(@project.slug, other)
+    assert_select "#issue-users", text: "—"
+  end
+
   test "show sets no snippet under a single-line title" do
     issue = create_issue("one-line", "undefined method 'name' for nil")
 

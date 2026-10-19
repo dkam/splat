@@ -48,6 +48,25 @@ module SentryProtocol
     # A frame's file as an SDK names it. sentry-go sends only the absolute path.
     def frame_file(frame) = frame["filename"].presence || frame["abs_path"].presence
 
+    USER_FIELDS = {"id" => "id", "username" => "username", "email" => "email", "ip_address" => "ip"}.freeze
+
+    # Who the event happened to, the way Sentry's sentry:user tag names them:
+    # the first of id, username, email and IP address, with its kind, so the
+    # user with id 7 isn't the user named "7". Nil when the event doesn't say.
+    # "{{auto}}" is the browser SDKs asking the server to fill in the IP
+    # address; Splat doesn't, so it names no one.
+    def user_key(payload)
+      user = payload["user"]
+      return unless user.is_a?(Hash)
+
+      USER_FIELDS.each do |field, kind|
+        value = user[field]
+        next if value.blank? || value == "{{auto}}"
+        return "#{kind}:#{value}" if value.is_a?(String) || value.is_a?(Numeric)
+      end
+      nil
+    end
+
     # A breadcrumb's time, which arrives as epoch seconds or an ISO 8601 string
     # depending on the SDK. Nil when it's neither.
     def time(value)

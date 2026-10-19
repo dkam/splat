@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **Users affected.** The issue page, each row of the issues list and the
+  MCP `get_issue` tool say how many distinct users an issue has reached,
+  told apart the way Sentry does it: by `user.id`, else username, email or
+  IP address. The count covers the events still kept, so a user drops out
+  with their last event. It needs the SDK to send a user
+  (`Sentry.set_user`), and counts from this release on.
+
 ## 1.25.0 — 2026-10-14
 
 Resolved issues reopen again when they recur — they hadn't since May — and

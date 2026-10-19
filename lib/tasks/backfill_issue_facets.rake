@@ -28,7 +28,7 @@ namespace :splat do
       # clock, and retire_issue_facets drops a pair once every event carrying it
       # has aged out. Stamping `now` would give an issue whose only staging
       # event is 89 days old a fresh 90-day lease on matching `staging`.
-      rows = IssueFacet::NAMES.flat_map do |name|
+      rows = IssueFacet::COLUMNS.flat_map do |name|
         Event.where(issue_id: issues.select(:id))
           .where.not(name => [nil, ""])
           .group(:project_id, :issue_id, name)

@@ -57,10 +57,12 @@ class IssuesController < ApplicationController
     else
       {}
     end
+    @issue_users = IssueFacet.counts_by_issue(@issues.map(&:id), :user)
   end
 
   def show
     @events = @issue.events.recent.limit(50)
+    @affected_users = @issue.affected_users_count
 
     @spark_range = 7.days.ago..Time.current
     @spark_buckets = 168

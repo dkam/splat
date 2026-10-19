@@ -176,6 +176,7 @@ class ProjectsController < ApplicationController
     else
       {}
     end
+    @issue_users = IssueFacet.counts_by_issue(issue_ids, :user)
   end
 
   def new

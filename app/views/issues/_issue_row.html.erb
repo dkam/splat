@@ -1,8 +1,9 @@
-<%# locals: (issue:, project:, sparkline:, deploy_markers:, sparkline_range:, burst_threshold:, environments: nil, heading: :h2) -%>
+<%# locals: (issue:, project:, sparkline:, deploy_markers:, sparkline_range:, burst_threshold:, environments: nil, users: nil, heading: :h2) -%>
 <%# One issue's row, on the issues list and the project overview's recent
     issues. sparkline is the issue's per-bucket event counts over
     sparkline_range; environments are its chips, nil where a project only
-    reports one. heading is the title's tag, h3 where the list sits under a
+    reports one. users is how many users it has reached, nil where its events
+    don't say. heading is the title's tag, h3 where the list sits under a
     section's h2. %>
 <div class="relative p-4 sm:p-6 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
   <%# Stretched link — keeps the whole row clickable now that the row is
@@ -75,6 +76,9 @@
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
     <span>First seen: <%= issue.first_seen.strftime("%Y-%m-%d %H:%M") %></span>
     <span>Last seen: <%= time_ago_in_words(issue.last_seen) %> ago</span>
+    <% if users %>
+      <span title="Distinct users across the events still kept"><%= pluralize(number_with_delimiter(users), "user") %></span>
+    <% end %>
         <% if environments.present? %>
       <span class="flex items-center gap-1" title="Environments this issue has been seen in">
         <% environments.each do |env| %>
