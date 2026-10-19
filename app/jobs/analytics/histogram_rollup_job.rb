@@ -30,6 +30,8 @@ module Analytics
       # Scalar companion. NULL db_time/view_time are summed as 0 but excluded
       # from their *_count, so AVG = sum/count matches raw AVG(col) (skips NULLs).
       # 5xx detection mirrors total_and_error_count_in_range (CAST status >= 500).
+      # The est_ columns weight each row by 1 / sample_rate, as
+      # Transaction#sample_weight does for the live bump; no rate weighs 1.
       def hourly_stats_select_sql
         @hourly_stats_select_sql ||= <<~SQL
           SELECT project_id,
@@ -48,7 +50,10 @@ module Analytics
                  COALESCE(MAX(query_count), 0),
                  SUM(CASE WHEN has_n_plus_one THEN 1 ELSE 0 END),
                  COALESCE(SUM(n_plus_one_time), 0),
-                 SUM(CASE WHEN CAST(http_status AS INTEGER) >= 500 THEN 1 ELSE 0 END)
+                 SUM(CASE WHEN CAST(http_status AS INTEGER) >= 500 THEN 1 ELSE 0 END),
+                 SUM(COALESCE(1.0 / sample_rate, 1.0)),
+                 SUM(duration * COALESCE(1.0 / sample_rate, 1.0)),
+                 SUM(CASE WHEN sample_rate IS NOT NULL THEN 1 ELSE 0 END)
             FROM transactions
            WHERE timestamp >= ? AND timestamp < ?
            GROUP BY 1, 2, 3, 4
@@ -147,10 +152,11 @@ module Analytics
       count sum_duration min_duration max_duration
       sum_db_time db_time_count sum_view_time view_time_count
       sum_query_count max_query_count n_plus_one_count sum_n_plus_one_time error_count
+      est_count est_sum_duration rated_count
     ].freeze
     HOURLY_STATS_KEY = HOURLY_STATS_COLUMNS.first(4).freeze
 
-    # Well under SQLite's 32766 bound-parameter limit at 17 columns a row.
+    # Well under SQLite's 32766 bound-parameter limit at 20 columns a row.
     UPSERT_SLICE = 500
 
     def upsert(conn, table, columns, key, rows)

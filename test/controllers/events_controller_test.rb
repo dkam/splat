@@ -177,4 +177,81 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     # net/protocol.rb is Ruby's, not the project's.
     assert_select "a[href^='https://git.example/']", count: 1
   end
+
+  # What a click on the project timeline's Events row opens.
+  test "index lists a window's events, newest first, with a count for each issue" do
+    from = Time.utc(2026, 10, 18, 10)
+    to = from + 1.hour
+    before = event_at("Before the window", from - 1.minute)
+    closed = [event_at("Tuber closed", from + 42.minutes), event_at("Tuber closed", from + 43.minutes)]
+    eof = event_at("end of file reached", from + 50.minutes)
+    after = event_at("After the window", to + 1.minute)
+
+    get project_events_url(@project.slug, from: from.iso8601, to: to.iso8601)
+    assert_response :success
+    [*closed, eof].each { assert_select "a[href=?]", project_event_path(@project.slug, it) }
+    [before, after].each { assert_select "a[href=?]", project_event_path(@project.slug, it), count: 0 }
+    assert_operator response.body.index(project_event_path(@project.slug, eof)), :<, response.body.index(project_event_path(@project.slug, closed.last))
+
+    assert_select "a[href=?]", project_events_path(@project.slug, issue_id: closed.first.issue_id, from: from.iso8601, to: to.iso8601), text: /×2/
+    assert_select "a[href=?]", project_events_path(@project.slug, from: (from - 1.hour).iso8601, to: from.iso8601)
+    assert_select "a[href=?]", project_events_path(@project.slug, from: to.iso8601, to: (to + 1.hour).iso8601)
+  end
+
+  test "index narrows to one issue, or to the issues in a status" do
+    from = 1.hour.ago.utc.beginning_of_minute
+    kept = event_at("Kept", from + 1.minute)
+    resolved = event_at("Fixed already", from + 2.minutes)
+    resolved.issue.resolved!
+
+    get project_events_url(@project.slug, issue_id: kept.issue_id, from: from.iso8601, to: Time.current.iso8601)
+    assert_select "a[href=?]", project_event_path(@project.slug, kept)
+    assert_select "a[href=?]", project_event_path(@project.slug, resolved), count: 0
+
+    get project_events_url(@project.slug, status: "resolved", from: from.iso8601, to: Time.current.iso8601)
+    assert_select "a[href=?]", project_event_path(@project.slug, resolved)
+    assert_select "a[href=?]", project_event_path(@project.slug, kept), count: 0
+  end
+
+  # Is it one client hammering a page, or everyone?
+  test "index says how many IPs, networks, users, browsers and systems the window's events came from" do
+    from = 1.hour.ago.utc.beginning_of_minute
+    chrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+    3.times { |i| event_from(from + i.minutes, ip: "198.51.100.7", ua: chrome) }
+    event_from(from + 4.minutes, ip: "198.51.100.20", ua: chrome, user: {"id" => 42})
+    event_at("Raised outside a request", from + 5.minutes)
+
+    get project_events_url(@project.slug, from: from.iso8601, to: Time.current.iso8601)
+    assert_response :success
+    assert_select "[data-dimension=ip]", text: /2 IPs.*198\.51\.100\.7\s+3.*1 not sent/m
+    assert_select "[data-dimension=network]", text: /1 network.*198\.51\.100\.0\/24\s+4/m
+    assert_select "[data-dimension=user]", text: /1 user.*id:42\s+1.*4 not sent/m
+    assert_select "[data-dimension=browser]", text: /1 browser.*Chrome 145\s+4/m
+    assert_select "[data-dimension=os]", text: /1 system.*macOS\s+4/m
+  end
+
+  test "index without a usable window shows the last 24 hours" do
+    old = event_at("Two days ago", 2.days.ago)
+    recent = event_at("An hour ago", 1.hour.ago)
+
+    get project_events_url(@project.slug, from: "yesterday-ish", to: "")
+    assert_response :success
+    assert_select "a[href=?]", project_event_path(@project.slug, recent)
+    assert_select "a[href=?]", project_event_path(@project.slug, old), count: 0
+  end
+
+  private
+
+  def event_at(message, at)
+    Event.create_from_sentry_payload!(SecureRandom.hex(16), {"message" => message, "timestamp" => at.utc.iso8601}, @project)
+  end
+
+  # An error raised in a request, the way sentry-rails sends one.
+  def event_from(at, ip:, ua:, user: {})
+    payload = {
+      "message" => "Raised in a request", "timestamp" => at.utc.iso8601, "user" => user,
+      "request" => {"url" => "https://example.com/", "headers" => {"User-Agent" => ua, "X-Real-Ip" => ip}}
+    }
+    Event.create_from_sentry_payload!(SecureRandom.hex(16), payload, @project)
+  end
 end

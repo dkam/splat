@@ -11,6 +11,16 @@
       <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
     <% end %>
 
+    <% if next_release_resolvable?(issue) %>
+      <%= button_to resolve_in_next_release_project_issue_path(project.slug, issue),
+          method: :patch,
+          class: "inline-flex items-center justify-center w-8 h-8 rounded-md border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors",
+          title: "Resolve in the next release: events from the current release or older won't reopen it",
+          aria: {label: "Resolve issue ##{issue.id} in the next release"} do %>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2 13l3.5 3.5L12 9M15 12h7M19 9l3 3-3 3"/></svg>
+      <% end %>
+    <% end %>
+
     <%= button_to ignore_project_issue_path(project.slug, issue),
         method: :patch,
         class: "inline-flex items-center justify-center w-8 h-8 rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",

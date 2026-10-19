@@ -69,6 +69,11 @@ module Monitors
       fp = fingerprint(monitor, kind)
       issue = Issue.find_by(project_id: monitor.project_id, fingerprint: fp)
 
+      # The first sweep to see a miss marks it on the monitor's timeline, at the
+      # time the check-in was due. Later sweeps of the same silence find the
+      # issue open and add nothing.
+      record_miss(monitor, now) if kind == "missed" && (issue.nil? || issue.resolved?)
+
       if issue.nil?
         Issue.create!(
           project_id: monitor.project_id,
@@ -85,6 +90,11 @@ module Monitors
       end
     rescue ActiveRecord::RecordNotUnique
       retry
+    end
+
+    def record_miss(monitor, now)
+      monitor.check_ins.create!(project_id: monitor.project_id, status: "missed",
+        started_at: monitor.next_expected_at || now)
     end
 
     # Recovery: close every open monitor issue for this slug. resolved! is

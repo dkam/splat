@@ -15,12 +15,91 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ### Added
 
-- **Users affected.** The issue page, each row of the issues list and the
-  MCP `get_issue` tool say how many distinct users an issue has reached,
-  told apart the way Sentry does it: by `user.id`, else username, email or
-  IP address. The count covers the events still kept, so a user drops out
-  with their last event. It needs the SDK to send a user
-  (`Sentry.set_user`), and counts from this release on.
+- **The project page is one clock.** Throughput, latency, logs, events, the
+  open issues that fired, the endpoints that took the time, and every
+  monitor are rows on one time axis, in UTC and local time. Deploys are
+  drawn down the whole page, and pointing at any row marks that hour (or
+  bucket) in every row and reads it out above. Windows run from 1h to 30d.
+  Each row draws itself from what it has: a tick per event or a bar per
+  bucket, a p95 line or dots when there are too few requests for one, a
+  bar per monitor run or a band for a heartbeat. A project with too little
+  in the last day opens at 7d and says so. Two issues whose events land in
+  the same seconds under the same message are marked as twins. Issue rows
+  keep resolve and ignore, and gain resolve in the next release, as the
+  issues list does.
+- **Click a bucket to list what's in it.** On the project page, clicking the
+  Events row opens that hour's events (or whatever the bucket is), an
+  issue's row opens that issue's events, and the Logs row opens the logs.
+  The new events list (`/projects/:slug/events`) takes `from` and `to`,
+  counts the events by issue, and steps to the hour before or after. It
+  can also narrow to one issue or to one status. The logs list takes
+  `from` and `to` too. The Throughput row opens the Performance page for
+  that bucket, ranked by time spent. The Latency row opens it with the
+  bucket's slowest requests first, and an endpoint's row opens that
+  endpoint's slowest. Both Performance pages take `from` and `to` and step
+  a window at a time, and both can list their transactions newest or
+  slowest first.
+- **Who the events came from.** Above the events list, a panel counts the
+  distinct IPs, networks (/24, or /48 for IPv6), users, browsers and
+  systems in the window. It names the most common of each and says how many
+  events didn't say. So one client hammering a page reads as "1 IP", and a
+  real outage as many. The breakdown reads the payloads of the newest 500
+  events and says so when there were more. Booko's events carry a
+  User-Agent but not an IP: sentry-ruby 7 sends `[Filtered]` for them unless
+  `data_collection.user_info` is on.
+- **Monitor run history.** Every check-in is now kept as a run in
+  `cron_check_ins`, as well as in the monitor's latest state. A run's
+  `in_progress` and its `ok` or `error` fill in one row, with its start, end
+  and duration. A missed check-in gets a row too, at the time it was due.
+  Booko's 19 monitors write about 6,000 rows a day. They're retired on the
+  events clock.
+- **Web requests and background jobs, apart.** The Performance page is a
+  one-clock page too, on the project page's axis. Requests, jobs and
+  anything else (Action Cable, say) each get a throughput row and a p95 row,
+  and a list of where their time went, with each kind's share of the whole.
+  So a queue of five-second jobs no longer sets the p95 of a 100ms site.
+  All / Web / Jobs / Other (`?kind=`) narrows the page to one kind. The kind
+  is the op the SDK sends (`http.server`, `queue.*`), recorded per endpoint
+  name at ingest and kept as long as the rollups. After deploying, run
+  `bin/rails splat:backfill_transaction_kinds` once to classify the jobs
+  that haven't run since. A job whose raw transactions have all aged out
+  can't be classified, and is drawn as a request.
+- **Users affected.** The issue page, the issues list, the project page's
+  issue rows and the MCP `get_issue` tool say how many distinct users an
+  issue has reached, told apart the way Sentry does it: by `user.id`, else
+  username, email or IP address. The count covers the events still kept,
+  so a user drops out with their last event. It needs the SDK to send a
+  user (`Sentry.set_user`), and counts from this release on.
+
+### Changed
+
+- **Pages use the window's width.** `<main>` was a Tailwind `container`,
+  which stops at the breakpoint below the window rather than at the window,
+  and each page then padded itself inside a second `max-w-7xl`. A 953px
+  window got 680px of content. It's fluid now, up to 1536px.
+- **The Performance page's tables are gone,** for the timeline's rows: each
+  endpoint's time, count, p50 and p95 sit at the end of its row. Its p99
+  and query counts are in the tooltip over them, and its N+1 share on its
+  N+1 badge.
+
+### Fixed
+
+- **The first bar of the rollup-backed charts counted two hours** when a
+  window didn't start on the hour: an endpoint's p95 trend, its MCP
+  timeseries, and any series over a window opened from a timeline bucket.
+  Bucketing truncated where it meant to floor.
+
+- **Time spent is scaled by the sample rate.** An SDK sends only a sampled
+  share of its transactions and says which share in the envelope header
+  (`trace.sample_rate`). Splat threw that away, so endpoints sampled at
+  different rates were compared as recorded. Booko traces web requests at 1%
+  and jobs at 10%, so its jobs looked ten times bigger beside its requests
+  than they are. The rate is kept on each transaction now and the hourly
+  rollups sum each one ×1/rate. The Performance page and the MCP
+  `get_transaction_stats` tool rank by the scaled time, and keep the figure
+  as recorded alongside it (in the tooltip, or as `time_spent`). Hours rolled
+  up before this release, and SDKs that send no rate (sentry-rust), count as
+  recorded.
 
 ## 1.25.0 — 2026-10-14
 

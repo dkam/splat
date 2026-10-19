@@ -108,6 +108,12 @@ class SdkEnvelopesTest < ActionDispatch::IntegrationTest
       transaction = ingest_transactions(sdk).sole
 
       assert_equal ["POST /checkout", "http.server"], [transaction.transaction_name, transaction.op]
+      # Recorded at traces_sample_rate 1.0; sentry-rust sends no trace header.
+      if sdk == "rust"
+        assert_nil transaction.sample_rate
+      else
+        assert_equal 1.0, transaction.sample_rate
+      end
       # Each query is held open 10 ms, one after the other.
       assert_operator transaction.db_time, :>=, 20
       assert_operator transaction.duration, :>=, transaction.db_time

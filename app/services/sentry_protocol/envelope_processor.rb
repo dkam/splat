@@ -263,7 +263,10 @@ module SentryProtocol
           {
             transaction_id: event_id,
             payload: item[:payload],
-            project_id: project.id
+            project_id: project.id,
+            # The SDK's sampling decision rides in the envelope header (the
+            # dynamic sampling context), not the payload.
+            sample_rate: envelope_headers.dig(:trace, :sample_rate)
           },
           kind: "transaction"
         )

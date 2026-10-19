@@ -7,12 +7,12 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
   end
 
   # Stub beanstalkd job: process_batch reads .body and calls .delete on :ok.
-  def job_for(transaction_id:, spans:, environment: nil)
+  def job_for(transaction_id:, spans:, environment: nil, name: "ProductsController#show", op: "http.server")
     payload = {
-      "transaction" => "ProductsController#show",
+      "transaction" => name,
       "start_timestamp" => 1_700_000_000.0,
       "timestamp" => 1_700_000_000.5,
-      "contexts" => {"trace" => {"op" => "http.server", "trace_id" => "trace-abc", "span_id" => "root"}},
+      "contexts" => {"trace" => {"op" => op, "trace_id" => "trace-abc", "span_id" => "root"}},
       "spans" => spans
     }
     payload["environment"] = environment if environment
@@ -94,6 +94,20 @@ class Ingest::TransactionConsumerTest < ActiveSupport::TestCase
     @consumer.send(:process_batch, [job_for(transaction_id: "txn-env", spans: [], environment: "production")])
 
     assert_equal %w[production], Facet.values_for(@project.id, :transaction, :environment)
+  end
+
+  test "processing a job records its name as a job, and a request records nothing" do
+    Facet.where(project_id: @project.id).delete_all
+    Facet.reset_throttle!
+
+    @consumer.send(:process_batch, [
+      job_for(transaction_id: "txn-job", spans: [], name: "CoverDownloadJob", op: "queue.process"),
+      job_for(transaction_id: "txn-web", spans: [])
+    ])
+
+    lookup = TransactionKind.lookup(@project.id)
+    assert_equal %w[CoverDownloadJob], lookup.job_names
+    assert_equal "web", lookup.kind_of("ProductsController#show")
   end
 
   test "build_span_tree hoists trace_id and uses ts/end_ts keys" do

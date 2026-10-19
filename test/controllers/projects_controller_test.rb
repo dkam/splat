@@ -10,106 +10,142 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     Rails.cache.clear
   end
 
-  test "show renders with the logs quick-link card" do
+  test "show draws a logs row that links to the logs" do
     Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
       level: :info, source: "sentry", body: "x", payload: {})
 
-    get project_url(@project.slug)
+    get project_url(@project.slug, window: "24h")
     assert_response :success
-    assert_match "Logs (24h)", response.body
-    assert_select "a[href=?]", project_logs_path(@project.slug)
+    assert_select "a[href=?]", project_logs_path(@project.slug), text: "Logs"
   end
 
-  # With no traffic there's no response time or error rate to show. Both
-  # read as a healthy green 0 (0ms, 0%) instead of N/A.
-  test "show gives N/A, not zero, for response time and error rate with no traffic" do
+  # With no traffic there's no response time to show. It used to read as a
+  # healthy 0ms instead of N/A.
+  test "show gives N/A, not zero, for latency with no traffic" do
     get project_url(@project.slug)
 
     assert_response :success
     refute_match(/>\s*0ms\s*</, response.body)
-    refute_match(/>\s*0%\s*</, response.body)
-    assert_select "div", text: "N/A", minimum: 3
+    assert_match(/N\/A <span[^>]*>p50/, response.body)
   end
 
-  test "show lists recent issues by their message, without the error_highlight snippet" do
-    Issue.create!(
-      project: @project, fingerprint: "highlighted", exception_type: "NameError", count: 1,
-      title: "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^",
-      first_seen: Time.current, last_seen: Time.current, status: :open
-    )
-
-    get project_url(@project.slug)
-    assert_response :success
-    assert_select "h3", text: "undefined local variable or method 'job' for main"
-  end
-
-  test "show lists recent events by their message, without the error_highlight snippet" do
+  test "show labels an issue's row by its message, without the error_highlight snippet" do
     message = "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^"
     Event.create_from_sentry_payload!(
-      "evt-recent-highlighted",
-      {"exception" => {"values" => [{"type" => "NameError", "value" => message}]},
-       "timestamp" => Time.current.iso8601},
+      "evt-highlighted",
+      {"exception" => {"values" => [{"type" => "NameError", "value" => message}]}, "timestamp" => Time.current.iso8601},
       @project
     )
 
-    get project_url(@project.slug)
+    get project_url(@project.slug, window: "24h")
     assert_response :success
-    # The recent issues list above heads with the same message, so look for
-    # the snippet rather than counting headings.
-    assert_select "h3", text: "undefined local variable or method 'job' for main", minimum: 1
-    assert_select "h3", text: /\^\^\^/, count: 0
+    assert_select "a", text: "undefined local variable or method 'job' for main"
+    assert_select "a", text: /\^\^\^/, count: 0
   end
 
-  test "show counts a recent issue's single event as 1 event" do
-    Issue.create!(project: @project, fingerprint: "single", title: "Single", count: 1,
-      first_seen: Time.current, last_seen: Time.current, status: :open)
+  # The overview's issue rows count users as the issues list's do, and leave
+  # the count off where no event said who its user was.
+  test "show says how many users each issue's row has reached" do
+    IssueFacet.reset_throttle!
+    reached = %w[1 2 2].map do |id|
+      Event.create_from_sentry_payload!(SecureRandom.hex(16),
+        {"message" => "Reached users", "user" => {"id" => id}, "timestamp" => Time.current.iso8601}, @project)
+    end.first.issue
+    Event.create_from_sentry_payload!(SecureRandom.hex(16),
+      {"message" => "Nobody said", "timestamp" => Time.current.iso8601}, @project)
 
-    get project_url(@project.slug)
+    get project_url(@project.slug, window: "24h")
     assert_response :success
-    text = Nokogiri::HTML(response.body).text.squish
-    assert_equal ["1 event"], text.scan(/\b1 events?\b/).uniq
+    assert_select "[data-issue-users]", count: 1, text: "2 users"
+    assert_select "a[href=?] ~ [data-issue-users]", project_issue_path(@project.slug, reached)
   end
 
-  # The row was a link with the issue's link inside it. Browsers don't nest
-  # links: they close the row's link at the inner one and reopen it after,
-  # which left an empty row above the event and its details strewn below.
-  test "show links each recent event once, with its issue link beside rather than inside" do
-    event = Event.create_from_sentry_payload!(
-      "evt-recent-row",
-      {"exception" => {"values" => [{"type" => "NoMethodError", "value" => "boom"}]},
-       "environment" => "production", "timestamp" => Time.current.iso8601},
-      @project
-    )
+  test "show offers resolve, resolve in the next release and ignore on an issue with events" do
+    event = Event.create_from_sentry_payload!("evt-triage",
+      {"message" => "Triage me", "release" => "2.0.0", "timestamp" => Time.current.iso8601}, @project)
+    issue = event.issue
 
-    get project_url(@project.slug)
-    assert_response :success
-    assert_select "a[href=?]", project_event_path(@project.slug, event), count: 1
-    assert_select "a[href=?]", project_issue_path(@project.slug, event.issue), text: "Issue ##{event.issue.id}"
-  end
-
-  # The recent issues share the issues list's row, so they offer the same
-  # triage and show the same environments.
-  test "show offers resolve and ignore on each recent issue, as the issues list does" do
-    issue = Issue.create!(project: @project, fingerprint: "triage", title: "Triage me", count: 1,
-      first_seen: Time.current, last_seen: Time.current, status: :open)
-
-    get project_url(@project.slug)
+    get project_url(@project.slug, window: "24h")
     assert_response :success
     assert_select "form[action=?]", resolve_project_issue_path(@project.slug, issue)
+    assert_select "form[action=?]", resolve_in_next_release_project_issue_path(@project.slug, issue)
     assert_select "form[action=?]", ignore_project_issue_path(@project.slug, issue)
     assert_select "a form", count: 0
   end
 
-  test "show's recent issues carry their environments once a project reports more than one" do
-    issue = Issue.create!(project: @project, fingerprint: "two-envs", title: "Two envs", count: 2,
-      first_seen: Time.current, last_seen: Time.current, status: :open)
-    IssueFacet.reset_throttle!
-    IssueFacet.harvest!(project_id: @project.id, issue_id: issue.id, values: {environment: "production"})
-    IssueFacet.harvest!(project_id: @project.id, issue_id: issue.id, values: {environment: "staging"})
+  test "show leaves resolve in the next release off until a release has been seen" do
+    issue = Event.create_from_sentry_payload!("evt-norelease",
+      {"message" => "No release", "timestamp" => Time.current.iso8601}, @project).issue
 
-    get project_url(@project.slug)
+    get project_url(@project.slug, window: "24h")
+    assert_select "form[action=?]", resolve_project_issue_path(@project.slug, issue)
+    assert_select "form[action=?]", resolve_in_next_release_project_issue_path(@project.slug, issue), count: 0
+  end
+
+  test "show marks a deploy in the window with its release" do
+    @project.releases.create!(version: "19.12.3+5a6f4862b90cc623eaa52a546b30453b52f36a13",
+      first_seen_at: 12.hours.ago, last_seen_at: 1.hour.ago)
+
+    get project_url(@project.slug, window: "24h")
     assert_response :success
-    assert_select "[title=?] span", "Environments this issue has been seen in", text: "staging"
+    # On a row of its own: sharing the local-time row, it covered the times.
+    assert_select "[data-timeline-row=deploys] span", text: "▾ 19.12.3 · 5a6f486"
+    assert_select "[data-timeline-target=localTick]" do |ticks|
+      ticks.each { |tick| assert_equal "", tick.text }
+    end
+    assert_select "[data-timeline-row=local] span", text: /19\.12\.3/, count: 0
+  end
+
+  test "show opens a quiet project at 7d, says so, and keeps a window it's asked for" do
+    get project_url(@project.slug)
+    assert_select "nav[aria-label=Window] a[aria-current=page]", text: "7d"
+    assert_match "the last 24h had too little to draw", response.body
+
+    get project_url(@project.slug, window: "1h")
+    assert_select "nav[aria-label=Window] a[aria-current=page]", text: "1h"
+    refute_match "too little to draw", response.body
+  end
+
+  # GR's four Tuber issues: resolved by the time the page was read, so their
+  # 13 events were in the Events row and in no issue row.
+  test "show folds the resolved issues that had events, so every event has a row" do
+    event = Event.create_from_sentry_payload!("evt-resolved",
+      {"message" => "Connection to beanstalk is closed", "timestamp" => 1.hour.ago.iso8601}, @project)
+    event.issue.resolved!
+
+    get project_url(@project.slug, window: "24h")
+    assert_response :success
+    assert_match "1 resolved issue, folded", response.body
+    assert_select "[data-timeline-href=?]", project_events_path(@project.slug, status: "resolved")
+  end
+
+  test "show's events, issue and logs rows open their lists for the bucket clicked" do
+    issue = Event.create_from_sentry_payload!("evt-click",
+      {"message" => "Click me", "timestamp" => 1.hour.ago.iso8601}, @project).issue
+    Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 1.hour.ago,
+      level: :info, source: "sentry", body: "x", payload: {})
+
+    get project_url(@project.slug, window: "24h")
+    assert_select "[data-timeline-href=?]", project_events_path(@project.slug)
+    assert_select "[data-timeline-href=?]", project_events_path(@project.slug, issue_id: issue.id)
+    assert_select "[data-timeline-href=?]", project_logs_path(@project.slug)
+  end
+
+  test "show's throughput, latency and endpoint rows open the endpoints for the bucket clicked" do
+    @project.transactions.create!(transaction_id: "txn-click", transaction_name: "BooksController#show",
+      timestamp: 1.hour.ago, duration: 120)
+
+    get project_url(@project.slug, window: "24h")
+    assert_select "[data-timeline-href=?]", project_endpoints_path(@project.slug)
+    assert_select "[data-timeline-href=?]", project_endpoints_path(@project.slug, sort: "slowest")
+    assert_select "[data-timeline-href=?]", detail_project_endpoints_path(@project.slug, name: "BooksController#show", sort: "slowest")
+  end
+
+  test "show draws every window" do
+    ProjectTimeline::WINDOWS.each_key do |key|
+      get project_url(@project.slug, window: key)
+      assert_response :success, key
+    end
   end
 
   test "show offers a DSN pointing at the requested authority when SPLAT_HOST is unset" do

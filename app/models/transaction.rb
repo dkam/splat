@@ -66,7 +66,9 @@ class Transaction < TransactionsSpansRecord
 
   after_create_commit :broadcast_transaction_update
 
-  def self.create_from_sentry_payload!(transaction_id, payload, project)
+  # sample_rate is the share of transactions the SDK kept, which it sends in
+  # the envelope header (trace.sample_rate) rather than in the payload.
+  def self.create_from_sentry_payload!(transaction_id, payload, project, sample_rate: nil)
     start_timestamp = parse_timestamp(payload["start_timestamp"])
     timestamp = parse_timestamp(payload["timestamp"])
     duration = ((timestamp - start_timestamp) * 1000).round if start_timestamp && timestamp
@@ -137,6 +139,7 @@ class Transaction < TransactionsSpansRecord
       view_time: view_time,
       environment: payload["environment"],
       release: payload["release"],
+      sample_rate: normalize_sample_rate(sample_rate),
       server_name: payload["server_name"],
       http_method: http_method,
       http_status: http_status,
@@ -281,6 +284,17 @@ class Transaction < TransactionsSpansRecord
     query_analysis["potential_n_plus_one"] ||
       query_patterns.select { |_, data| data["count"].to_i > SpanAnalyzer::N_PLUS_ONE_THRESHOLD }.keys
   end
+
+  # sentry-ruby and sentry-python send the rate as a string ("0.01"), others as
+  # a number. Only a rate an SDK could have sampled at is kept: above 0 (it
+  # would have sent nothing) and at most 1.
+  def self.normalize_sample_rate(value)
+    rate = Float(value, exception: false)
+    rate if rate && rate > 0 && rate <= 1
+  end
+
+  # How many transactions this one stands for. One when the SDK didn't say.
+  def sample_weight = sample_rate ? 1.0 / sample_rate : 1.0
 
   def controller_action
     return nil unless transaction_name.present?

@@ -1,0 +1,9 @@
+<%# Newest first or slowest first, keeping the page's other filters. %>
+<nav class="flex gap-0.5 p-0.5 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-gray-900" aria-label="Order">
+  <% {"recent" => "Newest", "slowest" => "Slowest"}.each do |key, label| %>
+    <% current = key == @sort %>
+    <%= link_to label, (key == "recent") ? current_page_with(drop: %w[sort]) : current_page_with(sort: key),
+        class: "px-2.5 py-1 rounded text-xs font-medium #{current ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm" : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}",
+        aria: {current: (current ? "page" : nil)} %>
+  <% end %>
+</nav>

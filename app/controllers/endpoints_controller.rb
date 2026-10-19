@@ -3,63 +3,53 @@
 # The performance dashboard's grouped surface — endpoints (= transaction_name)
 # is to transactions what an Issue is to events. Three actions:
 #
-#   index       — all endpoints in the project, ranked by impact (avg × count)
+#   index       — the project's endpoints on one clock (PerformanceTimeline),
+#                 web requests and background jobs apart, ranked by impact
 #   show        — one endpoint's detail (percentiles, recent transactions)
 #   n_plus_one  — endpoints with detected N+1 query patterns, ranked
+#
+# index and detail also take ?from=&to= (TimeWindowParam) in place of
+# ?time_range=: a click on the project timeline's Throughput, Latency or
+# endpoint row opens them for that bucket. ?sort=slowest lists the
+# transactions slowest first, which is what the latency rows ask for.
 #
 # Single-transaction drill-down still lives at TransactionsController#show.
 class EndpointsController < ApplicationController
   include Pagy::Method
+  include TimeWindowParam
 
   before_action :set_project
 
+  helper_method :range_params
+
+  SORTS = %w[recent slowest].freeze
+
   def index
-    @time_range = params[:time_range] || "24h"
-    time_ago = time_range_lower_bound(@time_range)
-    time_range = time_ago..Time.current
+    @time_range = params[:time_range].presence_in(ProjectTimeline::WINDOWS.keys) || "24h"
+    @window = time_window_param
+    @sort = params[:sort].presence_in(SORTS) || "recent"
     @name_query = params[:name].to_s.strip.presence
+    @environment = params[:environment].presence
+    # Web requests, background jobs or other (TransactionKind); nil is all of
+    # them, each drawn apart.
+    @kind = TransactionKind.normalize(params[:kind])
 
-    base_scope = @project.transactions.where("timestamp > ?", time_ago)
-    base_scope = base_scope.where(environment: params[:environment]) if params[:environment].present?
+    @timeline = PerformanceTimeline.new(@project, window: @time_range, range: @window, kind: @kind,
+      environment: @environment, name_query: @name_query)
+
+    # The feed covers the timeline's window, and the same names as its rows:
+    # a row here is the kind its endpoint is drawn under.
+    @kind_lookup = TransactionKind.lookup(@project.id)
+    base_scope = @project.transactions.where(timestamp: @timeline.range)
+    base_scope = base_scope.where(environment: @environment) if @environment
     base_scope = base_scope.where("transaction_name LIKE ?", "%#{@name_query}%") if @name_query
-
-    pct = Transaction.percentiles(time_range, project_id: @project.id, environment: params[:environment], name_query: @name_query)
-    # nil for a window with no requests: format_duration shows N/A, where a
-    # 0 showed as a fast, green 0ms.
-    @p50_duration = pct[:p50]
-    @p95_duration = pct[:p95]
-    @p99_duration = pct[:p99]
-
-    # When the user has filtered by name we want to see every match, not just
-    # the top 20 by impact.
-    @endpoints = Transaction.stats_by_endpoint_with_impact(
-      time_range,
-      project_id: @project.id,
-      environment: params[:environment],
-      name_query: @name_query,
-      limit: @name_query ? nil : 20
-    )
-
-    @sparkline_range = time_range
-    sparkline_names = @endpoints.map { |e| e["transaction_name"] }
-    sparkline_key = [
-      "endpoints_p95_sparklines/v1", @project.id, @time_range,
-      params[:environment].presence, @name_query, Digest::MD5.hexdigest(sparkline_names.join("\n"))
-    ].join("/")
-    @endpoint_sparklines = Rails.cache.fetch(sparkline_key, expires_in: 30.seconds) do
-      Transaction.p95_by_bucket(
-        transaction_names: sparkline_names,
-        time_range: time_range,
-        buckets: 24,
-        project_id: @project.id,
-        environment: params[:environment]
-      )
-    end
+    kind_sql, kind_binds = @kind_lookup.clause(@kind)
+    base_scope = base_scope.where(kind_sql, *kind_binds) if kind_sql
 
     # Countless: this feed is the whole project's transactions, which runs to
     # thousands of pages. A counted paginator would COUNT(*) the lot on every
     # load (and render a bogus "last page"); countless drops both.
-    @pagy, @transactions = pagy(:countless, base_scope.order(timestamp: :desc), limit: 50)
+    @pagy, @transactions = pagy(:countless, base_scope.order(transaction_order), limit: 50)
 
     @environments = cached_environments
   end
@@ -67,8 +57,9 @@ class EndpointsController < ApplicationController
   def detail
     @endpoint = params[:name] || params[:endpoint]
     @time_range = params[:time_range] || "24h"
-    time_ago = time_range_lower_bound(@time_range)
-    time_range = time_ago..Time.current
+    @window = time_window_param
+    @sort = params[:sort].presence_in(SORTS) || "recent"
+    time_range = @window || (time_range_lower_bound(@time_range)..Time.current)
 
     stats = Transaction.percentiles_for_endpoint(@endpoint, time_range, project_id: @project.id)
     @p50_duration = stats["p50_duration"]&.to_f&.round
@@ -89,8 +80,8 @@ class EndpointsController < ApplicationController
 
     transactions = @project.transactions
       .where(transaction_name: @endpoint)
-      .where("timestamp > ?", time_ago)
-      .order(timestamp: :desc)
+      .where(timestamp: time_range)
+      .order(transaction_order)
 
     # Countless pagination: this endpoint can have ~80k transactions/day, so a
     # counted paginator would run a COUNT(*) over the whole window on every page
@@ -114,6 +105,17 @@ class EndpointsController < ApplicationController
 
   def set_project
     @project = Project.find_by!(slug: params[:project_slug])
+  end
+
+  # What a link to another endpoints page carries: the window or the range,
+  # and the order when it isn't the usual one.
+  def range_params
+    carried = @window ? {from: @window.begin.utc.iso8601, to: @window.end.utc.iso8601} : {time_range: @time_range}
+    (@sort == "slowest") ? carried.merge(sort: @sort) : carried
+  end
+
+  def transaction_order
+    (@sort == "slowest") ? {duration: :desc, id: :desc} : {timestamp: :desc}
   end
 
   def time_range_lower_bound(range)

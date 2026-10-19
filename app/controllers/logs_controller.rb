@@ -2,6 +2,7 @@
 
 class LogsController < ApplicationController
   include Pagy::Method
+  include TimeWindowParam
 
   before_action :set_project
 
@@ -25,6 +26,9 @@ class LogsController < ApplicationController
     logs = logs.by_service(@service) if @service
     logs = logs.by_source(@source) if @source
     logs = logs.search_text(@query) if @query
+    # ?from=&to=, from a click on the project timeline's Logs row.
+    @window = time_window_param
+    logs = logs.where(timestamp: @window) if @window
 
     # Countless: avoids a SELECT COUNT(*) over the ~1M-row logs table (~7s) —
     # an append-only feed only needs prev/next, not a total page count.

@@ -51,7 +51,7 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :events, only: [:show, :destroy]
+    resources :events, only: [:index, :show, :destroy]
 
     resources :logs, only: [:index, :show]
 

@@ -16,7 +16,8 @@ module Analytics
 
     # tuples: each is a Transaction (or anything answering project_id,
     # transaction_name, environment, timestamp, duration, db_time, view_time,
-    # query_count, has_n_plus_one, n_plus_one_time, http_status).
+    # query_count, has_n_plus_one, n_plus_one_time, http_status, sample_rate,
+    # sample_weight).
     def bump_many!(transactions)
       return if transactions.empty?
       deltas = Hash.new { |h, k| h[k] = new_accumulator }
@@ -34,7 +35,8 @@ module Analytics
           a[:count], a[:sum_duration], a[:min_duration], a[:max_duration],
           a[:sum_db_time], a[:db_time_count], a[:sum_view_time], a[:view_time_count],
           a[:sum_query_count], a[:max_query_count], a[:n_plus_one_count],
-          a[:sum_n_plus_one_time], a[:error_count])
+          a[:sum_n_plus_one_time], a[:error_count],
+          a[:est_count], a[:est_sum_duration], a[:rated_count])
       end
 
       sql = +"INSERT INTO transaction_hourly_stats "
@@ -54,13 +56,15 @@ module Analytics
       count sum_duration min_duration max_duration
       sum_db_time db_time_count sum_view_time view_time_count
       sum_query_count max_query_count n_plus_one_count sum_n_plus_one_time error_count
+      est_count est_sum_duration rated_count
     ].freeze
 
     # Additive columns sum on conflict; min/max take the running extreme so the
     # window's min/max stay exact across many bumps and the rollup.
     def conflict_update_sql
       sums = %w[count sum_duration sum_db_time db_time_count sum_view_time
-        view_time_count sum_query_count n_plus_one_count sum_n_plus_one_time error_count]
+        view_time_count sum_query_count n_plus_one_count sum_n_plus_one_time error_count
+        est_count est_sum_duration rated_count]
         .map { |c| "#{c} = #{c} + excluded.#{c}" }
       extremes = [
         "min_duration = MIN(COALESCE(min_duration, excluded.min_duration), excluded.min_duration)",
@@ -74,7 +78,8 @@ module Analytics
       {count: 0, sum_duration: 0, min_duration: nil, max_duration: 0,
        sum_db_time: 0, db_time_count: 0, sum_view_time: 0, view_time_count: 0,
        sum_query_count: 0, max_query_count: 0, n_plus_one_count: 0,
-       sum_n_plus_one_time: 0, error_count: 0}
+       sum_n_plus_one_time: 0, error_count: 0,
+       est_count: 0.0, est_sum_duration: 0.0, rated_count: 0}
     end
 
     def accumulate!(a, t)
@@ -99,6 +104,10 @@ module Analytics
         a[:sum_n_plus_one_time] += t.n_plus_one_time.to_i
       end
       a[:error_count] += 1 if t.http_status.to_i >= 500
+      # Scaled back up by the SDK's sample rate: what the endpoint really cost.
+      a[:est_count] += t.sample_weight
+      a[:est_sum_duration] += dur * t.sample_weight
+      a[:rated_count] += 1 if t.sample_rate
     end
   end
 end

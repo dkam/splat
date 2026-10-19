@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 # A Sentry Crons monitor: one row per monitor_slug per project, upserted in
-# place from check-in envelope items (no per-check-in history — the latest
-# check-in IS the record, which keeps the write load at one tiny primary-DB
-# UPDATE per heartbeat).
+# place from check-in envelope items. The latest check-in is the monitor's
+# state; each run is also kept in cron_check_ins (see #record_run!), one small
+# INSERT or UPDATE beside the monitor's own, so it can be drawn over time.
 #
 # The schedule comes from the check-in's monitor_config: the first check-in
 # auto-registers the monitor, and later config changes update it. Monitors that
@@ -14,6 +14,7 @@
 # the normal alert path when a monitor goes silent, errors, or overruns.
 class CronMonitor < ApplicationRecord
   belongs_to :project
+  has_many :check_ins, class_name: "CronCheckIn", dependent: :delete_all
 
   STATUSES = %w[in_progress ok error].freeze
 
@@ -99,10 +100,31 @@ class CronMonitor < ApplicationRecord
     end
 
     monitor.save!
+    monitor.record_run!(status, check_in_id, payload["duration"], now) unless stale_start
     monitor
   rescue ActiveRecord::RecordNotUnique
     # Race with another writer on the same new slug: retry resolves to UPDATE.
     retry
+  end
+
+  # The run's row in cron_check_ins. An in_progress opens one; the ok or error
+  # with the same check_in_id closes it. A terminal check-in with no open row
+  # to close (a heartbeat, or one that overtook its in_progress) is a row of
+  # its own, started `duration` seconds before it arrived.
+  def record_run!(status, check_in_id, duration, now)
+    duration = duration.to_f if duration.is_a?(Numeric)
+    if status == "in_progress"
+      check_ins.create!(project_id: project_id, check_in_id: check_in_id, status: status, started_at: now)
+      return
+    end
+
+    run = check_in_id && check_ins.where(check_in_id: check_in_id, status: "in_progress").order(:id).last
+    if run
+      run.update!(status: status, finished_at: now, duration: duration || (now - run.started_at))
+    else
+      check_ins.create!(project_id: project_id, check_in_id: check_in_id, status: status,
+        started_at: duration ? now - duration : now, finished_at: now, duration: duration)
+    end
   end
 
   def apply_config(config)
