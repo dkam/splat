@@ -34,8 +34,12 @@ module Analytics
     # SQL bucketing a timestamp column into integer indices over a window:
     # floor((epoch(column) - origin) / bucket_seconds). origin_epoch and
     # bucket_seconds are integers computed in Ruby (safe to interpolate).
+    #
+    # FLOOR, not integer division: SQLite's truncates toward zero, so an
+    # hourly row starting before the window (-0.3 of a bucket) would land in
+    # bucket 0 rather than -1, where the readers drop it.
     def time_bucket_sql(origin_epoch:, bucket_seconds:, column: "timestamp")
-      "CAST((strftime('%s', #{column}) - #{origin_epoch.to_i}) / #{bucket_seconds.to_i} AS INTEGER)"
+      "CAST(FLOOR((strftime('%s', #{column}) - #{origin_epoch.to_i}) / #{bucket_seconds.to_i}.0) AS INTEGER)"
     end
 
     # Reduce a {bucket_index => count} distribution to a percentile (ms) via the

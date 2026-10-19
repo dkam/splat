@@ -142,6 +142,23 @@ class TransactionAnalyticsTest < ActiveSupport::TestCase
     assert_equal 1, vol.count { |element| !element.zero? }
   end
 
+  # A window that doesn't start on the hour begins partway through an hourly
+  # rollup row. That row starts before the window, so it falls before bucket
+  # 0 and is dropped — but integer division truncates toward zero, which put
+  # it in bucket 0 with the hour after it, and the first bar of every
+  # rollup-backed chart counted two hours.
+  test "a window off the hour gives its first bucket one hour, not two" do
+    hour = (Time.current - 6.hours).beginning_of_hour
+    7.times { create_txn(duration: 100, at: hour + 5.minutes) }            # before the window
+    3.times { create_txn(duration: 900, at: hour + 1.hour + 5.minutes) }   # its first bucket
+    range = (hour + 20.minutes)..(hour + 20.minutes + 4.hours)
+
+    assert_equal [3, 0, 0, 0], Transaction.volume_by_bucket(project_id: @project.id, time_range: range, buckets: 4)
+
+    p95 = Transaction.p95_by_bucket(transaction_names: ["GET /x"], time_range: range, buckets: 4, project_id: @project.id)
+    assert_in_delta 900, p95["GET /x"].first, 10, "the first bar is the hour inside the window"
+  end
+
   test "bucketing_for snaps widths of an hour or more up to a whole hour" do
     day = 24.hours.ago..Time.current
     assert_equal [3600, 24], Transaction.bucketing_for(day, 24), "already aligned → untouched"
