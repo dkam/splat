@@ -87,9 +87,10 @@ class IssueHeaderTest < ApplicationSystemTestCase
 
   # The sparkline, count and buttons sat beside the title and took a third of
   # the row from it, so a long message wrapped to three or four lines. The
-  # issues list and the overview's recent issues share one row partial; both
-  # pages are checked so a change made for one is seen on the other.
-  {"issues list" => :project_issues_path, "project overview" => :project_path}.each do |where, path|
+  # overview drew its recent issues with this row too, until it became the
+  # one-clock timeline, whose issue rows are its own; the issues list is the
+  # row's one page now.
+  {"issues list" => :project_issues_path}.each do |where, path|
     test "an issue row on the #{where} gives its title the full width, below the counts and buttons" do
       page.current_window.resize_to(940, 900)
       visit public_send(path, @project.slug)
@@ -139,22 +140,35 @@ class IssueHeaderTest < ApplicationSystemTestCase
     end
   end
 
-  # The row is one link stretched over it, and its issue link has to stay
-  # clickable on top of that rather than underneath.
-  test "a recent event on the overview opens the event, and its issue link the issue" do
+  # The one-clock card is wider than a phone on purpose, and scrolls within
+  # itself: the page around it mustn't, or the header and filters scroll away.
+  test "the project overview fits a phone, its timeline scrolling within its card" do
+    Event.create_from_sentry_payload!("evt-overview-phone",
+      {"message" => "boom", "timestamp" => Time.current.iso8601}, @project)
+    page.current_window.resize_to(390, 900)
+    visit project_path(@project.slug, window: "24h")
+    find("a", text: "boom")
+
+    assert_equal 0, horizontal_overflow, "the page is #{horizontal_overflow}px wider than the viewport"
+  end
+
+  # An event's row is one link stretched over it, and its issue link has to
+  # stay clickable on top of that rather than underneath. The overview's
+  # recent events had this row; the events list it links to has it now.
+  test "an event on the events list opens the event, and its issue link the issue" do
     event = Event.create_from_sentry_payload!(
-      "evt-overview-row",
+      "evt-list-row",
       {"exception" => {"values" => [{"type" => "NoMethodError", "value" => "boom"}]},
        "timestamp" => Time.current.iso8601},
       @project
     )
-    visit project_path(@project.slug)
+    visit project_events_path(@project.slug)
 
-    issue_link = find_link("Issue ##{event.issue.id}")
+    issue_link = find_link("##{event.issue.id}", exact_text: true)
     issue_link.scroll_to(issue_link)
     assert_equal project_issue_path(@project.slug, event.issue), link_at(issue_link)
     row = find("a[href='#{project_event_path(@project.slug, event)}']").find(:xpath, "..")
-    assert_equal project_event_path(@project.slug, event), link_at(row.find("h3", text: "boom"))
+    assert_equal project_event_path(@project.slug, event), link_at(row.find("span", exact_text: event.headline))
   end
 
   private

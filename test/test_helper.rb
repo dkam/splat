@@ -28,6 +28,14 @@ module ActiveSupport
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
+    # The facet write throttles remember a key per process, and a rolled-back
+    # test frees its ids for the next one: a later test's issue 3 harvesting
+    # "id:1" was skipped as already written by an earlier test's issue 3.
+    setup do
+      Facet.reset_throttle!
+      IssueFacet.reset_throttle!
+    end
+
     # Jobs spooled while tuber is down go to a directory of the test's own, so
     # parallel workers never replay each other's.
     setup { Ingest::Spool.dir = Dir.mktmpdir("spool") }
