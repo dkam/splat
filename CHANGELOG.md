@@ -64,6 +64,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   `bin/rails splat:backfill_transaction_kinds` once to classify the jobs
   that haven't run since. A job whose raw transactions have all aged out
   can't be classified, and is drawn as a request.
+- **The issues list is on the one clock too.** The tab's events and its new
+  issues are signal rows over the window, 1h to 30d, with the deploys drawn
+  down the page, and each issue's row marks its events as the project
+  page's do, beside its events in the window and in all. Recent lists
+  every issue in the tab, last seen first, as before; Busiest, those with
+  events in the window, most first; New, those first seen in it. Pointing
+  at an hour names the issues busiest in it, from the whole tab, and
+  clicking the Events row opens the list for that hour, busiest first.
+  The project page's "all issues →" keeps its window.
 - **Users affected.** The issue page, the issues list, the project page's
   issue rows and the MCP `get_issue` tool say how many distinct users an
   issue has reached, told apart the way Sentry does it: by `user.id`, else
@@ -84,6 +93,9 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ### Fixed
 
+- **"last event now ago"** on the project page, and "Last transaction now
+  ago" on the projects list, for anything under a minute old. It says "just
+  now".
 - **The first bar of the rollup-backed charts counted two hours** when a
   window didn't start on the hour: an endpoint's p95 trend, its MCP
   timeseries, and any series over a window opened from a timeline bucket.

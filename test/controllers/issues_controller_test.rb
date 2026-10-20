@@ -49,6 +49,66 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[rel=prev]", 1
   end
 
+  # The list on the project page's clock: each issue's events in the window
+  # drawn across it, and counted beside its count of all time.
+  test "index draws each issue on the window's clock" do
+    busy = create_issue("on-the-clock", "On the clock", count: 5)
+    record_events(busy, 1.hour.ago, 2.hours.ago)
+    quiet = create_issue("off-the-clock", "Off the clock")
+
+    get project_issues_url(@project.slug, window: "24h")
+    assert_response :success
+    assert_select "[data-signal=events] [data-count]", text: "2"
+    assert_select "[data-issue-row=?]", busy.id.to_s do
+      assert_select "[data-timeline-href=?]", project_events_path(@project.slug, issue_id: busy.id)
+      assert_select "span", text: "2 / 5 events"
+    end
+    assert_select "[data-issue-row=?]", quiet.id.to_s, text: /no events in this window/
+  end
+
+  test "index sorts by last seen, by events in the window, or by first seen in it" do
+    old = create_issue("seen-lately", "Seen lately")
+    old.update!(first_seen: 30.days.ago, last_seen: 1.minute.ago)
+    busy = create_issue("busiest", "Busiest")
+    busy.update!(first_seen: 30.days.ago, last_seen: 2.hours.ago)
+    record_events(busy, 2.hours.ago, 2.hours.ago, 2.hours.ago)
+    fresh = create_issue("fresh", "Fresh")
+    fresh.update!(first_seen: 3.hours.ago, last_seen: 3.hours.ago)
+    record_events(fresh, 3.hours.ago)
+
+    order = -> { css_select("[data-issue-row]").map { it["data-issue-row"].to_i } }
+
+    get project_issues_url(@project.slug)
+    assert_equal [old.id, busy.id, fresh.id], order.call
+    get project_issues_url(@project.slug, sort: "busiest")
+    assert_equal [busy.id, fresh.id], order.call
+    get project_issues_url(@project.slug, sort: "new")
+    assert_equal [fresh.id], order.call
+  end
+
+  # The Events row opens this list for the bucket clicked, and a list opened
+  # for a bucket is of the issues busiest in it.
+  test "index opens for a bucket clicked, busiest first" do
+    issue = create_issue("in-the-bucket", "In the bucket")
+    record_events(issue, 2.hours.ago)
+    create_issue("not-in-it", "Not in it")
+
+    get project_issues_url(@project.slug)
+    assert_select "[data-signal=events] [data-timeline-href=?]", project_issues_path(@project.slug, status: "open", sort: "busiest")
+
+    from = 3.hours.ago.beginning_of_hour
+    get project_issues_url(@project.slug, from: from.iso8601, to: (from + 2.hours).iso8601)
+    assert_select "nav[aria-label=Sort] a[aria-current=page]", text: "Busiest"
+    assert_equal [issue.id], css_select("[data-issue-row]").map { it["data-issue-row"].to_i }
+  end
+
+  test "index's window and sort keep the tab and the environment" do
+    get project_issues_url(@project.slug, status: "resolved", environment: "staging", window: "7d")
+    assert_select "nav[aria-label=Window] a[aria-current=page]", text: "7d"
+    assert_select "nav[aria-label=Window] a[href*='status=resolved'][href*='environment=staging'][href*='window=1h']"
+    assert_select "nav[aria-label=Sort] a[href*='status=resolved'][href*='window=7d'][href*='sort=new']"
+  end
+
   test "index filters by environment and offers a dropdown once there are two" do
     both = create_issue("spans-envs", "SpansEnvs")
     staging_only = create_issue("staging-only", "StagingOnly")
@@ -222,11 +282,18 @@ class IssuesControllerTest < ActionDispatch::IntegrationTest
 
   private
 
-  def create_issue(fingerprint, title)
+  def create_issue(fingerprint, title, count: 1)
     Issue.create!(
       project_id: @project.id, fingerprint: fingerprint, title: title,
-      exception_type: "RuntimeError", count: 1,
+      exception_type: "RuntimeError", count: count,
       first_seen: Time.current, last_seen: Time.current, status: :open
     )
+  end
+
+  # Events at those times, leaving the issue's count as it was.
+  def record_events(issue, *times)
+    Event.insert_all(times.map do |t|
+      {event_id: SecureRandom.uuid, project_id: @project.id, issue_id: issue.id, timestamp: t, created_at: t, updated_at: t}
+    end)
   end
 end

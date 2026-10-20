@@ -29,6 +29,18 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_match(/N\/A <span[^>]*>p50/, response.body)
   end
 
+  # The compact time reads "now" under a minute, which came out as "last
+  # event now ago".
+  test "show says an event a moment ago came now, not now ago" do
+    Event.create_from_sentry_payload!(SecureRandom.hex(16),
+      {"message" => "Just now", "timestamp" => 10.seconds.ago.iso8601}, @project)
+
+    get project_url(@project.slug)
+    assert_response :success
+    assert_match(/last event just now/, response.body)
+    refute_match(/now ago/, response.body)
+  end
+
   test "show labels an issue's row by its message, without the error_highlight snippet" do
     message = "undefined local variable or method 'job' for main\n\n    job.perform\n    ^^^"
     Event.create_from_sentry_payload!(

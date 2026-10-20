@@ -2,29 +2,39 @@
 
 class IssuesController < ApplicationController
   include Pagy::Method
+  include TimeWindowParam
+
+  SORTS = %w[recent busiest new].freeze
 
   before_action :set_project
   before_action :set_issue, only: [:show, :resolve, :resolve_in_next_release, :ignore, :reopen]
 
+  # The tab's issues on the project page's clock (IssuesTimeline). Recent
+  # lists every one, last seen first; busiest, those with events in the window,
+  # most first; new, those first seen in it. ?from=&to= (TimeWindowParam) opens
+  # it for a bucket clicked on a timeline, busiest first unless asked otherwise.
   def index
-    @status = params[:status] || "open"
-    issues = case @status
-    when "resolved"
-      @project.issues.resolved
-    when "ignored"
-      @project.issues.ignored
-    else
-      @project.issues.open
-    end.recent
+    @status = params[:status].presence_in(%w[resolved ignored]) || "open"
+    @window_key = params[:window].presence_in(ProjectTimeline::WINDOWS.keys) || ProjectTimeline::DEFAULT_WINDOW
+    @window = time_window_param
+    @sort = params[:sort].presence_in(SORTS) || (@window ? "busiest" : "recent")
 
     # "Seen in", not "belongs to" — grouping spans environments, so an issue
     # can appear under staging and production both. Backed by issue_facets
     # (maintained at ingest), so this stays an indexed subquery rather than a
     # DISTINCT over events.
     @environment = params[:environment].presence
-    issues = issues.seen_in_environment(@environment, project_id: @project.id) if @environment
+
+    @timeline = IssuesTimeline.new(@project, window: @window_key, range: @window, status: @status,
+      environment: @environment)
+    issues = case @sort
+    when "busiest" then @timeline.issues.in_order_of(:id, @timeline.busiest_ids)
+    when "new" then @timeline.issues.where(first_seen: @timeline.range).order(first_seen: :desc, id: :desc)
+    else @timeline.issues.recent
+    end
 
     @pagy, @issues = pagy(issues, limit: 25)
+    @rows = @timeline.rows(@issues)
     @burst_threshold = Setting.instance.burst_threshold
 
     counts_by_status = Rails.cache.fetch("project_#{@project.id}_issue_counts", expires_in: 30.seconds) do
@@ -33,18 +43,6 @@ class IssuesController < ApplicationController
     @open_count = counts_by_status["open"] || 0
     @resolved_count = counts_by_status["resolved"] || 0
     @ignored_count = counts_by_status["ignored"] || 0
-
-    @sparkline_buckets = 24
-    @sparkline_range = 24.hours.ago..Time.current
-    @sparklines = Event.event_counts_by_bucket(
-      issue_ids: @issues.map(&:id),
-      time_range: @sparkline_range,
-      buckets: @sparkline_buckets,
-      project_id: @project.id
-    )
-    @deploy_markers = @project.releases
-      .where(first_seen_at: @sparkline_range)
-      .pluck(:first_seen_at)
 
     # Dropdown options, and the per-row chips for the page of issues on screen
     # (one query for the page, not one per row). Both are pointless on a project

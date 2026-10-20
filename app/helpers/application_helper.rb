@@ -97,12 +97,14 @@ module ApplicationHelper
   # "2h", not "about 2 hours" — for the stat tiles and card footers, where the
   # column is a few characters wide and Rails' prose gets ellipsised into
   # "about 2 h...". Truncates rather than rounds: 149 minutes is still "2h",
-  # the same way a clock reads.
-  def time_ago_compact(time)
+  # the same way a clock reads. ago: true says "2h ago", or "just now", for
+  # a sentence: "now ago" is what appending the ago gave a minute in.
+  def time_ago_compact(time, ago: false)
     return "\u2014" if time.blank?
 
     seconds = (Time.current - time).to_i
-    return "now" if seconds < 60
+    return (ago ? "just now" : "now") if seconds < 60
+    return "#{time_ago_compact(time)} ago" if ago
 
     case seconds
     when 0...3600 then "#{seconds / 60}m"

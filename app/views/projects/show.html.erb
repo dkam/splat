@@ -17,7 +17,7 @@
     </nav>
 
     <span class="font-mono text-xs text-gray-500 dark:text-gray-400">
-      queue <%= @queue_depth %> · last event <%= @last_event_at ? "#{time_ago_compact(@last_event_at)} ago" : "never" %>
+      queue <%= @queue_depth %> · last event <%= @last_event_at ? time_ago_compact(@last_event_at, ago: true) : "never" %>
     </span>
 
     <div class="ml-auto flex items-center gap-2 text-sm">

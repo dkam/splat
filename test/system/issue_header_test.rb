@@ -1,7 +1,7 @@
 require "application_system_test_case"
 
 # The issue header holds a long title alongside the status badge and action
-# buttons, and the issues list rows hold one alongside a sparkline and counts.
+# buttons, and the issues list rows hold one alongside its events and counts.
 # Whether they collide or overflow is a question of rendered geometry, which
 # only a real browser can answer, so this measures the boxes, not the markup.
 class IssueHeaderTest < ApplicationSystemTestCase
@@ -85,47 +85,45 @@ class IssueHeaderTest < ApplicationSystemTestCase
     end
   end
 
-  # The sparkline, count and buttons sat beside the title and took a third of
-  # the row from it, so a long message wrapped to three or four lines. The
-  # overview drew its recent issues with this row too, until it became the
-  # one-clock timeline, whose issue rows are its own; the issues list is the
-  # row's one page now.
-  {"issues list" => :project_issues_path}.each do |where, path|
-    test "an issue row on the #{where} gives its title the full width, below the counts and buttons" do
-      page.current_window.resize_to(940, 900)
-      visit public_send(path, @project.slug)
+  # The issues list is on the one clock: each row is the overview's three
+  # columns, the title in the first beside the issue's events and its buttons,
+  # where the old row gave it the full width beneath them.
+  test "an issue row on the issues list keeps its title clear of the events and buttons" do
+    @issue.update!(title: "Failed to instantiate job, #{"class `JunkSourceProbeJob` doesn't exist, " * 6}(ActiveJob::UnknownJobClassError)")
+    page.current_window.resize_to(940, 900)
+    visit project_issues_path(@project.slug)
 
-      heading = rect(find("h2, h3", text: "Failed to instantiate job"))
-      resolve = rect(find("form[action$='/issues/#{@issue.id}/resolve'] button"))
-      assert_operator heading["top"], :>=, resolve["bottom"],
-        "the title #{heading.inspect} sits beside the buttons #{resolve.inspect}"
-    end
+    heading = rect(find("h2", text: "Failed to instantiate job"))
+    resolve = rect(find("form[action$='/issues/#{@issue.id}/resolve'] button"))
+    refute overlap?(heading, resolve), "the title #{heading.inspect} runs under the buttons #{resolve.inspect}"
+    # Two lines at most, however long the message.
+    line = page.evaluate_script("parseFloat(getComputedStyle(arguments[0]).lineHeight)", find("h2", text: "Failed to instantiate job"))
+    assert_operator heading["height"], :<=, line * 2 + 1, "the title runs to #{heading["height"] / line} lines"
+  end
 
-    # Wrapping the top line put the count and buttons on a line of their own,
-    # stranded at the left of the row.
-    test "an issue row on the #{where} cuts a long exception type short rather than wrapping" do
-      @issue.update!(exception_type: "ActionController::Redirecting::OpenRedirectError")
-      page.current_window.resize_to(940, 900)
-      visit public_send(path, @project.slug)
+  # A type has nowhere to break, so uncut it runs on past its column and
+  # under the issue's events.
+  test "an issue row on the issues list cuts a long exception type short" do
+    @issue.update!(exception_type: "ActionController::Redirecting::OpenRedirectError::AndThenSomeMore::AndMore")
+    page.current_window.resize_to(940, 900)
+    visit project_issues_path(@project.slug)
 
-      id = rect(find("span", text: "##{@issue.id}", exact_text: true))
-      resolve = rect(find("form[action$='/issues/#{@issue.id}/resolve'] button"))
-      assert_operator resolve["top"], :<, id["bottom"],
-        "the buttons #{resolve.inspect} wrapped below the id #{id.inspect}"
-    end
+    type = find("span[title='#{@issue.exception_type}']")
+    column = rect(type.find(:xpath, "../.."))
+    drawn = page.evaluate_script("(r => r.right)(arguments[0].getClientRects()[0])", type)
+    spill = page.evaluate_script("arguments[0].scrollWidth - arguments[0].clientWidth", type.find(:xpath, ".."))
+    assert_operator drawn, :<=, column["right"] + 1, "the type ends at #{drawn}, past its column's #{column["right"]}"
+    assert_equal 0, spill, "the type's line is #{spill}px wider than its column"
+  end
 
-    test "an issue row on the #{where} fits a phone without scrolling sideways" do
-      page.current_window.resize_to(390, 900)
-      visit public_send(path, @project.slug)
-      find("h2, h3", text: "Failed to instantiate job")
+  # The one-clock card is wider than a phone on purpose, and scrolls within
+  # itself, as the overview's does.
+  test "the issues list fits a phone, its timeline scrolling within its card" do
+    page.current_window.resize_to(390, 900)
+    visit project_issues_path(@project.slug)
+    find("h2", text: "Failed to instantiate job")
 
-      assert_equal 0, horizontal_overflow, "the page is #{horizontal_overflow}px wider than the viewport"
-      # The row itself, too: the page only shows an overflow when the row's
-      # spills past the viewport's edge, which a scrollbar can decide.
-      row = find("a[href$='/issues/#{@issue.id}']").find(:xpath, "..")
-      spill = page.evaluate_script("arguments[0].scrollWidth - arguments[0].clientWidth", row)
-      assert_equal 0, spill, "the row's content is #{spill}px wider than the row"
-    end
+    assert_equal 0, horizontal_overflow, "the page is #{horizontal_overflow}px wider than the viewport"
   end
 
   # The header is fixed, so its overflow doesn't scroll the page; it's just

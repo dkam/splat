@@ -114,7 +114,7 @@
             <% if hidden.positive? %><%= hidden %> more with events aren't drawn.<% end %>
           <% end %>
         </span>
-        <%= link_to "all issues →", project_issues_path(project.slug), class: "text-right text-blue-600 dark:text-blue-400 hover:underline" %>
+        <%= link_to "all issues →", project_issues_path(project.slug, window: t.window.key), class: "text-right text-blue-600 dark:text-blue-400 hover:underline" %>
       </div>
 
       <% scaled = t.endpoints.any? { it.stats["rated_count"].to_i.positive? } %>

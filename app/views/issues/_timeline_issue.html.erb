@@ -1,0 +1,73 @@
+<%# locals: (row:, timeline:, project:, lane:, burst_threshold:, environments: nil, users: nil) -%>
+<%# An issue's row on the issues list, on the one clock: who it is and what it
+    says | a tick per event in the window, or a bar a bucket past
+    ProjectTimeline::TICK_LIMIT | its events in the window and in all, and the
+    status buttons. The overview's row (projects/timeline/_issue) with room for
+    the title, which is what this list is read by. environments are its chips,
+    nil where a project only reports one; users is how many users it has
+    reached, nil where its events don't say. %>
+<% issue = row.issue %>
+<% path = project_issue_path(project.slug, issue) %>
+<div class="<%= lane %> py-1.5" data-issue-row="<%= issue.id %>">
+  <div class="min-w-0">
+    <div class="flex items-center gap-1.5 min-w-0 font-mono text-[11.5px]">
+      <%= link_to "##{issue.id}", path, class: "shrink-0 font-semibold text-gray-900 dark:text-gray-100 hover:underline" %>
+      <% if issue.exception_type.present? %>
+        <span class="truncate text-gray-500 dark:text-gray-400" title="<%= issue.exception_type %>"><%= issue.exception_type %></span>
+      <% else %>
+        <%# Grouped from a message (capture_message, a logged error) rather
+            than a raised exception, so there's no class to show. Set in the
+            body font, so it doesn't read as one. %>
+        <span class="shrink-0 font-sans text-gray-500 dark:text-gray-400" title="Reported as a message, not a raised exception">Message</span>
+      <% end %>
+      <% if issue.first_seen >= timeline.range.begin %>
+        <span class="shrink-0 px-1 rounded border text-[10px] font-semibold text-emerald-700 border-emerald-300 dark:text-emerald-300 dark:border-emerald-800"
+              title="First seen <%= issue.first_seen.utc.strftime("%-d %b %H:%MZ") %>, in this window">new</span>
+      <% end %>
+      <% if issue.bursting? %>
+        <% very_hot = issue.last_burst_rate.to_i >= burst_threshold * 2 %>
+        <span class="shrink-0 whitespace-nowrap px-1 rounded text-[10px] font-semibold <%= very_hot ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300" : "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" %>"
+              title="Bursting: events an hour at the last check, against a threshold of <%= number_with_delimiter(burst_threshold) %>">
+          <%= very_hot ? "🚨" : "🔥" %> <%= timeline_k(issue.last_burst_rate.to_i) %>/hr
+        </span>
+      <% end %>
+    </div>
+    <h2 class="text-[13px] leading-snug font-medium text-gray-900 dark:text-gray-100 line-clamp-2 break-words">
+      <%= link_to issue.headline, path, class: "hover:underline", title: issue.headline %>
+    </h2>
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+      <span title="Last seen <%= issue.last_seen.utc.strftime("%-d %b %H:%MZ") %> · first seen <%= issue.first_seen.utc.strftime("%-d %b %Y %H:%MZ") %>">seen <%= time_ago_compact(issue.last_seen, ago: true) %> · first <%= time_ago_compact(issue.first_seen, ago: true) %></span>
+      <% if users %>
+        <span title="Distinct users across the events still kept" data-issue-users><%= pluralize(number_with_delimiter(users), "user") %></span>
+      <% end %>
+      <% environments&.each do |env| %>
+        <span class="px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300" title="Seen in this environment"><%= env %></span>
+      <% end %>
+    </div>
+  </div>
+
+  <% if row.in_window.zero? %>
+    <div class="relative h-7">
+      <div class="absolute inset-x-0 bottom-0 border-b border-gray-200 dark:border-gray-800"></div>
+      <span class="absolute left-1 bottom-1 text-[11px] text-gray-400 dark:text-gray-500">no events in this window</span>
+    </div>
+  <% else %>
+    <svg viewBox="0 0 480 28" class="w-full h-7 cursor-pointer" preserveAspectRatio="none" aria-hidden="true"
+         data-timeline-href="<%= project_events_path(project.slug, issue_id: issue.id) %>" data-timeline-hint="click to list this issue's events">
+      <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 27.5H480"/>
+      <% if row.times %>
+        <path class="stroke-red-500 dark:stroke-red-400" stroke-width="1.5" vector-effect="non-scaling-stroke"
+              d="<%= timeline_ticks(row.times.map { timeline.frac(it) }, top: 3, bottom: 27) %>"/>
+      <% else %>
+        <path class="fill-red-500 dark:fill-red-400" d="<%= timeline_bars(row.bars, height: 28)[:bars] %>"/>
+      <% end %>
+    </svg>
+  <% end %>
+
+  <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+    <span class="whitespace-nowrap text-xs tabular-nums" title="Events in this window / every event it has had">
+      <b class="text-sm <%= row.in_window.zero? ? "text-gray-400 dark:text-gray-500" : "text-gray-900 dark:text-gray-100" %>"><%= number_with_delimiter(row.in_window) %></b><span class="text-gray-500 dark:text-gray-400"> / <%= number_with_delimiter(issue.count) %> <%= "event".pluralize(issue.count) %></span>
+    </span>
+    <%= render "issues/row_actions", project: project, issue: issue %>
+  </div>
+</div>

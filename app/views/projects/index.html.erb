@@ -82,7 +82,7 @@
                   <% end %>
                 </div>
               <% elsif (last_at = @last_transaction_at[project.id]) %>
-                <span title="<%= last_at.iso8601 %>">Last transaction <%= time_ago_compact(last_at) %> ago</span>
+                <span title="<%= last_at.iso8601 %>">Last transaction <%= time_ago_compact(last_at, ago: true) %></span>
               <% else %>
                 No performance data
               <% end %>

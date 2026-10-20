@@ -31,8 +31,7 @@ class PerformanceTimeline
     @environment = environment
     @name_query = name_query
     @clock = if range
-      span = range.end - range.begin
-      fit = ProjectTimeline::WINDOWS.values.find { it.span >= span } || ProjectTimeline::WINDOWS.values.last
+      fit = ProjectTimeline.window_covering(range.end - range.begin)
       ProjectTimeline.new(project, fit, now: now, range: whole_hour_buckets(range, fit.buckets))
     else
       ProjectTimeline.new(project, ProjectTimeline::WINDOWS.fetch(window, ProjectTimeline::WINDOWS.fetch("24h")), now: now)

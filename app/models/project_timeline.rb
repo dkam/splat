@@ -71,6 +71,12 @@ class ProjectTimeline
     new(project, WINDOWS.fetch(WIDER_WINDOW), now: now, widened_from: DEFAULT_WINDOW)
   end
 
+  # The window whose buckets cut a range another page was opened for (a bucket
+  # clicked on a timeline): the shortest at least as long, or else the longest.
+  def self.window_covering(span)
+    WINDOWS.values.find { it.span >= span } || WINDOWS.values.last
+  end
+
   # range: a window other than the one ending now, such as a bucket another
   # page was opened for, cut into window.buckets. The performance page's clock
   # (PerformanceTimeline) is one of these.
