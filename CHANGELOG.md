@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.26.0 — 2026-10-22
+
+Splat's pages share one clock. The project page, Performance, the issues
+list and the monitors page are rows on one time axis, 1h to 30d, with the
+deploys drawn down each. Web requests and background jobs are measured
+apart, time spent is scaled by the sample rate, every monitor run is kept,
+and issues say how many users they've reached.
+
 ### Added
 
 - **The project page is one clock.** Throughput, latency, logs, events, the
@@ -121,7 +129,6 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   Booko's PromotionPriceRefreshJob filled its row for days. Now a run that
   is still in progress when a later run has started is lost, and is drawn
   as an amber tick.
-
 - **Time spent is scaled by the sample rate.** An SDK sends only a sampled
   share of its transactions and says which share in the envelope header
   (`trace.sample_rate`). Splat threw that away, so endpoints sampled at
