@@ -13,6 +13,11 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.27.0 — 2026-10-22
+
+A monitor whose job is never coming back can be deleted from the monitors
+page, and the issues it left open are resolved with it.
+
 ### Added
 
 - **Monitors can be deleted.** Each row on the monitors page has a delete
