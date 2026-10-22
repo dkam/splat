@@ -17,6 +17,15 @@ class MonitorsController < ApplicationController
     @timeline = MonitorsTimeline.new(@project, window: @window_key, range: @window)
   end
 
+  # For a monitor that's never coming back: its open issues are resolved with
+  # it (CronMonitor's before_destroy). Back to the window it was deleted from.
+  def destroy
+    monitor = @project.cron_monitors.find(params[:id])
+    monitor.destroy!
+    redirect_back_or_to project_monitors_path(@project.slug),
+      allow_other_host: false, notice: "Monitor #{monitor.slug} deleted"
+  end
+
   private
 
   def set_project

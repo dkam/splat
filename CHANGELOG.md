@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Added
+
+- **Monitors can be deleted.** Each row on the monitors page has a delete
+  button, for a job that's never coming back. It asks first, takes the
+  monitor's check-ins with it, and resolves its open issues, which nothing
+  would close once it was gone. If the job checks in again, the monitor
+  comes back.
+
 ## 1.26.0 — 2026-10-22
 
 Splat's pages share one clock. The project page, Performance, the issues

@@ -20,8 +20,6 @@ module Monitors
   # Cost: one SELECT over a tiny table per sweep, writes only on state
   # transitions — nothing per-check-in and nothing proportional to data volume.
   class EvaluateJob
-    FAILURE_KINDS = %w[missed error overrun].freeze
-
     TITLES = {
       "missed" => ->(m) { "Monitor missed check-in: #{m.slug} (expected #{m.schedule_description})" },
       "error" => ->(m) { "Monitor reported error: #{m.slug}" },
@@ -49,7 +47,7 @@ module Monitors
         failures.each { |kind| open_issue!(monitor, kind, now) }
         update_state(monitor, failures.first)
       elsif monitor.last_checkin_at.present?
-        resolve_issues!(monitor) if FAILURE_KINDS.include?(monitor.state)
+        monitor.resolve_issues! if CronMonitor::FAILURE_KINDS.include?(monitor.state)
         update_state(monitor, "ok")
       end
       # Never checked in and not yet overdue (or no schedule): stays "unknown".
@@ -59,14 +57,10 @@ module Monitors
       monitor.update_columns(state: state, updated_at: Time.current) if monitor.state != state
     end
 
-    def fingerprint(monitor, kind)
-      "monitor:#{monitor.slug}:#{kind}"
-    end
-
     # Open (or reopen) the issue for this failure kind. An already-open issue
     # is left alone — that's the dedup. Ignored issues are respected.
     def open_issue!(monitor, kind, now)
-      fp = fingerprint(monitor, kind)
+      fp = monitor.issue_fingerprint(kind)
       issue = Issue.find_by(project_id: monitor.project_id, fingerprint: fp)
 
       # The first sweep to see a miss marks it on the monitor's timeline, at the
@@ -95,14 +89,6 @@ module Monitors
     def record_miss(monitor, now)
       monitor.check_ins.create!(project_id: monitor.project_id, status: "missed",
         started_at: monitor.next_expected_at || now)
-    end
-
-    # Recovery: close every open monitor issue for this slug. resolved! is
-    # silent (no notification), so recover→fail cycles notify only on failure.
-    def resolve_issues!(monitor)
-      fps = FAILURE_KINDS.map { |kind| fingerprint(monitor, kind) }
-      Issue.where(project_id: monitor.project_id, fingerprint: fps, status: :open)
-        .find_each(&:resolved!)
     end
   end
 end

@@ -60,6 +60,35 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-group=quiet] + [data-monitor-row=retired]"
   end
 
+  test "each monitor's row has a delete button that asks first" do
+    nightly = daily("nightly", state: "ok")
+
+    get project_monitors_url(@project.slug)
+    assert_select "[data-monitor-row=nightly] form[action=?][data-turbo-confirm]", project_monitor_path(@project.slug, nightly)
+  end
+
+  test "destroy deletes the monitor, resolves its open issue, and returns to the window it was in" do
+    retired = daily("detailer", state: "missed", last_checkin_at: 40.days.ago)
+    nightly = daily("nightly", state: "ok")
+    issue = Issue.create!(project: @project, fingerprint: "monitor:detailer:missed", title: "Monitor missed check-in: detailer",
+      exception_type: "MonitorMissed", status: :open, first_seen: 40.days.ago, last_seen: 40.days.ago)
+
+    delete project_monitor_url(@project.slug, retired), headers: {"Referer" => project_monitors_url(@project.slug, window: "30d")}
+
+    assert_redirected_to project_monitors_url(@project.slug, window: "30d")
+    refute CronMonitor.exists?(retired.id)
+    assert CronMonitor.exists?(nightly.id)
+    assert issue.reload.resolved?
+  end
+
+  test "destroy won't reach another project's monitor" do
+    other = CronMonitor.create!(project: projects(:two), slug: "nightly", state: "ok")
+
+    delete project_monitor_url(@project.slug, other)
+    assert_response :not_found
+    assert CronMonitor.exists?(other.id)
+  end
+
   test "the overview's Monitors heading opens this page in its window" do
     daily("nightly", state: "ok")
 

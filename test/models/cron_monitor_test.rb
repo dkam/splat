@@ -206,4 +206,25 @@ class CronMonitorTest < ActiveSupport::TestCase
     assert_nil monitor.next_expected_at
     refute monitor.missed?(1.year.from_now)
   end
+
+  # Only Monitors::EvaluateJob closes a monitor's issues, when it sees it
+  # recover, and it can't see one that's gone: deleting it closes them.
+  test "destroying a monitor resolves its open issues and leaves the rest alone" do
+    monitor = CronMonitor.record_check_in!(heartbeat_payload, @project)
+    issue = ->(fingerprint, status) {
+      Issue.create!(project: @project, fingerprint: fingerprint, title: fingerprint, status: status,
+        first_seen: 1.day.ago, last_seen: 1.day.ago)
+    }
+    missed = issue.call("monitor:meili-flush:missed", :open)
+    errored = issue.call("monitor:meili-flush:error", :ignored)
+    other = issue.call("monitor:fetcher:missed", :open)
+
+    assert_difference -> { CronCheckIn.count }, -1 do
+      monitor.destroy!
+    end
+
+    assert missed.reload.resolved?
+    assert errored.reload.ignored?
+    assert other.reload.open?
+  end
 end

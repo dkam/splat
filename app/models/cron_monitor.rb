@@ -22,6 +22,9 @@ class CronMonitor < ApplicationRecord
   # against; the rest mirror the failure kinds (see Monitors::EvaluateJob).
   STATES = %w[unknown ok missed error overrun].freeze
 
+  # What Monitors::EvaluateJob opens an Issue for, one per (monitor, kind).
+  FAILURE_KINDS = %w[missed error overrun].freeze
+
   # Sentry's default when monitor_config omits checkin_margin (minutes).
   DEFAULT_CHECKIN_MARGIN_MINUTES = 1
 
@@ -38,6 +41,12 @@ class CronMonitor < ApplicationRecord
   validates :state, inclusion: {in: STATES}
 
   scope :by_slug, -> { order(:slug) }
+
+  # Deleting a monitor resolves its open issues: only Monitors::EvaluateJob
+  # closes them, on recovery, and it can't see a monitor that's gone. Resolved,
+  # not deleted, so they're kept; one that checks in again re-registers, and
+  # its next failure reopens them.
+  before_destroy :resolve_issues!
 
   # Ingest path (Ingest::CheckInConsumer). One find + one INSERT/UPDATE on
   # primary per check-in. Returns nil for payloads not worth recording.
@@ -125,6 +134,18 @@ class CronMonitor < ApplicationRecord
       check_ins.create!(project_id: project_id, check_in_id: check_in_id, status: status,
         started_at: duration ? now - duration : now, finished_at: now, duration: duration)
     end
+  end
+
+  # The fingerprint of the Issue it opens for a failure kind.
+  def issue_fingerprint(kind)
+    "monitor:#{slug}:#{kind}"
+  end
+
+  # Close every open issue it opened. resolved! is silent (no notification),
+  # so recover→fail cycles notify only on failure.
+  def resolve_issues!
+    Issue.where(project_id: project_id, fingerprint: FAILURE_KINDS.map { issue_fingerprint(it) }, status: :open)
+      .find_each(&:resolved!)
   end
 
   def apply_config(config)
