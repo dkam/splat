@@ -13,6 +13,11 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.28.0 — 2026-10-23
+
+The column labels on the Performance page, and on the project page's "where
+the time went" card, sit over the figures they name.
+
 ### Fixed
 
 - **The Performance page's column labels sit over their figures.** The
