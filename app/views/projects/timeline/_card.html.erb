@@ -134,7 +134,7 @@
       <% if t.monitor_rows.any? %>
         <% failing = t.monitor_rows.count(&:failing?) %>
         <div class="<%= head %>">
-          <span>Monitors</span>
+          <%= link_to "Monitors", project_monitors_path(project.slug, window: t.window.key), class: "hover:underline" %>
           <span class="normal-case tracking-normal font-normal"><%= t.monitor_rows.size - failing %> ok<% if failing.positive? %> · <span class="text-red-600 dark:text-red-400"><%= failing %> failing</span><% end %></span>
           <span class="text-right">schedule · last run</span>
         </div>

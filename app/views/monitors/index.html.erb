@@ -1,68 +1,105 @@
+<%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+
+<%# The project's monitors on its clock (MonitorsTimeline): what was missed,
+    as a signal row, then a row per monitor grouped by how often it runs, each
+    with its runs and the check-ins its schedule said were due, so a miss
+    lines up with the deploy or the outage behind it. %>
+<% t = @timeline %>
+<% lane = "grid grid-cols-[var(--lbl)_minmax(0,1fr)_var(--val)] gap-x-(--gap) items-center" %>
+<% row = "#{lane} border-t border-gray-100 dark:border-gray-800" %>
+<% head = "#{lane} pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400" %>
+<% aside = "normal-case tracking-normal font-normal" %>
+<% pill = ->(current) { "px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap #{current ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm" : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}" } %>
+<% pills = "flex gap-0.5 p-0.5 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-gray-900" %>
+<%# Those gone quiet are left out of Missed: most likely retired, they'd miss
+    every check-in in the window, and drown out the misses that matter. %>
+<% live = t.rows.reject { t.quiet?(it) } %>
+<% missed = live.flat_map { |r| Array(r.slots).select { it.kept == false }.map(&:at) + Array(r.gaps).map(&:from) }.sort %>
+<% failing = live.count(&:failing?) %>
+<% quiet = t.rows.size - live.size %>
+
 <div class="py-4">
-  <div class="mb-8">
-    <%= breadcrumbs([@project.name, project_path(@project.slug)],
-                    ["Monitors", nil]) %>
+  <div class="mb-1"><%= breadcrumbs([@project.name, project_path(@project.slug)], ["Monitors", nil]) %></div>
+
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Monitors</h1>
+
+    <% if @window %>
+      <%= render "shared/window_steps", window: @window %>
+      <%= link_to "last #{@window_key}", current_page_with(drop: %w[from to]),
+          class: "text-sm text-blue-600 dark:text-blue-400 hover:underline" %>
+    <% else %>
+      <nav class="<%= pills %>" aria-label="Window">
+        <% ProjectTimeline::WINDOWS.each_key do |key| %>
+          <%= link_to key, current_page_with(window: key), class: pill.(key == @window_key),
+              aria: {current: (key == @window_key ? "page" : nil)} %>
+        <% end %>
+      </nav>
+    <% end %>
+
+    <% if t.rows.any? %>
+      <span class="text-sm text-gray-600 dark:text-gray-400" data-summary>
+        <%= t.rows.size - failing - quiet %> ok<% if failing.positive? %> · <span class="text-red-600 dark:text-red-400"><%= failing %> failing</span><% end %><% if quiet.positive? %> · <%= quiet %> gone quiet<% end %>
+      </span>
+    <% end %>
   </div>
 
-  <div class="flex justify-between items-center mb-6">
-    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Monitors</h1>
-  </div>
-
-  <% if @monitors.any? %>
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
-        <thead class="bg-gray-50 dark:bg-gray-800/60">
-          <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Monitor</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">State</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Schedule</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last check-in</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Environment</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-          <% @monitors.each do |monitor| %>
-            <tr>
-              <td class="px-6 py-4 whitespace-nowrap font-mono text-sm text-gray-900 dark:text-gray-100"><%= monitor.slug %></td>
-              <td class="px-6 py-4 whitespace-nowrap">
-                <% badge = case monitor.state
-                   when "ok" then "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
-                   when "missed", "error" then "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
-                   when "overrun" then "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300"
-                   else "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
-                   end %>
-                <span class="px-2 py-1 text-xs font-medium rounded <%= badge %>"><%= monitor.state %></span>
-                <% if monitor.last_status.present? && monitor.last_status != "ok" %>
-                  <span class="ml-1 text-xs text-gray-500 dark:text-gray-400" title="Latest check-in status"><%= monitor.last_status %></span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                <%= monitor.schedule_description %>
-                <% if monitor.checkin_margin.to_i.positive? %>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">+<%= monitor.checkin_margin %>m margin</span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                <% if monitor.last_checkin_at %>
-                  <span title="<%= monitor.last_checkin_at.iso8601 %>"><%= time_ago_in_words(monitor.last_checkin_at) %> ago</span>
-                <% else %>
-                  <span class="text-gray-400 dark:text-gray-500">never</span>
-                <% end %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                <%= monitor.last_duration ? format_duration(monitor.last_duration * 1000) : "—" %>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300"><%= monitor.environment.presence || "—" %></td>
-            </tr>
-          <% end %>
-        </tbody>
-      </table>
-    </div>
-  <% else %>
+  <% if t.rows.empty? %>
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow border border-gray-200 dark:border-gray-800 p-12 text-center text-gray-500 dark:text-gray-400">
       <p class="mb-2">No monitors yet.</p>
       <p class="text-sm">Monitors auto-register from Sentry Crons check-ins — send a check-in envelope with a <code class="font-mono">monitor_slug</code> to this project's DSN.</p>
+    </div>
+  <% else %>
+    <% if t.known_from > t.range.begin %>
+      <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+        Check-ins are kept from <span class="font-mono"><%= t.known_from.utc.strftime("%-d %b %H:%MZ") %></span>.
+        Before that is greyed: nothing is known of it, so nothing there counts as missed.
+      </p>
+    <% end %>
+
+    <%= render layout: "projects/timeline/frame",
+          locals: {timeline: t, buckets: t.cursor_buckets,
+                   sizes: "[--lbl:11rem] md:[--lbl:15rem] [--val:9.5rem] md:[--val:12rem] [--gap:0.75rem]"} do %>
+      <div class="<%= head %>"><span>Signals</span><span></span><span class="text-right"><%= @window ? timeline_window_label(@window) : t.window.key %></span></div>
+      <div class="<%= row %> py-1" data-signal="missed">
+        <div class="min-w-0"><div class="text-sm font-semibold">Missed</div><div class="text-[11px] text-gray-500 dark:text-gray-400">check-ins due that didn't come<%= ", but those gone quiet" if quiet.positive? %></div></div>
+        <% if missed.any? %>
+          <svg viewBox="0 0 480 24" class="w-full h-6" preserveAspectRatio="none" aria-hidden="true">
+            <path class="stroke-gray-200 dark:stroke-gray-800" stroke-width="1" vector-effect="non-scaling-stroke" d="M0 23.5H480"/>
+            <path class="stroke-red-500 dark:stroke-red-400" stroke-width="2" vector-effect="non-scaling-stroke" d="<%= timeline_ticks(missed.map { t.frac(it) }, top: 3, bottom: 23) %>"/>
+          </svg>
+        <% else %>
+          <span class="text-xs text-gray-500 dark:text-gray-400">none missed in this window</span>
+        <% end %>
+        <div class="text-right text-[15px] font-bold tabular-nums" data-count><%= number_with_delimiter(live.sum { it.due.to_i - it.kept.to_i }) %></div>
+      </div>
+
+      <% t.groups.each do |group| %>
+        <div class="<%= head %>" data-group="<%= group.key %>">
+          <span class="<%= "text-red-600 dark:text-red-400" if group.key == "failing" %>"><%= group.title %></span>
+          <span class="<%= aside %>">
+            <% if group.key == "quiet" %>
+              missed, and silent for over <%= MonitorsTimeline::QUIET_AFTER.inspect %>: retired?
+            <% else %>
+              <%= pluralize(group.rows.size, "monitor") %>
+            <% end %>
+          </span>
+          <span class="text-right">on time · took</span>
+        </div>
+        <% group.rows.each do |monitor_row| %>
+          <%= render "monitors/row", row: monitor_row, timeline: t, lane: row, quiet: group.key == "quiet" %>
+        <% end %>
+      <% end %>
+    <% end %>
+
+    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-2 bg-emerald-500 dark:bg-emerald-400"></span>a run, start to finish</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-px h-2 bg-gray-400"></span>a time its crontab named</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-0.5 h-3 bg-red-500"></span>due, and none came</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-red-200 dark:bg-red-900/70"></span>silent past its interval and margin</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-0.5 h-3 bg-amber-500"></span>started, never reported back</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 bg-gray-100 dark:bg-gray-800"></span>before check-ins were kept</span>
+      <span class="inline-flex items-center gap-1.5"><span class="inline-block h-3 border-l border-dashed border-violet-400"></span>deploy</span>
     </div>
   <% end %>
 </div>

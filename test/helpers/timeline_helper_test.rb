@@ -41,4 +41,31 @@ class TimelineHelperTest < ActionView::TestCase
 
     assert_equal [false, true], timeline_deploy_labels(@timeline).map { it[:hang_left] }
   end
+
+  def check_in(monitor, id, status, started_at, finished_at = nil)
+    monitor.check_ins.create!(project_id: @project.id, check_in_id: id, status: status,
+      started_at: started_at, finished_at: finished_at)
+  end
+
+  # Seen on Booko's at 7d: an hourly job's in_progress whose ok never came was
+  # drawn running from then until now, over a day of the runs after it.
+  test "a run that never reported back, with runs since, is marked where it started" do
+    monitor = CronMonitor.create!(project: @project, slug: "hourly", state: "ok")
+    lost = check_in(monitor, "lost", "in_progress", @now - 20.hours)
+    later = check_in(monitor, "later", "ok", @now - 19.hours, @now - 19.hours + 5)
+
+    from, to, status = timeline_runs(@timeline, [lost, later]).first
+    assert_equal "lost", status
+    assert_equal from, to
+  end
+
+  test "the latest run, still in progress, runs until now" do
+    monitor = CronMonitor.create!(project: @project, slug: "nightly", state: "ok")
+    earlier = check_in(monitor, "earlier", "ok", @now - 22.hours, @now - 21.hours)
+    going = check_in(monitor, "going", "in_progress", @now - 10.minutes)
+
+    _, to, status = timeline_runs(@timeline, [earlier, going]).last
+    assert_equal "in_progress", status
+    assert_equal @timeline.frac(@now), to
+  end
 end

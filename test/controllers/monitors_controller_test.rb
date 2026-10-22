@@ -26,4 +26,44 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_match "No monitors yet", response.body
   end
+
+  def daily(slug, **options)
+    CronMonitor.create!(project: @project, slug: slug, schedule_type: "crontab", schedule_value: "0 3 * * *",
+      checkin_margin: 60, created_at: 30.days.ago, **options)
+  end
+
+  test "index opens on a week, each monitor's runs kept against its schedule" do
+    travel_to Time.utc(2026, 10, 18, 10, 4)
+    nightly = daily("nightly", state: "ok", last_checkin_at: 7.hours.ago)
+    days = (0..9).map { Time.utc(2026, 10, 18, 3) - it.days }
+    CronCheckIn.insert_all(days.map { {cron_monitor_id: nightly.id, project_id: @project.id, status: "ok", started_at: it, finished_at: it + 60, duration: 60, created_at: it} })
+
+    get project_monitors_url(@project.slug)
+    assert_response :success
+    assert_select "nav[aria-label=Window] a[aria-current=page]", text: "7d"
+    assert_select "[data-monitor-row=nightly] [data-on-time]", text: "7/7 on time"
+    assert_select "[data-monitor-row=nightly]", text: /daily 03:00/
+  end
+
+  # A monitor long gone quiet misses every check-in in the window: counted,
+  # it would bury the one miss worth seeing.
+  test "the Missed row counts what was missed, but not by a monitor gone quiet" do
+    travel_to Time.utc(2026, 10, 18, 10, 4)
+    # Seven days with no run each, for two monitors: the one with a check-in
+    # kept 20 days back says what's known, and the late one.
+    CronCheckIn.create!(cron_monitor: daily("history"), project_id: @project.id, status: "ok", started_at: 20.days.ago)
+    daily("late", state: "missed", last_checkin_at: 2.days.ago)
+    daily("retired", state: "missed", last_checkin_at: 40.days.ago)
+
+    get project_monitors_url(@project.slug)
+    assert_select "[data-signal=missed] [data-count]", text: "14"
+    assert_select "[data-group=quiet] + [data-monitor-row=retired]"
+  end
+
+  test "the overview's Monitors heading opens this page in its window" do
+    daily("nightly", state: "ok")
+
+    get project_url(@project.slug, window: "24h")
+    assert_select "a[href=?]", project_monitors_path(@project.slug, window: "24h"), text: "Monitors"
+  end
 end

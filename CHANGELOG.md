@@ -73,6 +73,22 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   at an hour names the issues busiest in it, from the whole tab, and
   clicking the Events row opens the list for that hour, busiest first.
   The project page's "all issues →" keeps its window.
+- **The monitors page is on the one clock too.** It has a row per monitor
+  over the window, 1h to 30d, opening on a week. Rows are grouped by how
+  often each monitor runs, with the failing ones first. Each row draws its
+  runs as the project page's monitor rows do, together with what its
+  schedule said was due. A crontab's times are ticks, red where no run
+  started within the margin. An interval monitor's silences past its
+  interval and margin are red bands. Beside each row are the check-ins due
+  in the window that came ("81/82 on time", or a percentage for a heartbeat)
+  and how long its runs took. A Missed row above puts every miss on the
+  page's axis, so a miss lines up with the deploy behind it. Pointing at an
+  hour names what was missed in it and the runs that took a minute or more.
+  A monitor that has missed and been silent for over a week (or three of
+  its periods) is folded at the foot as gone quiet, and left out of Missed,
+  since it would miss every check-in. Nothing before the project's first
+  kept check-in counts as missed. The project page's Monitors heading opens
+  the page in the same window.
 - **Users affected.** The issue page, the issues list, the project page's
   issue rows and the MCP `get_issue` tool say how many distinct users an
   issue has reached, told apart the way Sentry does it: by `user.id`, else
@@ -100,6 +116,11 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
   window didn't start on the hour: an endpoint's p95 trend, its MCP
   timeseries, and any series over a window opened from a timeline bucket.
   Bucketing truncated where it meant to floor.
+- **A run that never reported back was drawn as still running**, from its
+  start to now, on the project page's monitor rows. One lost check-in of
+  Booko's PromotionPriceRefreshJob filled its row for days. Now a run that
+  is still in progress when a later run has started is lost, and is drawn
+  as an amber tick.
 
 - **Time spent is scaled by the sample rate.** An SDK sends only a sampled
   share of its transactions and says which share in the envelope header

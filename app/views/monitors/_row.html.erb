@@ -1,0 +1,51 @@
+<%# locals: (row:, timeline:, lane:, quiet: false) -%>
+<%# A monitor's row on the monitors page: its slug and schedule in words | its
+    runs and what was due (projects/timeline/_monitor_strip) | the check-ins
+    due in the window that came, and how long its runs took. %>
+<% monitor = row.monitor %>
+<% red = "text-red-700 dark:text-red-300" %>
+<% dim = "text-gray-500 dark:text-gray-400" %>
+<div class="<%= lane %> py-1.5" data-monitor-row="<%= monitor.slug %>">
+  <div class="min-w-0">
+    <div class="truncate font-mono text-[12.5px] font-semibold <%= row.failing? && !quiet ? red : "text-gray-900 dark:text-gray-100" %>" title="<%= monitor.slug %>"><%= monitor.slug %></div>
+    <div class="truncate text-[11px] <%= dim %>" title="<%= monitor.schedule_description %><%= " · #{monitor.timezone}" if monitor.timezone.present? %>, within <%= monitor.margin_seconds / 60 %>m">
+      <%= timeline_schedule_words(monitor) %> · ±<%= monitor.margin_seconds / 60 %>m
+    </div>
+  </div>
+
+  <%# One gone quiet would mark every check-in due as missed: it's hatched and
+      says how long it's been silent instead. %>
+  <%= render "projects/timeline/monitor_strip", row: row, timeline: timeline, slots: (row.slots unless quiet),
+        gaps: (row.gaps unless quiet), known_from: timeline.known_from, quiet: quiet %>
+
+  <div class="text-right font-mono text-[11px] tabular-nums leading-tight">
+    <div data-on-time>
+      <% if quiet %>
+        <span class="<%= dim %>">silent <%= time_ago_compact(monitor.last_checkin_at || monitor.created_at) %></span>
+      <% elsif row.due.to_i.positive? %>
+        <% short = row.kept < row.due %>
+        <span class="<%= short ? red : "text-gray-700 dark:text-gray-300" %>"
+              title="<%= monitor.schedule_type == "interval" ? "Check-ins due in this window, one every #{monitor.schedule_description.delete_prefix("every ")} give or take its margin, that came" : "Times its crontab named in this window that a run started for, within its margin" %>">
+          <% if row.due >= 1000 %>
+            <b class="text-[13px]"><%= number_to_percentage(100.0 * row.kept / row.due, precision: (row.kept == row.due) ? 0 : 2) %></b> of <%= timeline_k(row.due) %> on time
+          <% else %>
+            <b class="text-[13px]"><%= row.kept %></b>/<%= row.due %> on time
+          <% end %>
+        </span>
+      <% elsif (due = monitor.next_expected_at) %>
+        <span class="<%= dim %>" title="Next due <%= due.utc.strftime("%-d %b %H:%MZ") %>">next <%= due.utc.strftime("%a %-d %H:%MZ") %></span>
+      <% end %>
+    </div>
+    <div class="<%= dim %> truncate">
+      <% if row.avg %>
+        <span title="Its runs' average and longest in this window">avg <%= format_time_spent(row.avg * 1000) %> · max <%= format_time_spent(row.max * 1000) %></span>
+      <% elsif row.runs_in_window.positive? %>
+        <%= timeline_k(row.runs_in_window) %> check-ins
+      <% elsif monitor.last_checkin_at && !quiet %>
+        last <%= time_ago_compact(monitor.last_checkin_at, ago: true) %>
+      <% end %>
+      <% if row.errors.positive? %><span class="<%= red %>"> · <%= pluralize(row.errors, "error") %></span><% end %>
+      <% if row.lost.positive? %><span class="text-amber-700 dark:text-amber-300" title="Started, and never reported back"> · <%= row.lost %> lost</span><% end %>
+    </div>
+  </div>
+</div>

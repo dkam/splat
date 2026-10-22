@@ -1,0 +1,59 @@
+<%# locals: (row:, timeline:, slots: nil, gaps: nil, known_from: nil, quiet: false) -%>
+<%# A monitor's strip, for the overview's row and the monitors page's. Its runs
+    from cron_check_ins: one bar per run, start to finish, when there are few
+    enough (ProjectTimeline::TICK_LIMIT); otherwise one segment per bucket
+    that had a run, which is what an every-minute heartbeat needs. A monitor
+    with no runs kept in the window yet shows its last check-in. A failing one
+    is hatched, and says what's wrong; one gone quiet is hatched grey.
+
+    The monitors page adds what was due (MonitorsTimeline): a tick under each
+    of a crontab's times, red where no run came; an interval's silences,
+    shaded red; and the stretch before any check-in was kept, greyed, since
+    nothing is known of it. %>
+<% monitor = row.monitor %>
+<% hatched = row.failing? %>
+<div class="relative h-5 <%= "rounded overflow-hidden #{quiet ? "bg-gray-50 dark:bg-gray-800/40" : "bg-red-50 dark:bg-red-950/40"}" if hatched %>">
+  <svg viewBox="0 0 480 20" class="absolute inset-0 w-full h-full" preserveAspectRatio="none" aria-hidden="true">
+    <% if known_from && known_from > timeline.range.begin %>
+      <path class="fill-gray-100 dark:fill-gray-800/70" data-unknown d="<%= timeline_spans([[0, timeline.frac(known_from)]], top: 0, bottom: 20) %>"/>
+    <% end %>
+    <% if hatched %>
+      <path class="<%= quiet ? "stroke-gray-200 dark:stroke-gray-700" : "stroke-red-200 dark:stroke-red-900" %>" stroke-width="1.2" vector-effect="non-scaling-stroke" d="<%= timeline_hatch(20) %>"/>
+    <% end %>
+    <% if gaps&.any? %>
+      <path class="fill-red-200 dark:fill-red-900/70" data-gaps d="<%= timeline_spans(gaps.map { [timeline.frac(it.from), timeline.frac(it.to)] }, top: 1, bottom: 19) %>"/>
+    <% end %>
+    <% if slots %>
+      <% by_kept = slots.group_by(&:kept) %>
+      <path class="stroke-gray-400 dark:stroke-gray-500" stroke-width="1" vector-effect="non-scaling-stroke" data-slots="kept"
+            d="<%= timeline_ticks(Array(by_kept[true]).map { timeline.frac(it.at) }, top: 15, bottom: 20) %>"/>
+      <path class="stroke-gray-300 dark:stroke-gray-600" stroke-width="1" stroke-dasharray="1 1" vector-effect="non-scaling-stroke" data-slots="unjudged"
+            d="<%= timeline_ticks(Array(by_kept[nil]).map { timeline.frac(it.at) }, top: 15, bottom: 20) %>"/>
+      <path class="stroke-red-500 dark:stroke-red-400" stroke-width="2" vector-effect="non-scaling-stroke" data-slots="missed"
+            d="<%= timeline_ticks(Array(by_kept[false]).map { timeline.frac(it.at) }, top: 0, bottom: 20) %>"/>
+    <% end %>
+    <% if row.runs %>
+      <% runs = timeline_runs(timeline, row.runs).group_by(&:last) %>
+      <path class="fill-emerald-500 dark:fill-emerald-400" d="<%= timeline_spans(Array(runs["ok"]), top: 5, bottom: 15) %>"/>
+      <path class="fill-amber-400" d="<%= timeline_spans(Array(runs["in_progress"]), top: 5, bottom: 15) %>"/>
+      <path class="fill-red-500 dark:fill-red-400" d="<%= timeline_spans(Array(runs["error"]), top: 3, bottom: 17) %>"/>
+      <path class="stroke-red-500 dark:stroke-red-400" stroke-width="2" vector-effect="non-scaling-stroke" d="<%= timeline_ticks(Array(runs["missed"]).map(&:first), top: 0, bottom: 20) %>"/>
+      <path class="stroke-amber-500" stroke-width="2" vector-effect="non-scaling-stroke" data-runs="lost" d="<%= timeline_ticks(Array(runs["lost"]).map(&:first), top: 3, bottom: 17) %>"/>
+    <% elsif row.coverage %>
+      <% n = timeline.buckets.to_f %>
+      <% segments = ->(status) { (0...timeline.buckets).select { row.coverage[it][status].positive? }.map { [it / n, (it + 1) / n] } } %>
+      <path class="fill-emerald-500 dark:fill-emerald-400" d="<%= timeline_spans(segments.call("ok"), top: 7, bottom: 13) %>"/>
+      <path class="fill-red-500 dark:fill-red-400" d="<%= timeline_spans(segments.call("error"), top: 4, bottom: 16) %>"/>
+      <path class="stroke-red-500 dark:stroke-red-400" stroke-width="2" vector-effect="non-scaling-stroke"
+            d="<%= timeline_ticks(segments.call("missed").map(&:first), top: 0, bottom: 20) %>"/>
+    <% elsif !hatched %>
+      <path class="stroke-gray-300 dark:stroke-gray-700" stroke-width="1" stroke-dasharray="1 4" vector-effect="non-scaling-stroke" d="M0 10H480"/>
+      <% if monitor.last_checkin_at && monitor.last_checkin_at >= timeline.range.begin %>
+        <path class="stroke-emerald-500 dark:stroke-emerald-400" stroke-width="2" vector-effect="non-scaling-stroke" d="<%= timeline_ticks([timeline.frac(monitor.last_checkin_at)], top: 2, bottom: 18) %>"/>
+      <% end %>
+    <% end %>
+  </svg>
+  <% if hatched %>
+    <span class="relative block truncate px-2 font-mono text-[11px] leading-5 <%= quiet ? "text-gray-600 dark:text-gray-300" : "text-red-800 dark:text-red-200" %>"><%= timeline_monitor_note(monitor) %></span>
+  <% end %>
+</div>

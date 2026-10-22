@@ -172,6 +172,24 @@ module TimelineHelper
     end
   end
 
+  CRON_DAYS = %w[Sun Mon Tue Wed Thu Fri Sat Sun].freeze
+
+  # A schedule in words: "every 10 minutes", "hourly at :15", "daily 03:30
+  # Melbourne", "Sat 03:00 Melbourne". A crontab that doesn't put so simply
+  # stays a crontab.
+  def timeline_schedule_words(monitor)
+    return monitor.schedule_description unless monitor.schedule_type == "crontab"
+
+    n = /\A\d{1,2}\z/
+    words = case monitor.schedule_value.to_s.split
+    in [^n => m, "*", "*", "*", "*"] then return "hourly at :#{m.rjust(2, "0")}"
+    in [^n => m, ^n => h, "*", "*", "*"] then "daily #{h.rjust(2, "0")}:#{m.rjust(2, "0")}"
+    in [^n => m, ^n => h, "*", "*", /\A[0-7]\z/ => d] then "#{CRON_DAYS[d.to_i]} #{h.rjust(2, "0")}:#{m.rjust(2, "0")}"
+    else return monitor.schedule_description
+    end
+    [words, monitor.timezone.to_s.split("/").last&.tr("_", " ")].compact_blank.join(" ")
+  end
+
   # What's wrong with a failing monitor, in the strip it would have drawn in.
   def timeline_monitor_note(monitor)
     case monitor.state
@@ -185,11 +203,15 @@ module TimelineHelper
   end
 
   # The runs of a monitor as [from, to, status] fractions; a run still going
-  # reaches to now.
+  # reaches to now. One still in progress when a later run has started never
+  # reported back (its ok or error was lost on the way), so it's "lost",
+  # marked where it began rather than drawn running over the runs since.
   def timeline_runs(timeline, runs)
+    latest = runs.reject { it.status == "missed" }.map(&:started_at).max
     runs.map do |run|
-      finish = run.finished_at || ((run.status == "in_progress") ? timeline.now : run.started_at)
-      [timeline.frac(run.started_at), timeline.frac(finish), run.status]
+      status = (run.status == "in_progress" && run.started_at < latest) ? "lost" : run.status
+      finish = run.finished_at || ((status == "in_progress") ? timeline.now : run.started_at)
+      [timeline.frac(run.started_at), timeline.frac(finish), status]
     end
   end
 end
