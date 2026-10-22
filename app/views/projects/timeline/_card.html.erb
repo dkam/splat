@@ -121,7 +121,7 @@
       <div class="<%= head %>">
         <span>Where the time went</span>
         <span class="<%= aside %>">p95 <%= per %> · time <%= scaled ? "scaled by each SDK's sample rate" : "as recorded" %></span>
-        <span class="text-right">time · p95</span>
+        <span class="flex justify-end text-right whitespace-nowrap"><span class="w-16">time</span><span class="w-14">p95</span></span>
       </div>
       <% if t.endpoints.any? %>
         <% t.endpoints.each do |endpoint| %>

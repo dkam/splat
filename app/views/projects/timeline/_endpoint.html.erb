@@ -24,8 +24,11 @@
     <% end %>
   </svg>
   <div class="text-right text-xs tabular-nums whitespace-nowrap">
-    <%= time_spent_tag(stats, class: "font-semibold text-gray-900 dark:text-gray-100") %>
-    <span class="inline-block w-14 text-gray-500 dark:text-gray-400"><%= format_duration(stats["p95_duration"]) %></span>
+    <%# Columns as wide as their labels in the header, in projects/timeline/_card. %>
+    <div class="flex justify-end">
+      <%= time_spent_tag(stats, class: "w-16 font-semibold text-gray-900 dark:text-gray-100") %>
+      <span class="w-14 text-gray-500 dark:text-gray-400"><%= format_duration(stats["p95_duration"]) %></span>
+    </div>
     <% unless endpoint.line? %>
       <div class="text-[10px] text-gray-400 dark:text-gray-500">~<%= (stats["count"].to_f / timeline.buckets).round(1) %> <%= per %>: too few for a p95</div>
     <% end %>

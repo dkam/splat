@@ -13,6 +13,13 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+### Fixed
+
+- **The Performance page's column labels sit over their figures.** The
+  header over each kind's endpoints, "time · count · p50 · p95", was one
+  right-aligned string, so only p95 landed over its column. The project
+  page's "where the time went" header, "time · p95", was out the same way.
+
 ## 1.27.0 — 2026-10-22
 
 A monitor whose job is never coming back can be deleted from the monitors

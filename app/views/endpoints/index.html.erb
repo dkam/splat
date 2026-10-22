@@ -149,7 +149,7 @@
             <%= link_to "all #{timeline_k(totals[:count])} →", current_page_with(kind: kind), class: "text-blue-600 dark:text-blue-400 hover:underline" %>
           <% end %>
         </span>
-        <span class="text-right whitespace-nowrap">time · count · p50 · p95</span>
+        <span class="flex justify-end text-right whitespace-nowrap"><span class="w-16">time</span><span class="w-12">count</span><span class="w-14">p50</span><span class="w-14">p95</span></span>
       </div>
       <% endpoints.each do |endpoint| %>
         <%= render "endpoints/timeline_endpoint", endpoint: endpoint, timeline: t, project: @project, lane: row, per: per %>
