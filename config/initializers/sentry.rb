@@ -56,14 +56,14 @@ Rails.application.configure do
       # Structured logs → splat-splat, so Splat dogfoods its own logs feature as
       # a low-traffic source.
       #
-      # sentry-ruby 7.0.0 removed `enable_logs` outright and made logs the
-      # default (config.rails.structured_logging.enabled, true unless set), so
-      # there is nothing left to switch on — and setting it now is a
-      # NoMethodError at boot, in production, where this initializer is the only
-      # place it would ever have been evaluated.
-      #
-      # The subscriber list is what still carries weight: keep only
-      # action_controller (one log per request) and drop the default
+      # sentry-ruby 7.0.0 removed `enable_logs` outright (setting it is a
+      # NoMethodError at boot, in production, where this initializer is the
+      # only place it would ever have been evaluated) and turned Rails
+      # structured logging on by default; 7.1.0 turned it off again. Set it
+      # here so neither default decides.
+      config.rails.structured_logging.enabled = true
+
+      # Of the subscribers, keep only action_controller (one log per request) and drop the default
       # active_record subscriber, whose per-SQL-query logs would firehose
       # splat-splat given Splat's own ingest write volume.
       config.rails.structured_logging.subscribers = {
