@@ -184,7 +184,7 @@ GEM
       net-smtp
     marcel (1.2.1)
     matrix (0.4.3)
-    mcp (1.6.1)
+    mcp (1.8.0)
       json_schemer (>= 2.4)
     mini_mime (1.1.5)
     minitest (6.0.6)
@@ -306,7 +306,7 @@ GEM
       prism (>= 1.6.0)
       rbs (>= 4.0.0)
       tsort
-    regexp_parser (2.12.0)
+    regexp_parser (2.13.1)
     reline (0.7.0)
       io-console (~> 0.5)
     rexml (3.4.4)
@@ -455,7 +455,7 @@ DEPENDENCIES
   jbuilder
   jwt
   letter_opener
-  mcp (~> 1.6)
+  mcp (~> 1.8)
   openid_connect
   pagy (~> 43.6)
   propshaft
