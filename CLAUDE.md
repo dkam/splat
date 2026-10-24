@@ -166,9 +166,8 @@ end
 # Accepts Sentry envelope format
 # Returns: 200 OK, the envelope spooled to disk if tuber can't be reached
 # (Ingest::Spool); 503 when the spool is full too; 413 over Sentry's size
-# limits; 415 for Content-Encoding: br, refused until a brotli gem bundles
-# libbrotli 1.2.1 (CVE-2026-111497) (SDKs don't retry either way). Streams
-# switched off in Settings go out as X-Sentry-Rate-Limits.
+# limits (SDKs don't retry either way). Streams switched off in Settings go
+# out as X-Sentry-Rate-Limits.
 
 class Api::EnvelopesController < ApplicationController
   skip_before_action :verify_authenticity_token

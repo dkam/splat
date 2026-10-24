@@ -57,6 +57,11 @@ gem "jwt"
 # was pinned to the 2024-11-05 spec. See app/mcp/splat_mcp_server.rb.
 gem "mcp", "~> 1.6"
 
+# Brotli compression support for Sentry envelopes. 0.9.1 bundles libbrotli
+# 1.2.1, the first without CVE-2026-111497, and won't build against an
+# unpatched system copy.
+gem "brotli", ">= 0.9.1"
+
 # Zstandard compression support for Sentry envelopes
 gem "zstd-ruby"
 

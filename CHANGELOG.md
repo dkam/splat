@@ -13,6 +13,10 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+`Content-Encoding: br` is read again. brotli 0.9.1, out today, bundles
+libbrotli 1.2.1, which fixes CVE-2026-111497, and it won't build against a
+system libbrotli without the fix. Splat requires it at that version or later.
+
 ## 1.28.1 — 2026-10-24
 
 Envelopes sent with `Content-Encoding: br` are refused with a 415, and the

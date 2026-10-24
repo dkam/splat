@@ -83,6 +83,10 @@ module ActiveSupport
         zd = Zlib::Deflate.new
         yield ->(data) { io.write(zd.deflate(data)) }
         io.write(zd.finish)
+      when "br"
+        br = Brotli::Writer.new(io, quality: 1)
+        yield ->(data) { br.write(data) }
+        br.finish
       when "zstd"
         zs = Zstd::StreamingCompress.new
         yield ->(data) { io.write(zs.compress(data)) }

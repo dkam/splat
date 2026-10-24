@@ -178,19 +178,7 @@ class Api::EnvelopesControllerTest < ActionDispatch::IntegrationTest
     assert_nil response.headers["X-Sentry-Rate-Limits"]
   end
 
-  # CVE-2026-111497: libbrotli up to 1.2.0 can write out of bounds decoding
-  # a crafted stream, and no brotli gem bundles 1.2.1 yet. Refused on the
-  # header alone, never decoded; SDKs drop it rather than retry.
-  ["br", "BR", "gzip, br"].each do |encoding|
-    test "refuses with a 415, undecoded, a body sent with Content-Encoding: #{encoding}" do
-      queued = capture_tuber_puts { post_envelope("not decoded", encoding) }
-
-      assert_response :unsupported_media_type
-      assert_empty queued
-    end
-  end
-
-  %w[gzip deflate zstd].each do |encoding|
+  %w[gzip deflate br zstd].each do |encoding|
     test "reads an envelope sent with Content-Encoding: #{encoding}" do
       queued = capture_tuber_puts { post_envelope(compress(encoding, @valid_envelope), encoding) }
 
