@@ -79,7 +79,7 @@ group :development, :test do
   gem "brakeman", require: false
 
   # Ruby style guide, linter, and formatter [https://github.com/standardrb/standard]
-  gem "standard", "~> 1.51", require: false
+  gem "standard", "~> 1.57", require: false
 end
 
 group :development do
