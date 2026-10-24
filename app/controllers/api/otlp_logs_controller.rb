@@ -7,6 +7,8 @@
 #
 # Records normalize into the same `logs` table as Sentry Logs (source "otlp").
 class Api::OtlpLogsController < ApplicationController
+  include RawBody
+
   skip_before_action :verify_authenticity_token
   skip_before_action :require_authentication
 

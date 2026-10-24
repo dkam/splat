@@ -42,6 +42,17 @@ class Api::StoreControllerTest < ActionDispatch::IntegrationTest
     assert_equal ["a" * 32], queued.map { it[1][:event_id] }
   end
 
+  # As for OTLP logs: sentry-rails reads request.params after the action, and
+  # Rails can't parse a compressed body as JSON. /api is traced at 10%.
+  test "answers 200 to a gzipped event while Sentry traces the request" do
+    with_sentry_tracing(Api::StoreController) do
+      queued = capture_tuber_puts { post_store(compress("gzip", @event.to_json), "Content-Encoding" => "gzip") }
+
+      assert_response :success
+      assert_equal ["a" * 32], queued.map { it[1][:event_id] }
+    end
+  end
+
   test "gives an event without an id one, and answers with it" do
     queued = capture_tuber_puts { post_store(@event.except("event_id").to_json) }
 

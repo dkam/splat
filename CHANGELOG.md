@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+OTLP log batches sent gzipped, as pg01's collector sends them, are answered
+200 again. Since 1.18.3 they were stored but answered 400, so the collector
+counted every export as failed. Gzipped events posted to `/store/` had the
+same trouble whenever Splat's own tracing sampled the request.
+
+brotli 0.9.2, which stops leaking memory when a decompression buffer can't
+grow.
+
 ## 1.28.2 — 2026-10-24
 
 `Content-Encoding: br` is read again. brotli 0.9.1, out today, bundles

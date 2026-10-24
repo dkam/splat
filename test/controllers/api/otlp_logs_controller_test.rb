@@ -32,6 +32,23 @@ class Api::OtlpLogsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # sentry-rails reads request.params after every traced action, and Rails
+  # can't parse a gzipped body as JSON, so the logs were queued and the
+  # collector told 400. Production traces /v1/logs at 100%; pg01's collector
+  # gzips.
+  test "answers 200 to gzipped JSON while Sentry traces the request" do
+    Setting.instance.update!(store_logs: true)
+    with_sentry_tracing(Api::OtlpLogsController) do
+      with_tuber_stub do |calls|
+        post "/v1/logs", params: compress("gzip", @payload.to_json),
+          headers: {"Content-Type" => "application/json", "Content-Encoding" => "gzip", "Authorization" => "Bearer #{@project.public_key}"}
+
+        assert_response :success
+        assert_equal 1, calls.count { |args, _| args.first == Ingest::Tuber::LOGS_TUBE }
+      end
+    end
+  end
+
   test "rejects an unknown public key" do
     with_tuber_stub do |calls|
       post "/v1/logs", params: @payload.to_json,

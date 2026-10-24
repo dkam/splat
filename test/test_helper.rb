@@ -60,6 +60,24 @@ module ActiveSupport
       owner.singleton_class.define_method(name, original)
     end
 
+    # Sentry as production runs it, tracing every request, for the length of
+    # the block. sentry-rails puts its around_action on controllers only when
+    # Sentry is up at boot, which it never is in tests, so it goes on the
+    # controllers given here; it does nothing once Sentry is closed again.
+    def with_sentry_tracing(*controllers)
+      require "sentry/rails/controller_transaction"
+      controllers.each { it.include(Sentry::Rails::ControllerTransaction) unless it < Sentry::Rails::ControllerTransaction }
+      Sentry.init do |config|
+        config.dsn = "http://12345:67890@sentry.localdomain/sentry/42"
+        config.transport.transport_class = Sentry::DummyTransport
+        config.background_worker_threads = 0
+        config.traces_sample_rate = 1.0
+      end
+      yield
+    ensure
+      Sentry.close if Sentry.initialized?
+    end
+
     # A request body in one of the Content-Encodings ingest reads.
     def compress(encoding, text)
       compressed(encoding) { |write| write.call(text) }
