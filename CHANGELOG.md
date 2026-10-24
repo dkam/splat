@@ -13,13 +13,20 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.28.3 — 2026-10-24
+
 OTLP log batches sent gzipped, as pg01's collector sends them, are answered
 200 again. Since 1.18.3 they were stored but answered 400, so the collector
 counted every export as failed. Gzipped events posted to `/store/` had the
 same trouble whenever Splat's own tracing sampled the request.
 
-brotli 0.9.2, which stops leaking memory when a decompression buffer can't
-grow.
+Gem updates: brotli 0.9.2, which stops leaking memory when a decompression
+buffer can't grow; sentry-ruby 7.1.0, with Splat's own structured logs to
+splat-splat now switched on explicitly, since 7.1.0 turns them off by
+default; mcp 1.8.1; sqlite3 2.10.1 (SQLite 3.54.1); net-http 0.10.0, which
+hardens request and response handling; and pagy, faraday, uri and others.
+json stays on 2.x: 3.x rejects duplicate keys and won't generate from
+binary strings, and Splat's ingest path needs changes first.
 
 ## 1.28.2 — 2026-10-24
 
