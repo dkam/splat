@@ -13,6 +13,8 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.28.1 — 2026-10-24
+
 Envelopes sent with `Content-Encoding: br` are refused with a 415, and the
 brotli gem is gone. libbrotli up to 1.2.0 can write out of bounds decoding a
 crafted stream (CVE-2026-111497), reachable by anyone holding a DSN key, and
