@@ -88,7 +88,6 @@ GEM
       msgpack (~> 1.5)
     brakeman (8.1.0)
       racc
-    brotli (0.8.0)
     builder (3.3.0)
     bundler-audit (0.9.3)
       bundler (>= 1.2.0)
@@ -446,7 +445,6 @@ PLATFORMS
 DEPENDENCIES
   bootsnap
   brakeman
-  brotli
   bundler-audit
   capybara
   debug

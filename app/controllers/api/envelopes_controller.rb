@@ -36,6 +36,9 @@ class Api::EnvelopesController < ApplicationController
   rescue Ingest::Decompression::TooLarge => e
     Rails.logger.warn "[Envelope] refused for project #{project.slug}: #{e.message}"
     head :content_too_large
+  rescue Ingest::Decompression::Unsupported => e
+    Rails.logger.warn "[Envelope] refused for project #{project.slug}: #{e.message}"
+    head :unsupported_media_type
   rescue Ingest::Decompression::Unreadable => e
     Rails.logger.error "[Envelope] couldn't read the body for project #{project.slug}: #{e.message}"
     head :ok

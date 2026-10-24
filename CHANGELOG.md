@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+Envelopes sent with `Content-Encoding: br` are refused with a 415, and the
+brotli gem is gone. libbrotli up to 1.2.0 can write out of bounds decoding a
+crafted stream (CVE-2026-111497), reachable by anyone holding a DSN key, and
+the gem's newest release (0.9.0) still bundles 1.2.0. gzip, deflate and zstd
+are unchanged, and none of the eight SDKs recorded in
+`test/fixtures/files/sdk_envelopes` sent br. sentry-python does when the
+`brotli` package is installed; those envelopes are lost until it is
+uninstalled (the SDK then sends gzip) or Splat takes br back.
+
 ## 1.28.0 — 2026-10-23
 
 The column labels on the Performance page, and on the project page's "where

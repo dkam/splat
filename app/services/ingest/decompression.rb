@@ -19,6 +19,12 @@ module Ingest
     # Content-Encoding said.
     class Unreadable < StandardError; end
 
+    # An encoding Splat won't undo. Brotli, for now: libbrotli up to 1.2.0 can
+    # write out of bounds decoding a crafted stream (CVE-2026-111497), and no
+    # brotli gem bundles 1.2.1 yet. SDKs fall back to gzip without the
+    # library; one that still sends br gets a 415 and drops the envelope.
+    class Unsupported < StandardError; end
+
     module_function
 
     # The body, reading no further than the limit.
@@ -29,12 +35,15 @@ module Ingest
       body
     end
 
-    # Gzip, deflate (zlib), Brotli or Zstandard. With no Content-Encoding, or
-    # one not listed, gzip is recognised by its magic bytes.
+    # Gzip, deflate (zlib) or Zstandard. With no Content-Encoding, or one not
+    # listed, gzip is recognised by its magic bytes. Brotli is refused
+    # wherever it appears in the list, before any decoding.
     def decompress(body, content_encoding = nil)
-      case content_encoding.to_s.downcase
+      codings = content_encoding.to_s.downcase
+      raise Unsupported, "br: refused (CVE-2026-111497)" if codings.split(",").map(&:strip).include?("br")
+
+      case codings
       when "deflate" then inflate(body)
-      when "br" then unbrotli(body)
       when "zstd" then unzstd(body)
       else maybe_gunzip(body, content_encoding)
       end
@@ -60,13 +69,6 @@ module Ingest
       raise Unreadable, "deflate: #{e.message}"
     ensure
       zlib&.close
-    end
-
-    def unbrotli(body)
-      reader = Brotli::Reader.new(StringIO.new(body))
-      within_limit { |append| while (chunk = reader.read(CHUNK)) do append.call(chunk) end }
-    rescue Brotli::Error => e
-      raise Unreadable, "br: #{e.message}"
     end
 
     # Fed a slice at a time, each call filling at most one output buffer, so a
