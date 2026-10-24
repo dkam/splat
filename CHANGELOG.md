@@ -13,9 +13,16 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.28.2 — 2026-10-24
+
 `Content-Encoding: br` is read again. brotli 0.9.1, out today, bundles
 libbrotli 1.2.1, which fixes CVE-2026-111497, and it won't build against a
 system libbrotli without the fix. Splat requires it at that version or later.
+
+Ruby 4.0.9, for the regexp-compiler fixes behind GitLab's CVE-2026-93577,
+CVE-2026-97229 and CVE-2026-110264. Splat never compiles a regexp from
+outside input, so they weren't reachable through it. crass 1.0.8, for
+GHSA-pq4g-8rxf-4g29.
 
 ## 1.28.1 — 2026-10-24
 
