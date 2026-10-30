@@ -26,7 +26,24 @@ class CompressionDictionarySeeder
   ].freeze
 
   def self.run!
+    # On the deploy that moves logs to day files (ADR 0005), the logs catalog
+    # is new and empty. The legacy database's dictionaries go in first, under
+    # their own ids, or a seeded logs v1 could take an id old rows point at.
+    # If they can't, logs isn't seeded either: the next boot imports them.
+    legacy_pending = false
+    begin
+      Logs::Catalog.import_legacy!
+    rescue ActiveRecord::StatementInvalid, ActiveRecord::NoDatabaseError, SQLite3::Exception => e
+      legacy_pending = Logs::DayFiles.legacy_path&.file?
+      warn "[seeds:compression_dictionaries] legacy logs dictionaries not imported (#{e.class}: #{e.message})"
+    end
+
     DICTS.each do |spec|
+      if spec[:segment] == "logs" && legacy_pending
+        warn "[seeds:compression_dictionaries] logs not seeded: the legacy logs database's dictionaries go in first"
+        next
+      end
+
       path = Rails.root.join("zstd_dicts", spec[:file])
       unless path.exist?
         warn "[seeds:compression_dictionaries] missing #{path} — skipping #{spec[:segment]}"

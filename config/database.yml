@@ -30,6 +30,10 @@ default: &default
     mmap_size: 134217728    # 128 MB memory-mapped IO
     temp_store: memory
 
+# logs is the catalog of what the logs day files share (ADR 0005). The logs
+# themselves are one SQLite file per day under `day_files`, each opened by
+# Logs::DayFiles with these same settings. `legacy_database` is the logs
+# database from before day files: read until retention deletes it.
 development:
   primary:
     <<: *default
@@ -44,8 +48,10 @@ development:
     migrations_paths: db/transactions_spans_migrate
   logs:
     <<: *default
-    database: storage/development_logs.sqlite3
+    database: storage/development_logs_catalog.sqlite3
     migrations_paths: db/logs_migrate
+    day_files: storage/development_log_days
+    legacy_database: storage/development_logs.sqlite3
   cache:
     <<: *default
     database: storage/development_cache.sqlite3
@@ -72,8 +78,9 @@ test:
     migrations_paths: db/transactions_spans_migrate
   logs:
     <<: *default
-    database: storage/test_logs.sqlite3
+    database: storage/test_logs_catalog.sqlite3
     migrations_paths: db/logs_migrate
+    day_files: tmp/storage/test_logs
 
 
 # Store production database in the storage/ directory, which by default
@@ -92,8 +99,10 @@ production:
     migrations_paths: db/transactions_spans_migrate
   logs:
     <<: *default
-    database: storage/production_logs.sqlite3
+    database: storage/production_logs_catalog.sqlite3
     migrations_paths: db/logs_migrate
+    day_files: storage/log_days
+    legacy_database: storage/production_logs.sqlite3
   cache:
     <<: *default
     database: storage/production_cache.sqlite3

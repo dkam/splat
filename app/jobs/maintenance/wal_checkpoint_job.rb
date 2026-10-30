@@ -9,12 +9,12 @@ module Maintenance
   # gives up and lets the WAL keep growing. That's fine when writes are cheap and
   # scattered readers are brief.
   #
-  # It is not fine on the logs DB. Every Log.insert_all! also fires the three
-  # logs_fts_* triggers, so a single batch scatters writes across a 15 GB FTS
-  # index and 20 GB of secondary indexes inside a 110 GB file. Once the WAL got
-  # ahead of the checkpointer it never recovered: each attempt had more frames to
-  # copy, so it took longer, so it fell further behind — a runaway with no
-  # equilibrium.
+  # It was not fine on the logs DB before day files (ADR 0005). Every
+  # Log.insert_all! also fired the three logs_fts_* triggers, so a single batch
+  # scattered writes across a 15 GB FTS index and 20 GB of secondary indexes
+  # inside a 110 GB file. Once the WAL got ahead of the checkpointer it never
+  # recovered: each attempt had more frames to copy, so it took longer, so it
+  # fell further behind — a runaway with no equilibrium.
   #
   # Observed in production on 2026-08-17: production_logs.sqlite3-wal reached
   # 4.2 GB while every other WAL sat at its healthy 4 MB. LogConsumer was eating
@@ -46,8 +46,11 @@ module Maintenance
     # cable, both named as casualties of the 2026-08-17 incident this job
     # exists to prevent. Checkpointed concurrently below, so this ordering is
     # cosmetic, not a priority queue.
+    #
+    # "logs" is the logs catalog plus the day files still being written (see
+    # #day_files): since ADR 0005 the logs themselves are a file per day.
     DATABASES = {
-      "logs" => "LogsRecord",
+      "logs" => "LogsCatalogRecord",
       "transactions_spans" => "TransactionsSpansRecord",
       "issues_events" => "IssuesEventsRecord",
       "primary" => "ApplicationRecord",
@@ -64,13 +67,19 @@ module Maintenance
       # busy_timeout) and can delay the dead-man's-switch sweep behind it,
       # defeating the reason this job is on that tube at all. Checkpointing
       # concurrently bounds the worst case to a single busy_timeout instead.
-      threads = targets.filter_map do |name|
+      threads = targets.flat_map do |name|
         klass = DATABASES[name]
         unless klass
           Rails.logger.warn "[#{self.class.name}] unknown database #{name.inspect}, skipping"
-          next
+          next []
         end
-        Thread.new { [name, checkpoint(name, klass.constantize)] }
+        own = Thread.new { [name, checkpoint(name, klass.constantize)] }
+        next [own] unless name == "logs"
+
+        [own] + day_files.map do |shard|
+          label = "logs #{shard.day.iso8601}"
+          Thread.new { [label, shard.with { checkpoint(label, LogsRecord) }] }
+        end
       end
 
       results = threads.to_h { |t| t.value }
@@ -88,6 +97,13 @@ module Maintenance
     end
 
     private
+
+    # The logs day files with writes to checkpoint: today's, and yesterday's,
+    # which takes a batch built just before midnight. Older ones are never
+    # written, so their WAL is already empty.
+    def day_files
+      Logs::DayFiles.shards.reject { |shard| shard.legacy? || shard.closed? }
+    end
 
     def checkpoint(name, model)
       conn = model.connection

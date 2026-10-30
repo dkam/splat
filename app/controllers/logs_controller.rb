@@ -6,11 +6,10 @@ class LogsController < ApplicationController
 
   before_action :set_project
 
-  # Logs live on their own DB, so scope by project_id rather than a cross-DB
-  # association.
+  # Logs live in day files (Logs::DayFiles), so scope by project_id rather
+  # than a cross-DB association, and read through Logs::Reader, which runs the
+  # same relation on each file and merges the pages.
   def index
-    logs = Log.where(project_id: @project.id).recent
-
     @level = params[:level].presence
     @trace_id = params[:trace_id].presence
     @environment = params[:environment].presence
@@ -18,20 +17,12 @@ class LogsController < ApplicationController
     @service = params[:service].presence
     @source = params[:source].presence
     @query = params[:q].presence
-
-    logs = logs.by_level(@level) if @level && Log.levels.key?(@level)
-    logs = logs.for_trace(@trace_id).reorder(timestamp: :desc) if @trace_id
-    logs = logs.by_environment(@environment) if @environment
-    logs = logs.by_release(@release) if @release
-    logs = logs.by_service(@service) if @service
-    logs = logs.by_source(@source) if @source
-    logs = logs.search_text(@query) if @query
     # ?from=&to=, from a click on the project timeline's Logs row.
     @window = time_window_param
-    logs = logs.where(timestamp: @window) if @window
 
-    # Countless: avoids a SELECT COUNT(*) over the ~1M-row logs table (~7s) —
-    # an append-only feed only needs prev/next, not a total page count.
+    # Countless: no COUNT(*) across the files — an append-only feed only needs
+    # prev/next, not a total page count.
+    logs = Logs::Reader::Page.new(within: @window) { logs_relation }
     @pagy, @logs = pagy(:countless, logs, limit: 50)
 
     # Filter-dropdown values, maintained at ingest in the facets table (primary
@@ -46,12 +37,35 @@ class LogsController < ApplicationController
     @releases = Facet.values_for(@project.id, :log, :release).reverse
   end
 
+  # By log_id. A numeric id is a link from before day files, into the legacy
+  # database, the only place an id alone still names one log.
   def show
-    @log = Log.where(project_id: @project.id).find(params[:id])
+    scope = ->(logs) { logs.where(project_id: @project.id) }
+    @log = if params[:id].match?(/\A\d+\z/)
+      Logs::Reader.find_in_legacy(params[:id], &scope)
+    else
+      Logs::Reader.find_by_log_id(params[:id], &scope)
+    end
+    raise ActiveRecord::RecordNotFound, "Couldn't find Log #{params[:id]}" unless @log
+
     @related = related_transaction
   end
 
   private
+
+  # Built inside each day file's shard (see Logs::Reader).
+  def logs_relation
+    logs = Log.where(project_id: @project.id)
+    logs = logs.by_level(@level) if @level && Log.levels.key?(@level)
+    logs = logs.for_trace(@trace_id) if @trace_id
+    logs = logs.by_environment(@environment) if @environment
+    logs = logs.by_release(@release) if @release
+    logs = logs.by_service(@service) if @service
+    logs = logs.by_source(@source) if @source
+    logs = logs.where(timestamp: @window) if @window
+    logs = logs.search_text(@query, within: @window) if @query
+    logs
+  end
 
   def set_project
     @project = Project.find_by(slug: params[:project_slug]) || Project.find(params[:project_slug])

@@ -14,8 +14,9 @@ class SplatMcpServerTest < ActiveSupport::TestCase
 
     ENV["SPLAT_MCP_STATEMENT_TIMEOUT"] = "0.2"
     tools = SplatMcpTools.new
+    # In a logs day file, where search_logs runs.
     tools.define_singleton_method(:search_logs) do |_args|
-      LogsRecord.lease_connection.select_value(SLOW)
+      Logs::DayFiles.write(Time.now.utc.to_date) { LogsRecord.lease_connection.select_value(SLOW) }
       render_text("finished")
     end
 

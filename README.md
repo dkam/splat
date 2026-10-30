@@ -420,7 +420,7 @@ Splat stores everything in SQLite — there is no separate analytics engine to o
 | **primary** | `storage/production.sqlite3` | Application data — projects, settings, releases, OIDC sessions |
 | **issues_events** | `storage/production_issues_events.sqlite3` | Error issues and their raw events |
 | **transactions_spans** | `storage/production_transactions_spans.sqlite3` | APM transactions, span trees, and the rolled-up performance aggregates |
-| **logs** | `storage/production_logs.sqlite3` | Structured logs (zstd-compressed bodies, promoted query columns, FTS index) |
+| **logs** | `storage/log_days/YYYY-MM-DD.sqlite3`, one per day of ingest, and `storage/production_logs_catalog.sqlite3` | Structured logs (zstd-compressed bodies, promoted query columns, FTS index), each day's in its own file; the catalog holds the compression dictionaries they share ([ADR 0005](docs/decisions/0005-logs-day-files.md)) |
 
 (Two further Solid-backed databases — `production_cache.sqlite3` and `production_cable.sqlite3` — hold Solid Cache and Solid Cable data.)
 
@@ -480,7 +480,7 @@ Splat ingests structured logs alongside errors and transactions, into their own 
 
 **Compact storage.** The full record — message plus arbitrary attributes — is compressed into a blob using a trained zstd dictionary (logs are small and repetitive, so a shared dictionary pays off far more than per-row compression). The hot fields used for listing and filtering (timestamp, level, logger, environment, `trace_id`, `span_id`) are promoted to real columns and indexed; everything else is decompressed only when you open a single log.
 
-**Full-text search.** An FTS5 index covers both the message body and the *flattened* attributes, kept in sync with the table on insert/delete. The search box accepts free text (each token ANDed) plus a `key:value` shorthand that scopes a value to its attribute — so `status:422` matches a `422` stored under `status`, not some unrelated field. Pasted UUIDs are collapsed to a single token so a hyphenated id matches the way it's indexed.
+**Full-text search.** An FTS5 index covers both the message body and the *flattened* attributes, written with each log and deleted with its day file. The search box accepts free text (each token ANDed) plus a `key:value` shorthand that scopes a value to its attribute — so `status:422` matches a `422` stored under `status`, not some unrelated field. Pasted UUIDs are collapsed to a single token so a hyphenated id matches the way it's indexed.
 
 **Trace correlation.** Because logs carry `trace_id`, the log detail page links to its transaction and the transaction detail page links back to "View N logs for this trace." The two directions are deliberately lopsided: logs are ingested at ~100% while transactions are typically sampled (e.g. 1–10%), so the log→transaction link only appears when that trace happened to be sampled, while transaction→logs almost always resolves. Each link only renders when the other side actually exists, so you never land on an empty page.
 
@@ -669,7 +669,7 @@ Configure Uptime Kuma to send alerts via:
 
 ## Backup
 
-Splat splits its data across **six separate SQLite database files**, and backup tools operate per-file — backing up `production.sqlite3` alone captures only projects and settings, not your errors, transactions, or logs. Every database you care about needs its own backup configuration.
+Splat splits its data across **six separate SQLite database files, plus one file per day of logs**, and backup tools operate per-file — backing up `production.sqlite3` alone captures only projects and settings, not your errors, transactions, or logs. Every database you care about needs its own backup configuration.
 
 **Built in — two rake tasks**, for a copy on demand or from cron:
 
@@ -683,7 +683,7 @@ docker compose exec web bin/rails "splat:backup:snapshot[/backups/splat]"
 docker compose exec web bin/rails splat:backup:sync                      # storage/backups/current/
 ```
 
-Both copy the four databases that hold data (not the cache or cable) while Splat runs, and need as much free space as the databases take. The image's SQLite (Debian's 3.46) has no `sqlite3_rsync`, which arrived in 3.47, so in the container `sync` makes each copy afresh. The default directories are on the storage volume, the same disk as the databases; mount somewhere else and pass it if the copy should survive that disk.
+Both copy the four databases that hold data (not the cache or cable) and the logs day files, into `logs/` beside them, while Splat runs, and need as much free space as the databases take. A day file stops changing two days after its day, so `sync` copies each closed one once and then leaves it, as it does the old `production_logs.sqlite3` once copied after its last write, and deletes the copy of a day file retention has removed. The image's SQLite (Debian's 3.46) has no `sqlite3_rsync`, which arrived in 3.47, so in the container `sync` makes each copy afresh. The default directories are on the storage volume, the same disk as the databases; mount somewhere else and pass it if the copy should survive that disk.
 
 Or one of these, run outside Splat:
 
@@ -691,7 +691,7 @@ Or one of these, run outside Splat:
 - Real-time backup with ~10-30 second lag
 - Supports AWS S3, Backblaze B2, Cloudflare R2, MinIO
 - Point-in-time recovery
-- Requires one `dbs:` entry per database file — a single entry replicates a single file
+- Requires one `dbs:` entry per database file — a single entry replicates a single file. It can't follow the logs day files, which are new files every day; back those up with the tasks above
 
 **[sqlite3_rsync](https://sqlite.org/rsync.html)** - Efficient incremental backups (official SQLite utility)
 - Creates byte-for-byte clones of live databases
@@ -705,11 +705,13 @@ Do **not** back up a live database with plain `cp` or `rsync` — the databases 
 - `storage/production.sqlite3` - Application data: projects, settings, releases (critical)
 - `storage/production_issues_events.sqlite3` - Error issues and events (critical)
 - `storage/production_transactions_spans.sqlite3` - Transactions, spans, performance aggregates (critical)
-- `storage/production_logs.sqlite3` - Structured logs (critical if you rely on them)
+- `storage/log_days/YYYY-MM-DD.sqlite3` - Structured logs, one file per day they arrived (critical if you rely on them). Only today's and yesterday's change
+- `storage/production_logs_catalog.sqlite3` - The compression dictionaries every logs day file decodes against — back it up with them
+- `storage/production_logs.sqlite3` - Logs from before day files, read until retention deletes it
 - `storage/production_cache.sqlite3` / `storage/production_cable.sqlite3` - Solid Cache / Cable (optional, regenerated at runtime)
 - `storage/tuber/` - Tuber's write-ahead log — only holds in-flight ingest jobs; not needed for a point-in-time restore
 
-Example Litestream config covering all four critical databases:
+Example Litestream config covering the critical databases (the logs day files need the backup tasks above):
 
 ```yaml
 # /etc/litestream.yml
@@ -720,15 +722,15 @@ dbs:
     replicas: [{ url: s3://your-bucket/splat/issues_events }]
   - path: /app/storage/production_transactions_spans.sqlite3
     replicas: [{ url: s3://your-bucket/splat/transactions_spans }]
-  - path: /app/storage/production_logs.sqlite3
-    replicas: [{ url: s3://your-bucket/splat/logs }]
+  - path: /app/storage/production_logs_catalog.sqlite3
+    replicas: [{ url: s3://your-bucket/splat/logs_catalog }]
 ```
 
 ### Restoring
 
 Restore all critical databases from (roughly) the same point in time. The issues/events, transactions/spans, and logs databases reference project IDs in the primary database, so wildly mismatched restore points leave rows pointing at projects that don't exist yet. There's no cross-file transaction to preserve, so second-level alignment is fine — just don't mix a week-old primary with today's events.
 
-Each backup is self-contained: the zstd compression dictionaries used for event and log payloads are stored inside the same database file as the rows they compress, so a restored file is always readable on its own.
+The zstd compression dictionaries for event payloads are stored in the same database file as the events, so a restored issues/events file is readable on its own. Log payloads decode against the dictionaries in the logs catalog, so restore it with the day files.
 
 ## Model Context Protocol (MCP) Integration
 

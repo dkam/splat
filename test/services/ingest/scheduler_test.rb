@@ -20,7 +20,7 @@ class Ingest::SchedulerTest < ActiveSupport::TestCase
   # Jobs pinned to an hour of the night. Interval and hourly jobs are omitted
   # deliberately: "every 10m" and "cron 5 * * * *" fire the same number of
   # times whatever the zone, so naming one would be noise.
-  NIGHTLY = %w[data_retention logs_fts_optimize storage_stats_deep dictionary_drift].freeze
+  NIGHTLY = %w[data_retention storage_stats_deep dictionary_drift].freeze
 
   def schedule
     @schedule ||= YAML.load_file(Ingest::Scheduler::SCHEDULE_PATH)
@@ -52,22 +52,6 @@ class Ingest::SchedulerTest < ActiveSupport::TestCase
       assert_includes 0..4, local_hour(name),
         "#{name} runs at #{local_hour(name)}:00 Melbourne — heavy maintenance belongs overnight"
     end
-  end
-
-  test "logs_fts_optimize still follows data_retention" do
-    # Its comment depends on this: the night's deletes only leave delete-markers
-    # in logs_fts, and the merge is scheduled after retention so they start
-    # getting merged away the same night. Moving the cluster must not reorder it.
-    # Both measured from the same reference instant — comparing each cron's
-    # next occurrence from "now" says nothing when now falls between them.
-    from = Time.utc(2026, 9, 11, 14, 0, 0) # midnight, Melbourne
-    retention = cron_for("data_retention").next_time(from).to_utc_time
-    optimize = cron_for("logs_fts_optimize").next_time(from).to_utc_time
-
-    assert_operator optimize, :>, retention,
-      "logs_fts_optimize must still run after data_retention"
-    assert_operator optimize - retention, :<, 2.hours,
-      "and close enough behind it to be the same night's work"
   end
 
   test "the schedule survives a DST changeover in both directions" do

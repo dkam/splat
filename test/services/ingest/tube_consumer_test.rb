@@ -122,8 +122,10 @@ class Ingest::TubeConsumerTest < ActiveSupport::TestCase
 
   test "each ingest consumer sizes the cache of the database it writes" do
     assert_equal TransactionsSpansRecord, Ingest::TransactionConsumer.new.send(:cache_record)
-    assert_equal LogsRecord, Ingest::LogConsumer.new.send(:cache_record)
     assert_equal IssuesEventsRecord, Ingest::EventConsumer.new.send(:cache_record)
+    # Logs are written to a day file that changes daily (ADR 0005), not to one
+    # database a lease could hold on to.
+    assert_nil Ingest::LogConsumer.new.send(:cache_record)
   end
 
   test "the heartbeat stops once the batch is done" do

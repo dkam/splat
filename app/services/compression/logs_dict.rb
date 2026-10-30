@@ -1,5 +1,5 @@
 module Compression
-  class LogsDict < LogsRecord
+  class LogsDict < LogsCatalogRecord
     self.table_name = "compression_dictionaries"
   end
 end

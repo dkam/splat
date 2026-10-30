@@ -9,7 +9,9 @@
 #     off-peak batches.
 #   * :primary is near-zero churn (oidc_sessions/settings only). It has no
 #     vacuum caller, so it uses FULL — pages return automatically on every
-#     commit. The per-commit cost is negligible at primary's write rate, and
+#     commit. The logs catalog (dictionaries only) is the same. The logs day
+#     files are left at NONE: nothing is ever deleted from one, and retention
+#     deletes the whole file. The per-commit cost is negligible at primary's write rate, and
 #     it self-maintains without depending on a checkpoint winning a lock race.
 #     (Backstory: a one-time pre-rewrite migration left ~15GB of free pages in
 #     primary that nothing ever reclaimed; FULL prevents a recurrence.)
@@ -33,7 +35,7 @@ Rails.application.config.after_initialize do
     ApplicationRecord => [1, "FULL"],
     IssuesEventsRecord => [2, "INCREMENTAL"],
     TransactionsSpansRecord => [2, "INCREMENTAL"],
-    LogsRecord => [2, "INCREMENTAL"]
+    LogsCatalogRecord => [1, "FULL"]
   }
 
   targets.each do |base, (mode_value, mode_name)|

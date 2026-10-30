@@ -48,9 +48,10 @@ monitor_evaluation:
 
 # Explicit TRUNCATE checkpoint of the write-heavy DBs. SQLite's automatic
 # checkpoint is passive — it yields to readers and lets the WAL keep growing —
-# and on the logs DB, where every insert also writes the logs_fts_* triggers'
-# index entries, it loses the race and never recovers. Left alone it ran away to
-# a 4.2 GB WAL on 2026-08-17 and took ingest down with it. See the job.
+# and on the logs DB before day files, where every insert also wrote the
+# logs_fts_* triggers' index entries, it lost the race and never recovered.
+# Left alone it ran away to a 4.2 GB WAL on 2026-08-17 and took ingest down
+# with it. See the job.
 #
 # Rides splat.checkins (NOT splat.maintenance) for the same reason
 # monitor_evaluation does: this is the job that stops the WAL running away, so
@@ -83,19 +84,6 @@ data_retention:
   schedule: cron 0 2 * * * Australia/Melbourne
   con: 1
   idp: data_retention
-
-# Nightly FTS5 segment merge on the logs search index, plus vacuum. Retention
-# deletes only write delete-markers into logs_fts; without an explicit merge the
-# index grows without bound. Runs after data_retention so the night's deletes
-# start getting merged away right away. Time-budgeted and stepped (see the
-# job) — on a big index it is expected to leave work behind and pick it up
-# the next night, not merge everything away in one run.
-logs_fts_optimize:
-  class: Maintenance::LogsFtsOptimizeJob
-  tube: splat.maintenance
-  schedule: cron 40 2 * * * Australia/Melbourne
-  con: 1
-  idp: logs_fts_optimize
 
 # Daily dictionary-drift check. Per-segment enumeration job that fans out
 # Compression::DictTrainingJob — trains a candidate against recent samples,

@@ -9,6 +9,10 @@ module Ingest
   # Per-job insert keeps idempotency simple: a failed encode/insert retries only
   # that job. logs has no unique index, so a rare beanstalkd redelivery may dup
   # a batch — acceptable for high-volume logs.
+  #
+  # Rows go to today's day file (Logs::Writer, ADR 0005). No page-cache boost
+  # (CacheBoost) here: it's set on one connection to one database, and the
+  # database this writes changes every day.
   class LogConsumer < TubeConsumer
     DB = :logs
     TABLE = "logs"
@@ -18,8 +22,6 @@ module Ingest
     end
 
     private
-
-    def cache_record = LogsRecord
 
     def process_batch(jobs)
       outcomes = jobs.map do |job|
@@ -32,7 +34,7 @@ module Ingest
 
         records = parse(args["format"], args["payload"])
         rows = records.map { |rec| build_row(project, rec) }
-        Log.insert_all!(rows) if rows.any?
+        Logs::Writer.insert!(rows) if rows.any?
         harvest_facets(project, rows)
         [job, :ok]
       rescue => e
@@ -91,11 +93,11 @@ module Ingest
         service: rec[:service].presence || project.slug,
         duration_ms: rec[:duration_ms],
         source: rec[:source],
+        # Indexed with the row, not stored (Logs::Writer).
         attrs_text: rec[:attrs_text],
         payload_blob: Compression::Codec.encode(rec[:payload].to_json, db: DB, dict_id: dict_id),
         dict_id: dict_id,
-        created_at: now,
-        updated_at: now
+        created_at: now
       }
     end
   end

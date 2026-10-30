@@ -4,6 +4,7 @@ module Maintenance
   # After each table's batch loop we run PRAGMA incremental_vacuum on the
   # affected DB to actually return pages to disk (auto_vacuum is set to
   # INCREMENTAL on these DBs, so freed pages don't get reclaimed until we ask).
+  # Logs are deleted a day file at a time instead (see retire_logs).
   class RetentionJob
     BATCH_SIZE = 500
     SLEEP_BETWEEN_BATCHES = 0.05
@@ -75,7 +76,6 @@ module Maintenance
 
       vacuum(IssuesEventsRecord)
       vacuum(TransactionsSpansRecord)
-      vacuum(LogsRecord)
 
       duration = (Time.current - start).round(2)
       Rails.logger.info "[Maintenance::RetentionJob] done in #{duration}s — events:#{events_deleted}, transactions:#{transactions_deleted}, spans:#{spans_deleted}, span_trees:#{span_trees_deleted}, logs:#{logs_deleted}, histograms:#{histograms_deleted}, hourly_stats:#{hourly_stats_deleted}, facets:#{facets_deleted}, issue_facets:#{issue_facets_deleted}, check_ins:#{check_ins_deleted}"
@@ -123,8 +123,27 @@ module Maintenance
       batched_delete_all(CronCheckIn.where("started_at < ?", cutoff))
     end
 
+    # Logs go a whole day file at a time (ADR 0005), once the day it took logs
+    # in has ended before the cutoff: no row deletes, so nothing to vacuum.
+    # The legacy logs database goes whole too, once the newest log it took is
+    # past the cutoff; until then nothing is deleted from it either.
     def retire_logs(cutoff)
-      batched_delete_all(Log.where("timestamp < ?", cutoff))
+      Logs::DayFiles.shards.sum do |shard|
+        next 0 unless logs_retired?(shard, cutoff)
+
+        rows = shard.with { Log.count }
+        Logs::DayFiles.delete!(shard)
+        Rails.logger.info "[Maintenance::RetentionJob] deleted #{shard.path} (#{rows} logs)"
+        rows
+      end
+    end
+
+    def logs_retired?(shard, cutoff)
+      return shard.day < cutoff.utc.to_date unless shard.legacy?
+
+      # ids follow ingest order, so the highest is the newest log taken in.
+      newest = shard.with { Log.unscoped.order(id: :desc).pick(:created_at) }
+      newest.nil? || newest < cutoff
     end
 
     def retire_events(cutoff)

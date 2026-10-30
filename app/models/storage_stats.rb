@@ -1,6 +1,8 @@
 class StorageStats
   # Each entry is [label_for_ui, ActiveRecord base class]. The labels match
-  # what the settings page renders as a section header.
+  # what the settings page renders as a section header. "LogsRecord" stands
+  # for every logs file: the catalog and the day files (ADR 0005), whose
+  # tables are summed by name (see on_each_database).
   DBS = [
     ["Primary", "ApplicationRecord"],
     ["Issues + Events", "IssuesEventsRecord"],
@@ -57,7 +59,7 @@ class StorageStats
   # [ui label, dict AR model, AR base class (for the runs table connection)].
   DICTIONARIES = [
     ["Events", "Compression::IssuesEventsDict", "IssuesEventsRecord"],
-    ["Logs", "Compression::LogsDict", "LogsRecord"]
+    ["Logs", "Compression::LogsDict", "LogsCatalogRecord"]
   ].freeze
 
   # How many recent training runs to keep per DB in the snapshot.
@@ -145,8 +147,9 @@ class StorageStats
     # that's the honest "how big is this on disk" number the headline wants.
     def file_bytes_total
       DBS.sum do |_label, base_name|
-        conn = base_name.constantize.connection
-        conn.select_value("PRAGMA page_count").to_i * conn.select_value("PRAGMA page_size").to_i
+        on_each_database(base_name, catalog: true) { |conn|
+          conn.select_value("PRAGMA page_count").to_i * conn.select_value("PRAGMA page_size").to_i
+        }.sum
       rescue => e
         Rails.logger.warn("StorageStats.file_bytes_total(#{base_name}) failed: #{e.class}: #{e.message}")
         0
@@ -192,9 +195,10 @@ class StorageStats
     # SEARCH is the seek, SCAN is not.
     def data_span
       DATA_SPAN.filter_map do |label, base_name, table, column|
-        conn = base_name.constantize.connection
-        oldest = parse_time(conn.select_value("SELECT MIN(#{column}) FROM #{table}"))
-        newest = parse_time(conn.select_value("SELECT MAX(#{column}) FROM #{table}"))
+        oldest, newest = on_each_database(base_name) { |conn|
+          [parse_time(conn.select_value("SELECT MIN(#{column}) FROM #{table}")),
+            parse_time(conn.select_value("SELECT MAX(#{column}) FROM #{table}"))]
+        }.reject { it.first.nil? }.transpose.then { |o, n| [o&.min, n&.max] }
         days = (oldest && newest) ? ((newest - oldest) / 1.day.to_f).round(1) : nil
         {name: label, table: table, oldest: oldest, newest: newest, days: days}
       rescue => e
@@ -209,9 +213,9 @@ class StorageStats
     # it's frozen (new spans go into span_trees) and only ages out, so counting
     # it would inflate the daily cost of a retention day that no longer buys it.
     #
-    # The logs_fts shadow tables are the search index; a trigger deletes a log's
-    # entries with the log, so they are part of what a day of logs costs — on
-    # Booko (Oct 2026), 35.8 GB of index against 28.7 GB of logs.
+    # The logs_fts shadow tables are the search index, in each day file with
+    # the logs it indexes and deleted with them, so they are part of what a day
+    # of logs costs: 298 of a log's 1,638 bytes on Booko's busiest day (ADR 0005).
     DAILY_USAGE = {
       events_data_retention_days: [%w[events], "events"],
       transactions_data_retention_days: [%w[transactions], "transactions"],
@@ -267,11 +271,13 @@ class StorageStats
     # since COUNT(*) here would undo the point of the cheap sampling.
     def compression_estimate(table_rows = {})
       COMPRESSED.filter_map do |label, base_name, db, table|
-        conn = base_name.constantize.connection
         total_rows = table_rows[table]
         next if total_rows.nil? || total_rows.zero?
 
-        sample = sample_rows(conn, table)
+        # Logs are sampled from one day file, not every file's 25 anchors: the
+        # newest whose day is over, a whole day's traffic. Today's holds next
+        # to nothing just after midnight.
+        sample = on_each_database(base_name, sample_file: true) { |conn| sample_rows(conn, table) }.first.to_a
         next if sample.empty?
 
         compressed = 0
@@ -369,18 +375,55 @@ class StorageStats
     # count, table bytes, index bytes, and total bytes.
     def sqlite_tables_grouped
       DBS.map do |label, base_name|
-        base = base_name.constantize
-        {name: label, base: base_name, tables: sqlite_tables_for(base)}
+        tables = on_each_database(base_name, catalog: true) { |conn| sqlite_tables_for(conn) }
+        {name: label, base: base_name, tables: merge_tables(tables)}
       end
     end
 
     # Back-compat single-list view (primary only) — kept for any caller
     # not yet updated to the grouped form.
     def sqlite_tables
-      sqlite_tables_for(ApplicationRecord)
+      sqlite_tables_for(ApplicationRecord.connection)
     end
 
     private
+
+    # Runs the block on each database behind a base class name, returning what
+    # it returns for each. That's one database, except for LogsRecord: every
+    # logs day file and the legacy logs database (ADR 0005), newest first, and
+    # the catalog too with `catalog:` — it holds the dictionaries, no logs.
+    # With `sample_file:`, only the newest day file whose day is over, or
+    # failing that the newest file there is.
+    def on_each_database(base_name, catalog: false, sample_file: false, &block)
+      return [block.call(base_name.constantize.connection)] unless base_name == "LogsRecord"
+
+      shards = Logs::DayFiles.shards
+      if sample_file
+        today = Time.now.utc.to_date
+        shards = [shards.find { !it.legacy? && it.day < today } || shards.first].compact
+      end
+      (catalog ? [block.call(LogsCatalogRecord.connection)] : []) +
+        shards.map { |shard| shard.with { LogsRecord.with_connection(&block) } }
+    end
+
+    # One table list from several databases': rows, bytes and each index's
+    # bytes summed by name.
+    def merge_tables(lists)
+      return lists.first || [] if lists.size <= 1
+
+      lists.flatten.group_by { it[:name] }.map { |name, parts|
+        indexes = parts.flat_map { it[:indexes] }.group_by { it[:name] }
+          .map { |idx, same| {name: idx, bytes: same.sum { it[:bytes] }} }.sort_by { -it[:bytes] }
+        {
+          name: name,
+          row_estimate: parts.sum { it[:row_estimate] },
+          table_bytes: parts.sum { it[:table_bytes] },
+          index_bytes: parts.sum { it[:index_bytes] },
+          indexes: indexes,
+          total_bytes: parts.sum { it[:total_bytes] }
+        }
+      }.sort_by { -it[:total_bytes] }
+    end
 
     # table name => row count, from a `groups` breakdown built by a deep pass.
     def row_counts(groups)
@@ -416,8 +459,7 @@ class StorageStats
       end
     end
 
-    def sqlite_tables_for(base)
-      conn = base.connection
+    def sqlite_tables_for(conn)
       byte_map, cell_map = dbstat_by_object(conn)
 
       indexes_by_table = Hash.new { |h, k| h[k] = [] }

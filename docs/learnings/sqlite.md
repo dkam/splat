@@ -310,3 +310,18 @@ the version.
 
 **Check:** `db.statement_timeout = 10_000`, then a query that takes ~10ms
 uncapped. A working gem returns it; a broken one raises.
+
+## Opening a database that isn't there creates an empty one
+
+SQLite's default open flags are `READWRITE | CREATE`, so a connection to a path
+with no file makes a new, empty database there and opens that. Nothing fails at
+connect time; the first query fails with `no such table`, and the empty file
+stays on disk. A pool that reconnects to a file something else deleted does
+exactly this. Splat's logs day files are deleted whole by retention, and Rails
+reconnects pooled connections, so they open with `READWRITE` alone
+(`Logs::DayFiles`): a deleted file then fails to open, `unable to open database
+file`, and stays deleted.
+
+**Check:** `SQLite3::Database.new(path)` on a missing path leaves a 0-byte file;
+`SQLite3::Database.new(path, flags: SQLite3::Constants::Open::READWRITE)`
+raises `SQLite3::CantOpenException` and leaves none.
