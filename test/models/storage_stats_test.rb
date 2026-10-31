@@ -59,6 +59,37 @@ class StorageStatsTest < ActiveSupport::TestCase
     assert estimate[:saved_bytes].positive?
   end
 
+  # Logs are a file per ingest day (ADR 0005): the Logs group is every file's
+  # tables summed by name, and its span runs from the oldest file to the newest.
+  test "the logs group and span cover every day file" do
+    [Time.current, 3.days.ago].each do |at|
+      2.times { Log.create!(project_id: projects(:one).id, log_id: log_id_at(at), timestamp: at, level: :info, body: "x", payload: {}) }
+    end
+
+    logs = StorageStats.sqlite_tables_grouped.find { it[:name] == "Logs" }[:tables].index_by { it[:name] }
+    span = StorageStats.data_span.find { it[:name] == "Logs" }
+
+    assert_equal 4, logs["logs"][:row_estimate]
+    assert logs.key?("compression_dictionaries"), "the catalog's tables are in the group too"
+    assert_in_delta 3.days.ago, span[:oldest], 1.minute
+    assert_in_delta Time.current, span[:newest], 1.minute
+  end
+
+  # The code review: logs were sampled from the newest file, which just after
+  # midnight UTC holds next to nothing, and so dropped out of the estimate.
+  test "compression_estimate samples logs from a day that's over, not one just begun" do
+    5.times do |i|
+      Log.create!(project_id: projects(:one).id, log_id: log_id_at(1.day.ago), timestamp: 1.day.ago, level: :info,
+        body: "x", payload: {"body" => "Started GET \"/books/#{i}\" for 127.0.0.1" * 10})
+    end
+    Logs::DayFiles.write(Time.now.utc.to_date) {}
+
+    estimate = StorageStats.compression_estimate({"logs" => 5}).find { it[:name] == "Logs" }
+
+    assert estimate, "expected a Logs compression estimate"
+    assert_equal 5, estimate[:rows]
+  end
+
   # A table the deep pass hasn't counted yet can't be scaled into a total, and
   # counting it inline would reintroduce the full scan we just removed.
   test "compression_estimate skips tables with no known row count" do

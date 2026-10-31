@@ -16,10 +16,10 @@ class TransactionsController < ApplicationController
     # trace_id is promoted onto the transaction row; use it to link
     # transaction → logs (the reverse of the log detail's trace link).
     # .presence guards against a blank trace_id matching every untraced log
-    # in the project (an O(table) COUNT); the count itself is served by
-    # index_logs_on_project_id_and_trace_id.
+    # in the project (an O(table) COUNT); the count itself is a seek on
+    # index_logs_on_trace_id in each day file.
     @trace_id = @transaction.trace_id.presence
-    @trace_log_count = @trace_id ? Log.where(project_id: @project.id, trace_id: @trace_id).count : 0
+    @trace_log_count = @trace_id ? Logs::Reader.count { Log.where(project_id: @project.id, trace_id: @trace_id) } : 0
 
     # Errors thrown during this transaction (reverse of Event#related_transaction).
     # Usually none; capped because a pathological trace could carry many.

@@ -8,7 +8,8 @@
 # Idempotent — a second run just re-bumps last_seen_at.
 #
 # These DISTINCT scans are exactly what the facets table exists to avoid, run
-# once offline. On a busy logs table they take a while; that cost is paid once.
+# once offline. Logs are a file per day (ADR 0005), so each file is scanned in
+# turn, the legacy database too while it's there; that cost is paid once.
 # last_seen_at is set to now: every surviving row was seen within its retention
 # window, so a truly-dead value simply ages out on the next prune.
 namespace :splat do
@@ -34,7 +35,8 @@ namespace :splat do
     end
 
     %w[environment source service release].each do |name|
-      count = seed.call("log", name, Log.distinct.pluck(:project_id, name.to_sym))
+      pairs = Logs::Reader.map(gone: []) { Log.distinct.pluck(:project_id, name.to_sym) }.flatten(1)
+      count = seed.call("log", name, pairs.uniq)
       puts "  logs.#{name}: #{count} values"
     end
 

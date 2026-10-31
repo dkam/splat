@@ -93,19 +93,6 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
     refute SpanTree.exists?(blob.id), "blob cascade-deleted with its transaction"
   end
 
-  test "logs older than the logs cutoff are deleted, recent kept" do
-    Setting.instance.update!(logs_data_retention_days: 14)
-    old = Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 30.days.ago,
-      level: :info, source: "sentry", body: "old", payload: {})
-    recent = Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: 1.day.ago,
-      level: :info, source: "sentry", body: "recent", payload: {})
-
-    Maintenance::RetentionJob.new.perform
-
-    refute Log.exists?(old.id), "log past the 14d cutoff is purged"
-    assert Log.exists?(recent.id), "recent log is retained"
-  end
-
   # --- incremental_vacuum (Booko report, 2026-09-12) --------------------------
   #
   # The Booko notes read Splat's on-disk file sizes (logs 109 GB, spans 215 GB,
@@ -186,11 +173,11 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
 
   test "vacuum yields on lock contention instead of raising" do
     job = Maintenance::RetentionJob.new
-    conn = LogsRecord.connection
+    conn = IssuesEventsRecord.connection
     busy = ActiveRecord::StatementTimeout.new("SQLite3::BusyException: database is locked")
 
     with_stub(conn, :execute, ->(*) { raise busy }) do
-      assert_nothing_raised { job.send(:vacuum, LogsRecord, pause: 0) }
+      assert_nothing_raised { job.send(:vacuum, IssuesEventsRecord, pause: 0) }
     end
   end
 
@@ -198,16 +185,16 @@ class Maintenance::RetentionJobTest < ActiveSupport::TestCase
     # Pre-existing behaviour: a DB without incremental auto_vacuum answers
     # "no such pragma"/similar — warn, don't abort the whole retention pass.
     job = Maintenance::RetentionJob.new
-    conn = LogsRecord.connection
+    conn = IssuesEventsRecord.connection
     boom = ActiveRecord::StatementInvalid.new("no such pragma")
 
     with_stub(conn, :execute, ->(*) { raise boom }) do
-      assert_nothing_raised { job.send(:vacuum, LogsRecord, pause: 0) }
+      assert_nothing_raised { job.send(:vacuum, IssuesEventsRecord, pause: 0) }
     end
   end
 
   test "vacuum runs against a real database without raising" do
-    assert_nothing_raised { Maintenance::RetentionJob.new.send(:vacuum, LogsRecord, pause: 0) }
+    assert_nothing_raised { Maintenance::RetentionJob.new.send(:vacuum, IssuesEventsRecord, pause: 0) }
   end
 
   # --- stall recovery -------------------------------------------------------

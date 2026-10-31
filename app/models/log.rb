@@ -5,10 +5,35 @@
 # type "log") or OTLP (/v1/logs), both normalized into the same shape. The full
 # record (including attributes) is zstd-compressed into payload_blob; the hot
 # query/display fields are promoted to columns.
+#
+# Rows live in one SQLite file per day of ingest (ADR 0005, Logs::DayFiles), so
+# a query runs inside a day file's shard, and reads across days go through
+# Logs::Reader. `id` is unique within a file only; `log_id` is unique overall,
+# names the file the row is in, and is what URLs carry.
 class Log < LogsRecord
   include Compression::CompressedJson
 
   compressed_json :payload, db: :logs, table: "logs", platform: :source
+
+  # Columns of the legacy logs database that day files don't have. Ignored so
+  # the model's columns are the same whichever file loaded them first.
+  self.ignored_columns = %w[attrs_text updated_at]
+
+  # The columns come from today's day file. The default shard is the catalog,
+  # which has no logs table, so Log.new or a where(level:) built outside a day
+  # file's shard couldn't otherwise find them.
+  def self.load_schema!
+    Logs::DayFiles.write(Logs::DayFiles.today) { super }
+  end
+  private_class_method :load_schema!
+
+  # The flattened attributes, for the search index only (Logs::AttrsText).
+  attr_accessor :attrs_text
+
+  # Log.create! (tests, the console) lands where ingest would put the row: the
+  # day file of its log_id, indexed for search in the same transaction. Ingest
+  # itself goes through Logs::Writer.
+  around_create :create_in_day_file
 
   # Sentry sends trace/debug/info/warn/error/fatal; OTLP severity numbers are
   # bucketed onto the same scale at parse time. Stored as an integer column.
@@ -27,17 +52,16 @@ class Log < LogsRecord
   scope :by_release, ->(release) { where(release: release) }
   scope :by_source, ->(source) { where(source: source) }
   scope :by_service, ->(service) { where(service: service) }
-  # Indexed only via project_id+service above; server_name has no index of its
-  # own, so this is a filter applied over the timestamp window rather than a
-  # lookup. Cheap in that context, not something to lean on unwindowed.
+  # No index of its own: a filter applied over the timestamp window rather
+  # than a lookup. Cheap in that context, not something to lean on unwindowed.
   scope :by_server_name, ->(name) { where(server_name: name) }
   # duration_ms is populated from a source-provided attribute (e.g. Postgres
   # slow-query duration via the OTLP collector). Backs a future "min duration"
   # filter; the partial index covers the non-null slice.
   scope :slower_than, ->(ms) { where("duration_ms >= ?", ms) }
   # Free-text search over message body + flattened attributes via the logs_fts
-  # FTS5 index (see config/initializers/logs_fts.rb). Falls back to all when the
-  # query has no usable terms.
+  # FTS5 index (see Logs::Fts). Falls back to all when the query has no usable
+  # terms.
   #
   # Pass `within:` (the same time range the caller is already filtering on) for
   # any windowed search. Without it the timestamp window contributes *nothing*
@@ -135,7 +159,19 @@ class Log < LogsRecord
     end
   end
 
+  def to_param = log_id || id&.to_s
+
   private
+
+  def create_in_day_file
+    self.log_id ||= SecureRandom.uuid_v7
+    Logs::DayFiles.write(Logs::DayFiles.ingest_day(log_id)) do
+      self.class.transaction do
+        yield
+        self.class.with_connection { |conn| Logs::Fts.index(conn, [[id, body, attrs_text]]) }
+      end
+    end
+  end
 
   def unwrap_attribute_value(value) = Logs::AttributeValue.unwrap(value)
 end

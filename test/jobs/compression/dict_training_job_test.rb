@@ -143,6 +143,23 @@ class Compression::DictTrainingJobTest < ActiveSupport::TestCase
     5.times { |k| assert_equal 10, types["Steady#{k}Error"] }  # under the cap: all kept
   end
 
+  # Logs are a file per ingest day (ADR 0005): the sample is drawn from each
+  # day file in the lookback window, and trains a logs dictionary in the
+  # catalog the files share.
+  test "trains a logs dictionary from the day files in the lookback window" do
+    [Time.current, 2.days.ago, 30.days.ago].each do |at|
+      60.times do |i|
+        Log.create!(project_id: @project.id, log_id: log_id_at(at), timestamp: at, level: :info, source: "sentry",
+          body: "Completed 200 OK in #{i}ms", payload: {"body" => "Completed 200 OK in #{i}ms (Views: 1ms | ActiveRecord: 2ms)",
+                                                        "attributes" => {"sentry.environment" => {"value" => "production"}}})
+      end
+    end
+
+    result = Compression::DictTrainingJob.new.perform("logs")
+
+    assert_equal 120, result[:samples] + result[:eval_samples], "both recent day files, not the one past the lookback"
+  end
+
   test "the issue cap is per day, so an issue loud every day keeps its weight" do
     3.times { |d| seed_events(30, type: "DailyError", at: d.days.ago) }
 

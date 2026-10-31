@@ -6,7 +6,7 @@ class Maintenance::WalCheckpointJobTest < ActiveSupport::TestCase
   test "checkpoints every known database and reports frames" do
     results = Maintenance::WalCheckpointJob.new.perform
 
-    assert_equal Maintenance::WalCheckpointJob::DATABASES.keys.sort, results.keys.sort
+    assert_equal Maintenance::WalCheckpointJob::DATABASES.keys.sort, results.keys.grep_v(/\Alogs \d/).sort
     results.each do |name, result|
       assert result, "#{name} returned a result"
       next if result.key?(:error)
@@ -18,9 +18,27 @@ class Maintenance::WalCheckpointJobTest < ActiveSupport::TestCase
   end
 
   test "checkpoints only the named databases" do
-    results = Maintenance::WalCheckpointJob.new.perform("logs")
+    results = Maintenance::WalCheckpointJob.new.perform("transactions_spans")
 
-    assert_equal ["logs"], results.keys
+    assert_equal ["transactions_spans"], results.keys
+  end
+
+  # The logs catalog, and the day files still taking writes (ADR 0005): today's,
+  # and yesterday's in the hour after midnight, for a job under way then.
+  # Older ones are never written again.
+  test "logs covers the catalog and the day files still being written" do
+    project = projects(:one)
+    travel_to(Time.now.utc.beginning_of_day + 30.minutes) do
+      [Time.current, 1.day.ago, 3.days.ago].each do |at|
+        Log.create!(project_id: project.id, log_id: log_id_at(at), timestamp: at, level: :info, source: "sentry", body: "x", payload: {})
+      end
+
+      results = Maintenance::WalCheckpointJob.new.perform("logs")
+
+      today = Time.now.utc.to_date
+      assert_equal ["logs", "logs #{today - 1}", "logs #{today}"], results.keys.sort
+      results.each_value { |r| refute r.key?(:error), r.inspect }
+    end
   end
 
   test "covers all 6 database connections, including cache and cable" do
@@ -29,7 +47,7 @@ class Maintenance::WalCheckpointJobTest < ActiveSupport::TestCase
   end
 
   test "raises when a database checkpoint fails for a reason other than busy/locked contention" do
-    conn = LogsRecord.connection
+    conn = LogsCatalogRecord.connection
 
     with_stub(conn, :select_rows, ->(*) { raise ActiveRecord::ConnectionNotEstablished, "no connection" }) do
       error = assert_raises(RuntimeError) do
@@ -53,6 +71,6 @@ class Maintenance::WalCheckpointJobTest < ActiveSupport::TestCase
 
     Maintenance::WalCheckpointJob.new.perform("logs")
 
-    assert_equal "checkpoint me", Log.find(log.id).body
+    assert_equal "checkpoint me", Logs::Reader.find_by_log_id(log.log_id).body
   end
 end

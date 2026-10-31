@@ -13,7 +13,9 @@ module Compression
   #   "events:project:42"         → events WHERE project_id=42
   #   "logs:platform:sentry"      → logs   WHERE source=sentry
   # REGISTRY maps the table to the DB it lives on plus the dict model scoped to
-  # that DB — dict bytes and dict_id stay in the same file as the data.
+  # that DB — dict bytes and dict_id stay in the same file as the data. Logs
+  # are the exception since ADR 0005: the rows are in day files and their
+  # dictionaries in the logs catalog that every day file shares.
   #
   # Promotion threshold is intentionally conservative — we want fewer,
   # better versions, not version churn.
@@ -162,19 +164,18 @@ module Compression
     # one-at-a-time reads, so a large eval set is cheap and makes the scores
     # steady. Returns {train:, eval:} counts.
     def stream_samples(db:, table:, segment:, train_dir:, eval_dir:)
-      conn = REGISTRY.fetch(table)[:record].constantize.connection
       since = LOOKBACK_DAYS.days.ago
 
       qualifier_sql, qualifier_bind = segment_qualifier(table, segment)
       binds = [since]
       binds << qualifier_bind if qualifier_bind
 
-      rows = conn.exec_query(sample_sql(table, qualifier_sql), "DictTrainingJob sample", binds)
+      rows = sample(table, qualifier_sql, binds, since)
 
       train_n = 0
       eval_n = 0
       train_bytes = 0
-      rows.rows.each do |(blob, dict_id)|
+      rows.each do |(blob, dict_id)|
         payload = Compression::Codec.decode(blob, db: db, dict_id: dict_id)
         next if payload.nil?
 
@@ -195,16 +196,37 @@ module Compression
       {train: train_n, eval: eval_n}
     end
 
+    # [payload_blob, dict_id] rows for stream_samples. Logs are a file per day
+    # of ingest (ADR 0005), so they're an even share of SAMPLES from each day
+    # file in the lookback window, shuffled together. The legacy logs database
+    # isn't sampled: it stopped taking logs at the cutover.
+    def sample(table, qualifier_sql, binds, since)
+      record = REGISTRY.fetch(table)[:record]
+      unless record == "LogsRecord"
+        return record.constantize.connection.exec_query(sample_sql(table, qualifier_sql), "DictTrainingJob sample", binds).rows
+      end
+
+      shards = Logs::DayFiles.shards.reject { it.legacy? || it.day < since.utc.to_date }
+      return [] if shards.empty?
+
+      share = (SAMPLES.to_f / shards.size).ceil
+      shards.flat_map { |shard|
+        shard.with do
+          LogsRecord.with_connection { |conn| conn.exec_query(sample_sql(table, qualifier_sql, limit: share), "DictTrainingJob sample", binds).rows }
+        end
+      }.shuffle
+    end
+
     # Up to SAMPLES random rows from the lookback window, in random order. Where
     # the table has an issue_column, each (issue, day) first keeps at most
     # ISSUE_DAY_CAP rows. That window function numbers ids, not payloads, so
     # the partition sort stays small however many rows a flood left behind.
-    def sample_sql(table, qualifier_sql)
+    def sample_sql(table, qualifier_sql, limit: SAMPLES)
       issue_column = REGISTRY.fetch(table)[:issue_column]
       candidates = "FROM #{table} WHERE timestamp >= ? AND payload_blob IS NOT NULL #{qualifier_sql}"
 
       unless issue_column
-        return "SELECT payload_blob, dict_id #{candidates} ORDER BY RANDOM() LIMIT #{SAMPLES.to_i}"
+        return "SELECT payload_blob, dict_id #{candidates} ORDER BY RANDOM() LIMIT #{limit.to_i}"
       end
 
       <<~SQL.squish

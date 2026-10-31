@@ -13,6 +13,29 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+Logs are stored one SQLite file per day they arrived, under `storage/log_days/`
+([ADR 0005](docs/decisions/0005-logs-day-files.md)), and retention deletes
+whole files. Booko's logs database was 58.9 GB for 7.95M logs on 2026-10-25,
+7,957 bytes a log, 41.4 GB of it search index that row-by-row retention had
+left in pieces. The busiest day before it, rebuilt through the new code, is
+1,638 bytes a log: about 13 GB for the same 15 days. The nightly FTS optimize
+job and the logs vacuum are gone with what made them necessary.
+
+Search, filters, the trace links on events and transactions, the project
+timeline and the MCP log tools read across the files. Log pages are addressed
+by `log_id` now; old links by number still open while the old database is
+there. An MCP call's 15-second cap covers all the files it reads, not each.
+
+On upgrade, `storage/production_logs.sqlite3` stops taking logs and is read
+alongside the day files until its newest log is past retention, when it's
+deleted whole: no backfill, and disk peaks at the old file plus the new ones
+for that long. Retention deletes nothing from it in the meantime, so logs in it
+older than the retention setting can still be read until it goes. Its
+compression dictionaries are copied at boot into
+`storage/production_logs_catalog.sqlite3`, which the day files share.
+Litestream can't follow a new file every day; the backup tasks copy the day
+files (see README, Backup).
+
 ## 1.28.3 — 2026-10-24
 
 OTLP log batches sent gzipped, as pg01's collector sends them, are answered

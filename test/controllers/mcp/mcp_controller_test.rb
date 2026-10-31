@@ -1076,6 +1076,34 @@ module Mcp
       assert_match "trace line 1", tool_text
     end
 
+    # Logs are a file per ingest day (ADR 0005); a trace's logs can sit in two.
+    test "get_trace_logs collects a trace's logs across day files, oldest first" do
+      project = projects(:one)
+      Log.create!(project_id: project.id, log_id: log_id_at(1.minute.ago), timestamp: 1.minute.ago,
+        level: :info, source: "sentry", body: "trace line today", trace_id: "two-day-trace", payload: {})
+      Log.create!(project_id: project.id, log_id: log_id_at(1.day.ago), timestamp: 1.day.ago,
+        level: :info, source: "sentry", body: "trace line yesterday", trace_id: "two-day-trace", payload: {})
+
+      call_tool("get_trace_logs", {"trace_id" => "two-day-trace"})
+      assert_response :success
+      assert_match(/trace line yesterday.*trace line today/m, tool_text)
+    end
+
+    test "search_logs merges day files newest first, and get_log finds a log in an older one" do
+      project = projects(:one)
+      old = Log.create!(project_id: project.id, log_id: log_id_at(2.days.ago), timestamp: 2.days.ago,
+        level: :error, source: "sentry", body: "disk nearly full, two days ago", payload: {})
+      Log.create!(project_id: project.id, log_id: log_id_at(1.hour.ago), timestamp: 1.hour.ago,
+        level: :error, source: "sentry", body: "disk nearly full, an hour ago", payload: {})
+
+      call_tool("search_logs", {"query" => "disk full", "time_range_hours" => 72})
+      assert_response :success
+      assert_match(/an hour ago.*two days ago/m, tool_text)
+
+      call_tool("get_log", {"log_id" => old.log_id})
+      assert_match "disk nearly full, two days ago", tool_text
+    end
+
     test "get_transaction surfaces the promoted trace_id so logs can be cross-referenced" do
       project = projects(:one)
       txn = Transaction.create!(project: project, transaction_id: SecureRandom.uuid,

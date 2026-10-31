@@ -578,36 +578,42 @@ class SplatMcpTools
 
     project_id = resolve_project_id(args)
 
-    logs = Log.where(timestamp: time_range).recent
-    logs = logs.where(project_id: project_id) if project_id
-    # within: is what keeps a common term over a wide window from enumerating
-    # every match in the table — see Log.search_text.
-    logs = logs.search_text(args["query"], within: time_range) if args["query"].present?
-    logs = logs.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
-    logs = logs.by_logger(args["logger"]) if args["logger"].present?
-    logs = logs.by_service(args["service"]) if args["service"].present?
-    logs = logs.by_server_name(args["server_name"]) if args["server_name"].present?
-    logs = logs.for_trace(args["trace_id"]).reorder(timestamp: :desc) if args["trace_id"].present?
-    logs = logs.by_environment(args["environment"]) if args["environment"].present?
-    logs = logs.by_release(args["release"]) if args["release"].present?
-    logs = logs.limit(limit)
+    # Built in each day file the window touches (see Logs::Reader), newest
+    # first across them.
+    logs = Logs::Reader.list(limit: limit, within: time_range) do
+      rel = Log.where(timestamp: time_range)
+      rel = rel.where(project_id: project_id) if project_id
+      # within: is what keeps a common term over a wide window from enumerating
+      # every match in the file — see Log.search_text.
+      rel = rel.search_text(args["query"], within: time_range) if args["query"].present?
+      rel = rel.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
+      rel = rel.by_logger(args["logger"]) if args["logger"].present?
+      rel = rel.by_service(args["service"]) if args["service"].present?
+      rel = rel.by_server_name(args["server_name"]) if args["server_name"].present?
+      rel = rel.for_trace(args["trace_id"]) if args["trace_id"].present?
+      rel = rel.by_environment(args["environment"]) if args["environment"].present?
+      rel = rel.by_release(args["release"]) if args["release"].present?
+      rel
+    end
 
-    render_text("#{window_note}#{format_logs_list(logs.to_a, window_label(time_range))}")
+    render_text("#{window_note}#{format_logs_list(logs, window_label(time_range))}")
   end
 
   def get_log(args)
-    log = Log.find_by(log_id: args["log_id"])
+    log = Logs::Reader.find_by_log_id(args["log_id"])
     return render_error("Log not found: #{args["log_id"]}") unless log
 
     render_text(format_log_detail(log))
   end
 
+  # No time bound, so every day file is asked: a seek on index_logs_on_trace_id
+  # in each.
   def get_trace_logs(args)
     trace_id = args["trace_id"]
     return render_error("trace_id is required") if trace_id.blank?
 
     limit = (args["limit"]&.to_i || 100).clamp(1, 500)
-    logs = Log.for_trace(trace_id).limit(limit).to_a
+    logs = Logs::Reader.list(limit: limit, oldest_first: true) { Log.for_trace(trace_id) }
 
     render_text(format_logs_list(logs, nil, header: "Logs for trace #{trace_id}"))
   end

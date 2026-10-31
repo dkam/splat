@@ -2,7 +2,7 @@
   <div class="mb-8">
     <%= breadcrumbs([@project.name, project_path(@project.slug)],
                     ["Logs", project_logs_path(@project.slug)],
-                    ["Log ##{@log.id}", nil]) %>
+                    ["Log #{@log.log_id || "##{@log.id}"}", nil]) %>
   </div>
 
   <% parts = parse_log_message(@log.body) %>

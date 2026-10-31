@@ -33,17 +33,20 @@ class Ingest::LogConsumerTest < ActiveSupport::TestCase
     assert_equal "sentry", sentry.first[:source]
   end
 
-  test "inserting parsed records persists rows" do
+  test "inserting parsed records persists rows, searchable by body and attributes" do
     payload = {"items" => [
-      {"timestamp" => Time.now.to_f, "level" => "info", "body" => "one", "trace_id" => "trace-x"},
+      {"timestamp" => Time.now.to_f, "level" => "info", "body" => "one", "trace_id" => "trace-x",
+       "attributes" => {"order_status" => {"value" => "backordered", "type" => "string"}}},
       {"timestamp" => Time.now.to_f, "level" => "error", "body" => "two", "trace_id" => "trace-x"}
     ]}
     records = @consumer.send(:parse, "sentry", payload)
     rows = records.map { |r| @consumer.send(:build_row, @project, r) }
 
-    assert_difference -> { Log.where(trace_id: "trace-x").count }, 2 do
-      Log.insert_all!(rows)
+    assert_difference -> { Logs::Reader.count { Log.where(trace_id: "trace-x") } }, 2 do
+      Logs::Writer.insert!(rows)
     end
+    assert_equal ["one"], Logs::Reader.list(limit: 5) { Log.search_text("order_status:backordered") }.map(&:body)
+    assert_equal ["two"], Logs::Reader.list(limit: 5) { Log.search_text("two") }.map(&:body)
   end
 
   test "harvest_facets records distinct environment/source/service/release from the batch" do

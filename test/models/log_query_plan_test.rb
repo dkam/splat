@@ -25,6 +25,11 @@ require "test_helper"
 # with a project_id the planner picks index_logs_on_project_id_and_timestamp
 # and is fine either way, which is why the narrow project+level retry in the
 # incident report came back in under a second.
+#
+# Since ADR 0005 a query runs in one day file at a time, and a file holds a
+# day, so the bare (timestamp) index bounds an unscoped window well enough and
+# (level, timestamp) and (environment, timestamp) went. These plans are what
+# Logs::DayFiles::SCHEMA's indexes are for.
 class LogQueryPlanTest < ActiveSupport::TestCase
   setup do
     @project = projects(:one)
@@ -37,7 +42,17 @@ class LogQueryPlanTest < ActiveSupport::TestCase
   end
 
   def plan_for(relation)
-    LogsRecord.connection.select_all("EXPLAIN QUERY PLAN #{relation.to_sql}").rows.flatten.join("\n")
+    Logs::DayFiles.write(Time.now.utc.to_date) do
+      LogsRecord.lease_connection.select_all("EXPLAIN QUERY PLAN #{relation.to_sql}").rows.flatten.join("\n")
+    end
+  end
+
+  def refute_sorted(relation, label)
+    plan = plan_for(relation)
+    refute_match(/USE TEMP B-TREE FOR ORDER BY/, plan,
+      "#{label}: every matching row is being materialised and sorted before " \
+      "LIMIT can apply. Plan was:\n#{plan}")
+    plan
   end
 
   # The two assertions are separate on purpose: a plan can avoid the temp
@@ -102,16 +117,46 @@ class LogQueryPlanTest < ActiveSupport::TestCase
     )
   end
 
-  # The composite indexes make the bare single-column ones redundant: a strict
-  # prefix of a wider index earns nothing and gives the planner a worse option
-  # to choose. On the production logs table they are not free — dropping them
-  # is the point, not a side effect.
-  test "the bare level and environment indexes are gone" do
-    names = LogsRecord.connection.indexes(:logs).map(&:name)
+  # The logs page with no window: the newest 50 of a project, and of a
+  # project at one level. Each walks an index in order and stops at LIMIT.
+  test "a project's newest logs, and its newest at a level, need no sort" do
+    create_log(level: :error)
 
-    refute_includes names, "index_logs_on_level",
-      "superseded by index_logs_on_level_and_timestamp"
-    refute_includes names, "index_logs_on_environment",
-      "superseded by index_logs_on_environment_and_timestamp"
+    plan = refute_sorted(Log.where(project_id: @project.id).recent.limit(51), "project")
+    assert_match(/index_logs_on_project_id_and_timestamp/, plan)
+    plan = refute_sorted(Log.where(project_id: @project.id).recent.by_level("error").limit(51), "project + level")
+    assert_match(/index_logs_on_project_id_and_level_and_timestamp/, plan)
+  end
+
+  # A release is one deploy's band of a project's logs, and often not in the
+  # newest files at all. Bound by project alone, the filter walks the whole of
+  # every file newer than it: 114 ms warm and 3.3 s cold per day file for a
+  # release with no rows, measured on Booko's 2026-10-26 (378k rows of one
+  # project).
+  test "a release filter seeks on the release, not every row of the project" do
+    create_log(release: "1.2.3")
+
+    plan = refute_sorted(Log.where(project_id: @project.id).recent.by_release("1.2.3").limit(51), "project + release")
+    assert_match(/index_logs_on_project_id_and_release_and_timestamp/, plan)
+  end
+
+  test "a trace's logs are a seek on trace_id" do
+    create_log(trace_id: "abc123")
+
+    assert_match(/index_logs_on_trace_id/, plan_for(Log.where(project_id: @project.id, trace_id: "abc123")))
+  end
+
+  test "a day file has the indexes these plans rely on, and no others" do
+    names = Logs::DayFiles.write(Time.now.utc.to_date) { LogsRecord.lease_connection.indexes(:logs).map(&:name) }
+
+    assert_equal %w[
+      index_logs_on_log_id
+      index_logs_on_project_id_and_duration_ms
+      index_logs_on_project_id_and_level_and_timestamp
+      index_logs_on_project_id_and_release_and_timestamp
+      index_logs_on_project_id_and_timestamp
+      index_logs_on_timestamp
+      index_logs_on_trace_id
+    ], names.sort
   end
 end

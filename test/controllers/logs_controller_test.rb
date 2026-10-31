@@ -31,11 +31,12 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
   test "index filters by release" do
     Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
       level: :error, source: "sentry", body: "line from the old deploy", release: "1.11.1", payload: {})
-    @log.update!(release: "1.12.0")
+    Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+      level: :error, source: "sentry", body: "line from the new deploy", release: "1.12.0", payload: {})
 
     get project_logs_url(@project.slug, release: "1.12.0")
     assert_response :success
-    assert_match "controller test log", response.body
+    assert_match "line from the new deploy", response.body
     refute_match "line from the old deploy", response.body
   end
 
@@ -77,6 +78,43 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[rel=prev]", 1
   end
 
+  # Logs are a file per ingest day (ADR 0005): a page can take rows from
+  # several, merged by timestamp.
+  test "index pages across day files, newest first" do
+    30.times do |i|
+      Log.create!(project_id: @project.id, log_id: log_id_at(1.day.ago), timestamp: 1.day.ago - i.seconds,
+        level: :info, source: "sentry", body: "yesterday #{i}", payload: {})
+      Log.create!(project_id: @project.id, log_id: log_id_at(Time.current), timestamp: (i + 1).seconds.ago,
+        level: :info, source: "sentry", body: "today #{i}", payload: {})
+    end
+
+    get project_logs_url(@project.slug)
+    assert_select "a[href^=?]", project_logs_path(@project.slug) + "/", count: 50
+    assert_match "yesterday 18", response.body
+    refute_match "yesterday 19", response.body
+
+    get project_logs_url(@project.slug, page: 2)
+    assert_select "a[href^=?]", project_logs_path(@project.slug) + "/", count: 11
+    assert_match "yesterday 29", response.body
+  end
+
+  test "show finds a log by log_id in an older day file" do
+    old = Log.create!(project_id: @project.id, log_id: log_id_at(3.days.ago), timestamp: 3.days.ago,
+      level: :info, source: "sentry", body: "three days back", payload: {})
+
+    get project_log_url(@project.slug, old.log_id)
+    assert_response :success
+    assert_match "three days back", response.body
+  end
+
+  test "show is a 404 for another project's log" do
+    other = Log.create!(project_id: projects(:two).id, timestamp: Time.current,
+      level: :info, source: "sentry", body: "not yours", payload: {})
+
+    get project_log_url(@project.slug, other.log_id)
+    assert_response :not_found
+  end
+
   test "show renders a single log with attributes" do
     get project_log_url(@project.slug, @log)
     assert_response :success
@@ -111,5 +149,31 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href^=?]", "#{project_logs_path(@project.slug)}?", text: "any time"
     refute_match %r{href="[^"]*//evil\.example}, response.body
     refute_match %r{href="javascript:}, response.body
+  end
+end
+
+# A link from before day files carries the log's numeric id, which only the
+# legacy database can still answer. Reading it opens a pool the test drops
+# afterwards, which a test transaction can't survive, so no transaction.
+class LogsControllerLegacyTest < ActionDispatch::IntegrationTest
+  self.use_transactional_tests = false
+
+  setup do
+    @project = projects(:one)
+    @dir = Pathname(Dir.mktmpdir("legacy"))
+    Logs::DayFiles.legacy_path = build_legacy_logs(@dir.join("logs.sqlite3"), rows: [
+      {project_id: @project.id, timestamp: 2.days.ago, body: "a log from an old link"}
+    ])
+  end
+
+  teardown do
+    Logs::DayFiles.legacy_path = nil
+    FileUtils.rm_rf(@dir)
+  end
+
+  test "show answers a numeric id from the legacy database" do
+    get project_log_url(@project.slug, 1)
+    assert_response :success
+    assert_match "a log from an old link", response.body
   end
 end

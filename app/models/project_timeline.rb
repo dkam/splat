@@ -265,10 +265,13 @@ class ProjectTimeline
         p95: Transaction.p95_series(project_id: project.id, time_range: range, buckets: buckets),
         percentiles: Transaction.percentiles(range, project_id: project.id),
         endpoints: stats.map { it.merge("p95_series" => p95s[it["transaction_name"]]) },
-        # A grouped count down the (project_id, timestamp) index: Booko's day is
-        # ~125k rows. Cached with the rest because a 7d window is ten times that.
+        # A grouped count down the (project_id, timestamp) index of each day
+        # file the window touches, summed: Booko's day is ~125k rows. Cached
+        # with the rest because a 7d window is ten times that.
         logs: begin
-          counts = Log.where(project_id: project.id, timestamp: range).group(Arel.sql(bucket_sql("timestamp"))).count
+          counts = Logs::Reader.group_count(within: range) do
+            Log.where(project_id: project.id, timestamp: range).group(Arel.sql(bucket_sql("timestamp")))
+          end
           Array.new(buckets) { |i| counts[i].to_i }
         end
       }

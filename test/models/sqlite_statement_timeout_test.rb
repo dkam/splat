@@ -29,7 +29,7 @@ class SqliteStatementTimeoutTest < ActiveSupport::TestCase
   test "the connection has no timeout after the block" do
     skip_unless_supported
 
-    record = LogsRecord
+    record = LogsCatalogRecord
     assert_raises(ActiveRecord::StatementInvalid) do
       SqliteStatementTimeout.with(200) { record.lease_connection.select_value(SLOW) }
     end
@@ -40,10 +40,53 @@ class SqliteStatementTimeoutTest < ActiveSupport::TestCase
   # Holds on any gem: on a broken one `with` must not switch the timeout on,
   # or every MCP query would fail.
   test "a statement inside the timeout finishes" do
-    assert_equal 100_000, SqliteStatementTimeout.with(10_000) { LogsRecord.lease_connection.select_value(QUICK) }
+    assert_equal 100_000, SqliteStatementTimeout.with(10_000) { LogsCatalogRecord.lease_connection.select_value(QUICK) }
+  end
+
+  # A read across the logs day files opens each inside the block (ADR 0005).
+  # Each gets what's left of the block's time, so sixteen files share one cap
+  # rather than taking it sixteen times over.
+  test "a logs day file opened inside the block gets what's left of its time" do
+    skip_unless_supported
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    error = assert_raises(ActiveRecord::StatementInvalid) do
+      SqliteStatementTimeout.with(500) do
+        sleep 0.4
+        in_day_file { LogsRecord.lease_connection.select_value(PAST_CAP) }
+      end
+    end
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+    assert SqliteStatementTimeout.interrupted?(error), "#{error.class}: #{error.message}"
+    assert_operator elapsed, :<, 0.7, "the day file got the whole 500ms again: #{elapsed.round(2)}s"
+  end
+
+  test "a day file opened once the time is spent raises before running anything" do
+    skip_unless_supported
+
+    error = assert_raises(SqliteStatementTimeout::Expired) do
+      SqliteStatementTimeout.with(100) do
+        sleep 0.15
+        in_day_file { flunk "the day file's query ran" }
+      end
+    end
+    assert SqliteStatementTimeout.interrupted?(error)
+  end
+
+  test "a day file's connection has no timeout after the block" do
+    skip_unless_supported
+
+    assert_raises(ActiveRecord::StatementInvalid) do
+      SqliteStatementTimeout.with(200) { in_day_file { LogsRecord.lease_connection.select_value(SLOW) } }
+    end
+
+    assert_equal 2_000_000, in_day_file { LogsRecord.lease_connection.select_value(PAST_CAP) }
   end
 
   private
+
+  def in_day_file(&) = Logs::DayFiles.write(Time.now.utc.to_date, &)
 
   def skip_unless_supported
     skip "sqlite3 #{SQLite3::VERSION}: statement_timeout is broken (sparklemotion/sqlite3-ruby#737)" unless SqliteStatementTimeout.supported?
