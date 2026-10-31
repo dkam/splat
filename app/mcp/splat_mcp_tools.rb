@@ -581,19 +581,19 @@ class SplatMcpTools
     # Built in each day file the window touches (see Logs::Reader), newest
     # first across them.
     logs = Logs::Reader.list(limit: limit, within: time_range) do
-      logs = Log.where(timestamp: time_range)
-      logs = logs.where(project_id: project_id) if project_id
+      rel = Log.where(timestamp: time_range)
+      rel = rel.where(project_id: project_id) if project_id
       # within: is what keeps a common term over a wide window from enumerating
       # every match in the file — see Log.search_text.
-      logs = logs.search_text(args["query"], within: time_range) if args["query"].present?
-      logs = logs.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
-      logs = logs.by_logger(args["logger"]) if args["logger"].present?
-      logs = logs.by_service(args["service"]) if args["service"].present?
-      logs = logs.by_server_name(args["server_name"]) if args["server_name"].present?
-      logs = logs.for_trace(args["trace_id"]) if args["trace_id"].present?
-      logs = logs.by_environment(args["environment"]) if args["environment"].present?
-      logs = logs.by_release(args["release"]) if args["release"].present?
-      logs
+      rel = rel.search_text(args["query"], within: time_range) if args["query"].present?
+      rel = rel.by_level(args["level"]) if args["level"].present? && Log.levels.key?(args["level"])
+      rel = rel.by_logger(args["logger"]) if args["logger"].present?
+      rel = rel.by_service(args["service"]) if args["service"].present?
+      rel = rel.by_server_name(args["server_name"]) if args["server_name"].present?
+      rel = rel.for_trace(args["trace_id"]) if args["trace_id"].present?
+      rel = rel.by_environment(args["environment"]) if args["environment"].present?
+      rel = rel.by_release(args["release"]) if args["release"].present?
+      rel
     end
 
     render_text("#{window_note}#{format_logs_list(logs, window_label(time_range))}")

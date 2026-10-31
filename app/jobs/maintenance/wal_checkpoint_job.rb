@@ -98,8 +98,8 @@ module Maintenance
 
     private
 
-    # The logs day files with writes to checkpoint: today's, and yesterday's,
-    # which takes a batch built just before midnight. Older ones are never
+    # The logs day files with writes to checkpoint: today's, and yesterday's
+    # until it closes (Logs::DayFiles::Shard#closed_at). Older ones are never
     # written, so their WAL is already empty.
     def day_files
       Logs::DayFiles.shards.reject { |shard| shard.legacy? || shard.closed? }

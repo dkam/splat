@@ -42,28 +42,38 @@ module Logs
       rows[offset, limit] || []
     end
 
-    # Matching logs across the files.
-    def count(within: nil, &build)
-      shards_by_bounds(within).sum { |shard, _| unless_gone(shard, 0) { shard.with { build.call.count } } }
+    # The block's answer in each file, run inside it, or `gone` for a file
+    # retention deleted meanwhile. With `within:`, only the files whose
+    # timestamps can meet it.
+    def map(within: nil, gone: nil, &block)
+      shards = within ? shards_by_bounds(within).map(&:first) : DayFiles.shards
+      shards.map { |shard| unless_gone(shard, gone) { shard.with(&block) } }
     end
+
+    # Matching logs across the files.
+    def count(within: nil, &build) = map(within:, gone: 0) { build.call.count }.sum
 
     # A grouped count (`build` returns a relation with .group), summed across
     # files key by key.
     def group_count(within: nil, &build)
-      shards_by_bounds(within).each_with_object(Hash.new(0)) do |(shard, _), totals|
-        unless_gone(shard, {}) { shard.with { build.call.count } }.each { |key, n| totals[key] += n }
+      map(within:, gone: {}) { build.call.count }.each_with_object(Hash.new(0)) do |counts, totals|
+        counts.each { |key, n| totals[key] += n }
       end
     end
 
-    # The log with this log_id. Its own day's file first, then the legacy
-    # database, then the rest: a seek on index_logs_on_log_id in each.
-    def find_by_log_id(log_id, &scope)
+    # The log with this log_id: a seek on index_logs_on_log_id. A UUIDv7 is in
+    # the file of the day it names, or the legacy database if it's from before
+    # day files; any other log_id is looked for everywhere, legacy first.
+    def find_by_log_id(log_id, project_id: nil)
       return nil if log_id.blank?
 
-      first = DayFiles.shard_for_log_id(log_id)
-      rest = DayFiles.shards.reject { |s| s.name == first&.name }.partition(&:legacy?).flatten
-      [first, *rest].compact.each do |shard|
-        log = unless_gone(shard, nil) { shard.with { (scope ? scope.call(Log.all) : Log.all).find_by(log_id: log_id) } }
+      shards = if DayFiles.day_for(log_id)
+        [DayFiles.shard_for_log_id(log_id), DayFiles.legacy_shard].compact
+      else
+        DayFiles.shards.partition(&:legacy?).flatten
+      end
+      shards.each do |shard|
+        log = unless_gone(shard, nil) { shard.with { of_project(project_id).find_by(log_id: log_id) } }
         return log if log
       end
       nil
@@ -72,25 +82,21 @@ module Logs
     # The log with this id in the legacy database, where an id alone still
     # names one log: links from before day files carry it. nil once the
     # legacy database has gone.
-    def find_in_legacy(id, &scope)
-      legacy = DayFiles.shards.find(&:legacy?) or return nil
-      unless_gone(legacy, nil) { legacy.with { (scope ? scope.call(Log.all) : Log.all).find_by(id: id) } }
+    def find_in_legacy(id, project_id: nil)
+      legacy = DayFiles.legacy_shard or return nil
+      unless_gone(legacy, nil) { legacy.with { of_project(project_id).find_by(id: id) } }
     end
 
     # A page of #list in the shape Pagy's countless paginator takes: it only
     # calls offset, limit and to_a.
-    class Page
-      def initialize(within: nil, oldest_first: false, offset: 0, limit: nil, &build)
-        @within, @oldest_first, @offset, @limit, @build = within, oldest_first, offset, limit, build
-      end
+    Page = Data.define(:build, :within, :skip, :take) do
+      def initialize(build:, within: nil, skip: 0, take: nil) = super
 
-      def offset(n) = Page.new(within: @within, oldest_first: @oldest_first, offset: n, limit: @limit, &@build)
+      def offset(n) = with(skip: n)
 
-      def limit(n) = Page.new(within: @within, oldest_first: @oldest_first, offset: @offset, limit: n, &@build)
+      def limit(n) = with(take: n)
 
-      def to_a
-        Reader.list(limit: @limit, offset: @offset, within: @within, oldest_first: @oldest_first, &@build)
-      end
+      def to_a = Reader.list(limit: take, offset: skip, within:, &build)
     end
 
     # Files with rows, skipping any whose timestamps can't meet `within`, in
@@ -99,7 +105,7 @@ module Logs
       DayFiles.shards.filter_map { |shard|
         bounds = unless_gone(shard, nil) { shard.bounds }
         next unless bounds
-        next if within && !overlaps?(bounds, within)
+        next if within && !Range.new(*bounds).overlap?(within)
         [shard, bounds]
       }.sort_by { |_, (oldest, newest)| oldest_first ? oldest.to_r : -newest.to_r }
     end
@@ -115,9 +121,6 @@ module Logs
       gone
     end
 
-    def overlaps?((oldest, newest), range)
-      (range.begin.nil? || newest >= range.begin) &&
-        (range.end.nil? || (range.exclude_end? ? oldest < range.end : oldest <= range.end))
-    end
+    def of_project(project_id) = project_id ? Log.where(project_id: project_id) : Log.all
   end
 end

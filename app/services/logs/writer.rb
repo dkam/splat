@@ -12,7 +12,7 @@ module Logs
     module_function
 
     def insert!(rows)
-      rows.group_by { |row| DayFiles.day_for(row[:log_id]) || Time.now.utc.to_date }.each do |day, batch|
+      rows.group_by { |row| DayFiles.ingest_day(row[:log_id]) }.each do |day, batch|
         DayFiles.write(day) do
           LogsRecord.transaction do
             text = batch.to_h { |row| [row[:log_id], [row[:body], row[:attrs_text]]] }

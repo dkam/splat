@@ -115,12 +115,12 @@ class Logs::ReaderTest < ActiveSupport::TestCase
     assert_equal({"error" => 2, "info" => 1}, Logs::Reader.group_count { Log.where(trace_id: "t1").group(:level) })
   end
 
-  test "finds a log by log_id, in whichever file it is" do
+  test "finds a log by log_id, in the file of the day it names" do
     log = create_log(ingested_at: 2.days.ago, body: "find me")
     create_log(ingested_at: 1.minute.ago)
 
     assert_equal "find me", Logs::Reader.find_by_log_id(log.log_id).body
-    assert_nil Logs::Reader.find_by_log_id(log.log_id) { |logs| logs.where(project_id: -1) }
+    assert_nil Logs::Reader.find_by_log_id(log.log_id, project_id: -1)
     assert_nil Logs::Reader.find_by_log_id(SecureRandom.uuid_v7)
     assert_nil Logs::Reader.find_by_log_id(nil)
   end
@@ -129,7 +129,7 @@ class Logs::ReaderTest < ActiveSupport::TestCase
   test "a Page takes offset and limit like a relation" do
     5.times { |i| create_log(ingested_at: Time.current - i.minutes, body: "line #{i}") }
 
-    page = Logs::Reader::Page.new { Log.all }.offset(2).limit(2)
+    page = Logs::Reader::Page.new(build: -> { Log.all }).offset(2).limit(2)
 
     assert_equal ["line 2", "line 3"], page.to_a.map(&:body)
   end

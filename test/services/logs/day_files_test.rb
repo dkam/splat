@@ -67,13 +67,19 @@ class Logs::DayFilesTest < ActiveSupport::TestCase
     assert_equal [today, today - 1, today - 3], days & [today, today - 1, today - 3]
   end
 
-  test "a closed day file is one no batch can still reach" do
+  test "a day file closes an hour after its day ends" do
     today = Time.now.utc.to_date
     shard = ->(day) { Logs::DayFiles::Shard.new(name: :x, day: day, path: nil) }
 
-    refute shard.call(today).closed?
-    refute shard.call(today - 1).closed?, "takes a batch built just before midnight"
-    assert shard.call(today - 2).closed?
+    travel_to(today.in_time_zone("UTC") + 30.minutes) do
+      refute shard.call(today).closed?
+      refute shard.call(today - 1).closed?, "a job under way at midnight may still write it"
+      assert shard.call(today - 2).closed?
+    end
+    travel_to(today.in_time_zone("UTC") + 2.hours) do
+      refute shard.call(today).closed?
+      assert shard.call(today - 1).closed?
+    end
   end
 end
 

@@ -23,7 +23,7 @@ class Log < LogsRecord
   # which has no logs table, so Log.new or a where(level:) built outside a day
   # file's shard couldn't otherwise find them.
   def self.load_schema!
-    Logs::DayFiles.write(Time.now.utc.to_date) { super }
+    Logs::DayFiles.write(Logs::DayFiles.today) { super }
   end
   private_class_method :load_schema!
 
@@ -165,7 +165,7 @@ class Log < LogsRecord
 
   def create_in_day_file
     self.log_id ||= SecureRandom.uuid_v7
-    Logs::DayFiles.write(Logs::DayFiles.day_for(log_id) || Time.now.utc.to_date) do
+    Logs::DayFiles.write(Logs::DayFiles.ingest_day(log_id)) do
       self.class.transaction do
         yield
         self.class.with_connection { |conn| Logs::Fts.index(conn, [[id, body, attrs_text]]) }

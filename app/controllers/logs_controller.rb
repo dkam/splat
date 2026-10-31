@@ -22,7 +22,7 @@ class LogsController < ApplicationController
 
     # Countless: no COUNT(*) across the files — an append-only feed only needs
     # prev/next, not a total page count.
-    logs = Logs::Reader::Page.new(within: @window) { logs_relation }
+    logs = Logs::Reader::Page.new(within: @window, build: -> { logs_relation })
     @pagy, @logs = pagy(:countless, logs, limit: 50)
 
     # Filter-dropdown values, maintained at ingest in the facets table (primary
@@ -40,11 +40,10 @@ class LogsController < ApplicationController
   # By log_id. A numeric id is a link from before day files, into the legacy
   # database, the only place an id alone still names one log.
   def show
-    scope = ->(logs) { logs.where(project_id: @project.id) }
     @log = if params[:id].match?(/\A\d+\z/)
-      Logs::Reader.find_in_legacy(params[:id], &scope)
+      Logs::Reader.find_in_legacy(params[:id], project_id: @project.id)
     else
-      Logs::Reader.find_by_log_id(params[:id], &scope)
+      Logs::Reader.find_by_log_id(params[:id], project_id: @project.id)
     end
     raise ActiveRecord::RecordNotFound, "Couldn't find Log #{params[:id]}" unless @log
 

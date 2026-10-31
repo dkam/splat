@@ -9,12 +9,13 @@
 #     off-peak batches.
 #   * :primary is near-zero churn (oidc_sessions/settings only). It has no
 #     vacuum caller, so it uses FULL — pages return automatically on every
-#     commit. The logs catalog (dictionaries only) is the same. The logs day
-#     files are left at NONE: nothing is ever deleted from one, and retention
-#     deletes the whole file. The per-commit cost is negligible at primary's write rate, and
+#     commit. The per-commit cost is negligible at primary's write rate, and
 #     it self-maintains without depending on a checkpoint winning a lock race.
 #     (Backstory: a one-time pre-rewrite migration left ~15GB of free pages in
-#     primary that nothing ever reclaimed; FULL prevents a recurrence.)
+#     primary that nothing ever reclaimed; FULL prevents a recurrence.) The
+#     logs catalog (dictionaries only) is the same.
+#   * The logs day files are left at NONE: nothing is ever deleted from one,
+#     and retention deletes the whole file.
 #
 # Why here and not database.yml or the migration:
 #   * A connect-time `pragmas: { auto_vacuum: ... }` is silently ineffective:

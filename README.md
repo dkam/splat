@@ -683,7 +683,7 @@ docker compose exec web bin/rails "splat:backup:snapshot[/backups/splat]"
 docker compose exec web bin/rails splat:backup:sync                      # storage/backups/current/
 ```
 
-Both copy the four databases that hold data (not the cache or cable) and the logs day files, into `logs/` beside them, while Splat runs, and need as much free space as the databases take. A day file stops changing two days after its day, so `sync` copies each closed one once and then leaves it, as it does the old `production_logs.sqlite3` once copied after its last write, and deletes the copy of a day file retention has removed. The image's SQLite (Debian's 3.46) has no `sqlite3_rsync`, which arrived in 3.47, so in the container `sync` makes each copy afresh. The default directories are on the storage volume, the same disk as the databases; mount somewhere else and pass it if the copy should survive that disk.
+Both copy the four databases that hold data (not the cache or cable) and the logs day files, into `logs/` beside them, while Splat runs, and need as much free space as the databases take. A day file stops changing an hour after its day ends (UTC), so `sync` copies each closed one once and then leaves it, as it does the old `production_logs.sqlite3` once copied after its last write, and deletes the copy of a day file retention has removed. The image's SQLite (Debian's 3.46) has no `sqlite3_rsync`, which arrived in 3.47, so in the container `sync` makes each copy afresh. The default directories are on the storage volume, the same disk as the databases; mount somewhere else and pass it if the copy should survive that disk.
 
 Or one of these, run outside Splat:
 

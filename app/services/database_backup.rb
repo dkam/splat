@@ -26,7 +26,7 @@ module DatabaseBackup
 
   # Each file to copy: name, path, where its copy goes in the backup
   # directory, and when it closed, after which a copy is current: a day file
-  # two days after its day, the legacy logs database at its last write
+  # an hour after its day (Shard#closed_at), the legacy logs database at its last write
   # (nothing writes it once day files take over). nil for the rest, which
   # change all the time.
   def databases
@@ -40,7 +40,7 @@ module DatabaseBackup
         {name: "logs legacy", path: shard.path, copy: Pathname(shard.path.basename), closed_at: last_written(shard.path)}
       else
         {name: "logs #{shard.day.iso8601}", path: shard.path, copy: Pathname("logs").join(shard.path.basename),
-         closed_at: (Time.utc(shard.day.year, shard.day.month, shard.day.day) + 2.days if shard.closed?)}
+         closed_at: (shard.closed_at if shard.closed?)}
       end
     end
   end

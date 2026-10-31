@@ -98,9 +98,12 @@ module Logs
       # [oldest, newest] timestamp in the file, or nil when it holds no rows.
       def bounds = DayFiles.bounds(self)
 
-      # Today's and yesterday's files may still be written: yesterday's takes
-      # a batch built just before midnight. Older ones never change.
-      def closed? = !legacy? && day < Time.now.utc.to_date - 1
+      # When the file stops changing: an hour after its day ends. Ingest mints
+      # a log's log_id and inserts it in the same job, so only a job under way
+      # at midnight writes to a day once it's over. nil for the legacy database.
+      def closed_at = day && (day + 1).in_time_zone("UTC") + 1.hour
+
+      def closed? = !legacy? && Time.now >= closed_at
     end
 
     # Set up front, not on first use: two threads' first calls racing to build
@@ -118,7 +121,8 @@ module Logs
       end
 
       def root=(path)
-        reset!
+        registered.each_key { |name| unregister(name) }
+        bounds_cache.clear
         @root = path && Pathname(path)
       end
 
@@ -151,9 +155,12 @@ module Logs
       # each process lets go of them the next time it looks.
       def shards
         prune!
-        list = days.reverse.map { |day| register(shard_for(day)) }
-        list << register(Shard.new(name: LEGACY_SHARD, day: nil, path: legacy_path)) if legacy_logs?
-        list
+        [*days.reverse.map { |day| register(shard_for(day)) }, legacy_shard].compact
+      end
+
+      # The legacy database's shard, or nil once it has gone.
+      def legacy_shard
+        register(Shard.new(name: LEGACY_SHARD, day: nil, path: legacy_path)) if legacy_logs?
       end
 
       # The shard holding a log_id, by the day it names — nil when the log_id
@@ -168,6 +175,12 @@ module Logs
         m = UUID_V7.match(log_id.to_s) or return nil
         Time.at(Rational(Integer("#{m[1]}#{m[2]}", 16), 1000)).utc.to_date
       end
+
+      # The day whose file a log goes in: the day its log_id was minted, or
+      # today for one that isn't a UUIDv7.
+      def ingest_day(log_id) = day_for(log_id) || today
+
+      def today = Time.now.utc.to_date
 
       # Runs the block against the day's file, creating it first if this is the
       # day's first write.
@@ -193,31 +206,11 @@ module Logs
       # [oldest, newest] timestamp, or nil for an empty file. Two index seeks,
       # not one MIN/MAX statement, which SQLite would answer with a full scan
       # (see StorageStats.data_span). A closed file's bounds don't change, so
-      # they're kept until the file goes; an open one's are read each time,
-      # and only bounds read once the file closed are kept.
+      # they're kept until the file goes; an open one's are read each time.
       def bounds(shard)
-        closed = shard.closed?
-        cached = bounds_cache[shard.name]
-        return cached[:bounds] if cached && closed
-
-        found = shard.with do
-          LogsRecord.with_connection do |conn|
-            oldest = conn.select_value("SELECT MIN(timestamp) FROM logs")
-            newest = conn.select_value("SELECT MAX(timestamp) FROM logs")
-            oldest && [parse_time(oldest), parse_time(newest)]
-          end
-        end
-        bounds_cache[shard.name] = {bounds: found} if closed
-        found
+        read = -> { shard.with { (oldest = Log.unscoped.minimum(:timestamp)) && [oldest, Log.unscoped.maximum(:timestamp)] } }
+        shard.closed? ? bounds_cache.fetch_or_store(shard.name) { read.call } : read.call
       end
-
-      # Forget every registered shard — for tests, and for a root change.
-      def reset!
-        registered.each_key { |name| unregister(name) }
-        forget_bounds!
-      end
-
-      def forget_bounds! = bounds_cache.clear
 
       private
 
@@ -225,18 +218,17 @@ module Logs
       # logs table — the empty one SQLite makes when something opens a missing
       # path, or the FTS-only stub the old boot initializer left on installs
       # that never took a log — is passed over rather than failing every read.
-      # Asked once per path: a file doesn't turn into a logs database later.
+      # Asked once, and again when legacy_path changes: a file doesn't turn
+      # into a logs database later.
       def legacy_logs?
         path = legacy_path
         return false unless path&.file?
+        return @legacy_logs unless @legacy_logs.nil?
 
-        @legacy_logs ||= {}
-        @legacy_logs.fetch(path.to_s) do
-          db = SQLite3::Database.new(path.to_s, flags: SQLite3::Constants::Open::READONLY)
-          @legacy_logs[path.to_s] = !db.get_first_value("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'logs'").nil?
-        ensure
-          db&.close
-        end
+        db = SQLite3::Database.new(path.to_s, flags: SQLite3::Constants::Open::READONLY)
+        @legacy_logs = !db.get_first_value("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'logs'").nil?
+      ensure
+        db&.close
       end
 
       def catalog_config
@@ -335,10 +327,6 @@ module Logs
           db&.close unless db&.closed?
           ["", "-wal", "-shm"].each { |suffix| FileUtils.rm_f("#{tmp}#{suffix}") } if tmp
         end
-      end
-
-      def parse_time(value)
-        value.is_a?(Time) ? value : Time.find_zone("UTC").parse(value.to_s)
       end
     end
   end

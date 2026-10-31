@@ -35,7 +35,7 @@ namespace :splat do
     end
 
     %w[environment source service release].each do |name|
-      pairs = Logs::DayFiles.shards.flat_map { |shard| shard.with { Log.distinct.pluck(:project_id, name.to_sym) } }
+      pairs = Logs::Reader.map(gone: []) { Log.distinct.pluck(:project_id, name.to_sym) }.flatten(1)
       count = seed.call("log", name, pairs.uniq)
       puts "  logs.#{name}: #{count} values"
     end

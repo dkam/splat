@@ -57,9 +57,9 @@ module SqliteStatementTimeout
   def self.with(ms)
     return yield unless supported? && ms.positive?
 
-    state = {ms: ms, deadline: now + ms / 1000.0, connections: []}
+    state = {ms: ms, deadline: now + ms / 1000.0, connections: Set.new}
     ActiveSupport::IsolatedExecutionState[STATE] = state
-    records.each { |record| cap(state, record.lease_connection.raw_connection, ms) }
+    records.each { |record| cover(record) }
     yield
   ensure
     if state
@@ -81,7 +81,9 @@ module SqliteStatementTimeout
     left = ((state[:deadline] - now) * 1000).floor
     raise Expired, "statement timeout: #{state[:ms]}ms used up" unless left.positive?
 
-    cap(state, record.lease_connection.raw_connection, left)
+    db = record.lease_connection.raw_connection
+    db.statement_timeout = left
+    state[:connections] << db
   end
 
   # What a statement stopped by the timeout raises, once Active Record has
@@ -90,12 +92,6 @@ module SqliteStatementTimeout
     error.is_a?(Expired) ||
       (error.is_a?(ActiveRecord::StatementInvalid) && error.cause.is_a?(SQLite3::InterruptException))
   end
-
-  def self.cap(state, db, ms)
-    db.statement_timeout = ms
-    state[:connections] << db unless state[:connections].include?(db)
-  end
-  private_class_method :cap
 
   def self.now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   private_class_method :now

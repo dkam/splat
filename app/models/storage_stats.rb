@@ -147,7 +147,7 @@ class StorageStats
     # that's the honest "how big is this on disk" number the headline wants.
     def file_bytes_total
       DBS.sum do |_label, base_name|
-        on_each_database(base_name, catalog: true) { |conn|
+        on_each_database(base_name) { |conn|
           conn.select_value("PRAGMA page_count").to_i * conn.select_value("PRAGMA page_size").to_i
         }.sum
       rescue => e
@@ -195,10 +195,15 @@ class StorageStats
     # SEARCH is the seek, SCAN is not.
     def data_span
       DATA_SPAN.filter_map do |label, base_name, table, column|
-        oldest, newest = on_each_database(base_name) { |conn|
+        oldest, newest = if base_name == "LogsRecord"
+          # Each day file's own, kept once it's closed (Logs::DayFiles.bounds).
+          bounds = Logs::Reader.shards_by_bounds(nil).map(&:last)
+          [bounds.map(&:first).min, bounds.map(&:last).max]
+        else
+          conn = base_name.constantize.connection
           [parse_time(conn.select_value("SELECT MIN(#{column}) FROM #{table}")),
             parse_time(conn.select_value("SELECT MAX(#{column}) FROM #{table}"))]
-        }.reject { it.first.nil? }.transpose.then { |o, n| [o&.min, n&.max] }
+        end
         days = (oldest && newest) ? ((newest - oldest) / 1.day.to_f).round(1) : nil
         {name: label, table: table, oldest: oldest, newest: newest, days: days}
       rescue => e
@@ -274,10 +279,16 @@ class StorageStats
         total_rows = table_rows[table]
         next if total_rows.nil? || total_rows.zero?
 
-        # Logs are sampled from one day file, not every file's 25 anchors: the
-        # newest whose day is over, a whole day's traffic. Today's holds next
-        # to nothing just after midnight.
-        sample = on_each_database(base_name, sample_file: true) { |conn| sample_rows(conn, table) }.first.to_a
+        sample = if base_name == "LogsRecord"
+          # From one day file, not every file's 25 anchors: the newest whose
+          # day is over, a whole day's traffic. Today's holds next to nothing
+          # just after midnight.
+          shards = Logs::DayFiles.shards
+          shard = shards.find { !it.legacy? && it.day < Logs::DayFiles.today } || shards.first
+          shard ? shard.with { LogsRecord.with_connection { |conn| sample_rows(conn, table) } } : []
+        else
+          sample_rows(base_name.constantize.connection, table)
+        end
         next if sample.empty?
 
         compressed = 0
@@ -375,35 +386,21 @@ class StorageStats
     # count, table bytes, index bytes, and total bytes.
     def sqlite_tables_grouped
       DBS.map do |label, base_name|
-        tables = on_each_database(base_name, catalog: true) { |conn| sqlite_tables_for(conn) }
+        tables = on_each_database(base_name) { |conn| sqlite_tables_for(conn) }
         {name: label, base: base_name, tables: merge_tables(tables)}
       end
-    end
-
-    # Back-compat single-list view (primary only) — kept for any caller
-    # not yet updated to the grouped form.
-    def sqlite_tables
-      sqlite_tables_for(ApplicationRecord.connection)
     end
 
     private
 
     # Runs the block on each database behind a base class name, returning what
-    # it returns for each. That's one database, except for LogsRecord: every
-    # logs day file and the legacy logs database (ADR 0005), newest first, and
-    # the catalog too with `catalog:` — it holds the dictionaries, no logs.
-    # With `sample_file:`, only the newest day file whose day is over, or
-    # failing that the newest file there is.
-    def on_each_database(base_name, catalog: false, sample_file: false, &block)
+    # it returns for each. That's one database, except for LogsRecord: the
+    # catalog, which holds the dictionaries, then every logs day file and the
+    # legacy logs database (ADR 0005), less any retention deletes meanwhile.
+    def on_each_database(base_name, &block)
       return [block.call(base_name.constantize.connection)] unless base_name == "LogsRecord"
 
-      shards = Logs::DayFiles.shards
-      if sample_file
-        today = Time.now.utc.to_date
-        shards = [shards.find { !it.legacy? && it.day < today } || shards.first].compact
-      end
-      (catalog ? [block.call(LogsCatalogRecord.connection)] : []) +
-        shards.map { |shard| shard.with { LogsRecord.with_connection(&block) } }
+      [block.call(LogsCatalogRecord.connection), *Logs::Reader.map { LogsRecord.with_connection(&block) }.compact]
     end
 
     # One table list from several databases': rows, bytes and each index's
