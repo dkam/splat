@@ -13,6 +13,8 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.29.0 — 2026-11-01
+
 Logs are stored one SQLite file per day they arrived, under `storage/log_days/`
 ([ADR 0005](docs/decisions/0005-logs-day-files.md)), and retention deletes
 whole files. Booko's logs database was 58.9 GB for 7.95M logs on 2026-10-25,
