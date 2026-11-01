@@ -13,6 +13,19 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.29.1 — 2026-11-01
+
+rack 3.2.8, for four advisories published on 2026-10-31. The serious one
+(GHSA-5v64-555j-wjxm, high): rack's multipart parser kept parsed data in its
+scan buffer, so a crafted body could exhaust memory, and Rails parses
+multipart bodies on every route, Splat's public ingest endpoints included.
+The others: an invalid `Host` returned verbatim by `host_with_port` and
+`base_url` (GHSA-2j8w-xcrc-x985), a leading empty or quoted `boundary`
+parameter slipping past the multipart boundary guard (GHSA-p8x9-v4hv-2w4g),
+and `Rack::Static` header rules bypassed by unnormalized dot segments
+(GHSA-wvg4-6p58-3gh3). 1.29.0 was published with rack 3.2.7 the same day;
+deploy this one instead.
+
 ## 1.29.0 — 2026-11-01
 
 Logs are stored one SQLite file per day they arrived, under `storage/log_days/`
