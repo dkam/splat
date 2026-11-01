@@ -44,6 +44,13 @@ files (see README, Backup).
   under "Errors in this request" for exactly that call. `get_event` and
   `get_transaction` also read a 32-digit id as the Sentry one now, not a row
   id; about one Sentry id in 3.4 million is all digits.
+- **Logging in again a day later works.** Splat logs you out when its
+  record of your provider session expires (24 hours) or a backchannel logout
+  ends it, but the provider keeps the same session id while you're signed in
+  there, so the login that followed couldn't record it beside the old one. It
+  went through untracked and the next page logged you out again, in a loop
+  until the hourly cleanup deleted the old record. A login now takes the
+  record over.
 
 ## 1.28.3 — 2026-10-24
 

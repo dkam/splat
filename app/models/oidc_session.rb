@@ -24,17 +24,18 @@ class OidcSession < ApplicationRecord
     update!(expires_at: 1.minute.ago)
   end
 
-  # Create session mapping for user
+  # Create session mapping for user, or take over the sid's old one. The
+  # provider keeps one sid for as long as you're signed in there, so a login
+  # after this mapping expired, or after a backchannel logout invalidated it,
+  # brings the same sid back — and it has just come with a verified ID token,
+  # so the provider holds it live. A second row would fail uniqueness and
+  # leave the login untracked, which logs you straight back out.
   def self.create_for_user(oidc_sid:, session_id:, user_email:, expires_in: 24.hours)
-    create!(
-      oidc_sid: oidc_sid,
-      session_id: session_id,
-      user_email: user_email,
-      expires_at: expires_in.from_now
-    )
+    mapping = find_or_initialize_by(oidc_sid: oidc_sid)
+    mapping.update!(session_id: session_id, user_email: user_email, expires_at: expires_in.from_now)
+    mapping
   rescue ActiveRecord::RecordNotUnique
-    # Handle race condition - session already exists
-    Rails.logger.warn "OIDC session already exists for sid: #{oidc_sid}"
-    find_by(oidc_sid: oidc_sid)
+    # A concurrent login for the same sid inserted first; take its row over.
+    retry
   end
 end
