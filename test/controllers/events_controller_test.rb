@@ -23,6 +23,42 @@ class EventsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href=?]", project_transaction_path(@project.slug, txn)
   end
 
+  # The event_id is the id an app has in hand — Sentry.last_event_id, an
+  # error page's reference — so it's what the URL carries. Links made before
+  # that carry the row id, and still open.
+  test "an event's URL carries its event_id, and a link by row id still opens it" do
+    event = Event.create_from_sentry_payload!(SecureRandom.hex(16),
+      {"message" => "addressed by event_id", "timestamp" => Time.current.iso8601}, @project)
+
+    assert_equal "/projects/#{@project.slug}/events/#{event.event_id}", project_event_path(@project.slug, event)
+    [event.event_id, event.id].each do |id|
+      get project_event_url(@project.slug, id)
+      assert_response :success
+      assert_match "addressed by event_id", response.body
+    end
+
+    get project_event_url(projects(:two).slug, event.event_id)
+    assert_response :not_found
+
+    delete project_event_url(@project.slug, event.event_id)
+    assert_not Event.exists?(event.id)
+  end
+
+  # Ingest keeps whatever event_id the client sent. One with a dot would be
+  # read back as a format (abc.def is id abc, format def), and an all-digit one
+  # as a row id, so those link by row id instead.
+  test "an event_id that can't stand in a URL is linked by row id" do
+    ["not.a.uuid", "12345"].each do |event_id|
+      event = Event.create_from_sentry_payload!(event_id,
+        {"message" => "odd id #{event_id}", "timestamp" => Time.current.iso8601}, @project)
+
+      assert_equal "/projects/#{@project.slug}/events/#{event.id}", project_event_path(@project.slug, event)
+      get project_event_url(@project.slug, event)
+      assert_response :success
+      assert_match "odd id #{event_id}", response.body
+    end
+  end
+
   test "show links to the trace's logs when any exist" do
     trace = "def456def456def456def456def45600"
     Log.create!(

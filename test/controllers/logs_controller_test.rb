@@ -107,6 +107,16 @@ class LogsControllerTest < ActionDispatch::IntegrationTest
     assert_match "three days back", response.body
   end
 
+  test "show links to its trace's transaction by transaction_id" do
+    txn = @project.transactions.create!(transaction_id: SecureRandom.hex(16),
+      transaction_name: "TracedController#show", timestamp: Time.current, duration: 12, trace_id: "log-trace")
+    log = Log.create!(project_id: @project.id, log_id: SecureRandom.uuid_v7, timestamp: Time.current,
+      level: :info, source: "sentry", body: "traced", trace_id: "log-trace", payload: {})
+
+    get project_log_url(@project.slug, log.log_id)
+    assert_select "a[href=?]", "/projects/#{@project.slug}/transactions/#{txn.transaction_id}", text: /view transaction/
+  end
+
   test "show is a 404 for another project's log" do
     other = Log.create!(project_id: projects(:two).id, timestamp: Time.current,
       level: :info, source: "sentry", body: "not yours", payload: {})

@@ -92,7 +92,7 @@
             <%= link_to @log.trace_id, project_logs_path(@project.slug, trace_id: @log.trace_id),
                 class: "text-blue-600 dark:text-blue-400 hover:underline" %>
             <% if @related %>
-              · <%= link_to "view transaction →", project_transaction_path(@project.slug, @related.id),
+              · <%= link_to "view transaction →", project_transaction_path(@project.slug, @related),
                   class: "text-blue-600 dark:text-blue-400 hover:underline" %>
             <% end %>
           </dd>

@@ -39,7 +39,7 @@ class TransactionsController < ApplicationController
   end
 
   def set_transaction
-    @transaction = @project.transactions.find(params[:id])
+    @transaction = @project.transactions.find_by_param!(params[:id])
   end
 
   def transaction_data

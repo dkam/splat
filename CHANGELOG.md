@@ -36,14 +36,24 @@ compression dictionaries are copied at boot into
 Litestream can't follow a new file every day; the backup tasks copy the day
 files (see README, Backup).
 
+### Changed
+
+- **Event and transaction URLs carry the SDK's id.** An event's page is at
+  `/projects/covers/events/<event_id>` rather than its row number: the
+  32-character id `Sentry.last_event_id` returns, so an app that shows it as
+  an error reference leads straight to the page, and `get_event` takes the
+  same value. Transactions are addressed by `transaction_id` the same way.
+  Links by number still open.
+
 ### Fixed
 
-- **MCP's `get_event` takes the number from an event's URL.** It looked
-  events up by Sentry `event_id` only, so `/projects/covers/events/3324179`
-  pasted to an agent was a dead end, as was the id `get_transaction` lists
-  under "Errors in this request" for exactly that call. `get_event` and
-  `get_transaction` also read a 32-digit id as the Sentry one now, not a row
-  id; about one Sentry id in 3.4 million is all digits.
+- **MCP's `get_event` takes an event's row number too.** It looked events
+  up by Sentry `event_id` only, so an event URL from before this release
+  (`/projects/covers/events/3324179`) pasted to an agent was a dead end, as
+  was the id `get_transaction` lists under "Errors in this request" for
+  exactly that call. `get_event` and `get_transaction` also read a 32-digit
+  id as the Sentry one now, not a row id; about one Sentry id in 3.4 million
+  is all digits.
 - **Logging in again a day later works.** Splat logs you out when its
   record of your provider session expires (24 hours) or a backchannel logout
   ends it, but the provider keeps the same session id while you're signed in

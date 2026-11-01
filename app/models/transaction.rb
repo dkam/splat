@@ -2,6 +2,9 @@
 
 class Transaction < TransactionsSpansRecord
   include TransactionAnalytics
+  include SentryAddressed
+
+  def self.sentry_id_column = :transaction_id
 
   # Spans beyond this cap are dropped at ingest.
   SPAN_CAP = 1000

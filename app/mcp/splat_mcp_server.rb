@@ -537,7 +537,7 @@ class SplatMcpServer
           properties: {
             event_id: {
               type: ["string", "integer"],
-              description: "Either the Sentry event ID (32 hex chars) or the internal numeric ID — the number at the end of a web UI event URL (/projects/<project>/events/<id>), and the id get_transaction lists under \"Errors in this request\"."
+              description: "Either the Sentry event ID (32 hex chars) — what a web UI event URL ends with (/projects/<project>/events/<id>) — or the internal numeric ID, which older event URLs carry and get_transaction lists under \"Errors in this request\"."
             }
           },
           required: ["event_id"]

@@ -64,7 +64,7 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :transactions, only: [:show], constraints: {id: /\d+/}
+    resources :transactions, only: [:show]
   end
 
   # MCP (Model Context Protocol) endpoint

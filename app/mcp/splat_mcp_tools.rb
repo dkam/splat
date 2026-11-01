@@ -563,16 +563,11 @@ class SplatMcpTools
     render_text(text)
   end
 
-  # Takes the internal id too: it's what the web UI's event URLs carry, and
-  # what get_transaction's "Errors in this request" hands out.
+  # Takes the row id too (SentryAddressed): older event URLs carry it, and
+  # get_transaction's "Errors in this request" hands it out.
   def get_event(args)
-    id = args["event_id"].to_s
-    event =
-      if internal_id?(id)
-        Event.includes(:issue, :project).find(id)
-      else
-        Event.includes(:issue, :project).find_by!(project_id: every_project_id, event_id: id)
-      end
+    event = Event.includes(:issue, :project).where(project_id: every_project_id)
+      .find_by_param!(args["event_id"])
 
     text = format_event_detail(event)
 
@@ -812,14 +807,8 @@ class SplatMcpTools
       return Transaction.includes(:project).find(newest_id)
     end
 
-    id_str = id.to_s
-    if id_str.blank?
-      raise ActiveRecord::RecordNotFound, "Supply either transaction_id or trace_id"
-    elsif internal_id?(id_str)
-      Transaction.includes(:project).find(id_str)
-    else
-      Transaction.includes(:project).find_by!(project_id: every_project_id, transaction_id: id_str)
-    end
+    raise ActiveRecord::RecordNotFound, "Supply either transaction_id or trace_id" if id.blank?
+    Transaction.includes(:project).where(project_id: every_project_id).find_by_param!(id)
   end
 
   # Events and transactions index their external ids only behind project_id —
@@ -833,13 +822,6 @@ class SplatMcpTools
   # project. Projects live on the primary DB, so this can't be a join.
   def every_project_id
     Project.ids
-  end
-
-  # A row id, as opposed to a Sentry event_id or transaction_id. Those are 32
-  # hex characters, and about one in 3.4 million is all digits — rare, but
-  # splat-booko holds tens of millions of transactions.
-  def internal_id?(id)
-    id.match?(/\A\d{1,31}\z/)
   end
 
   PERCENTILE_KEYS = %i[avg p50 p95 p99 min max].freeze

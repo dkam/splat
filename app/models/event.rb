@@ -2,6 +2,9 @@
 
 class Event < IssuesEventsRecord
   include Compression::CompressedJson
+  include SentryAddressed
+
+  def self.sentry_id_column = :event_id
 
   compressed_json :payload, db: :issues_events, table: "events", platform: :platform
 

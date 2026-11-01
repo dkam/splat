@@ -224,8 +224,10 @@ class EndpointsControllerTest < ActionDispatch::IntegrationTest
     @project.transactions.create!(transaction_id: SecureRandom.uuid, transaction_name: name, timestamp: at, duration: duration)
   end
 
-  # The transactions the page links to, in the order it lists them.
+  # The transactions the page links to, in the order it lists them, as row ids
+  # (links carry the transaction_id).
   def listed_transaction_ids
-    response.body.scan(%r{/projects/#{@project.slug}/transactions/(\d+)}).flatten.map(&:to_i).uniq
+    response.body.scan(%r{/projects/#{@project.slug}/transactions/([\w-]+)}).flatten.uniq
+      .map { @project.transactions.find_by_param!(it).id }
   end
 end

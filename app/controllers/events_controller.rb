@@ -65,6 +65,6 @@ class EventsController < ApplicationController
   end
 
   def set_event
-    @event = @project.events.find(params[:id])
+    @event = @project.events.find_by_param!(params[:id])
   end
 end

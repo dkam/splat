@@ -5,6 +5,26 @@ class TransactionsControllerTest < ActionDispatch::IntegrationTest
     @project = projects(:one)
   end
 
+  # Same as events: the SDK's transaction_id is the URL, a row id still opens.
+  test "a transaction's URL carries its transaction_id, and a link by row id still opens it" do
+    txn = @project.transactions.create!(transaction_id: SecureRandom.hex(16),
+      transaction_name: "AddressedController#show", timestamp: Time.current, duration: 12)
+
+    assert_equal "/projects/#{@project.slug}/transactions/#{txn.transaction_id}",
+      project_transaction_path(@project.slug, txn)
+    [txn.transaction_id, txn.id].each do |id|
+      get project_transaction_url(@project.slug, id)
+      assert_response :success
+      assert_match "AddressedController#show", response.body
+    end
+
+    get project_transaction_url(@project.slug, txn, format: :json)
+    assert_equal txn.transaction_id, response.parsed_body["transaction_id"]
+
+    get project_transaction_url(projects(:two).slug, txn.transaction_id)
+    assert_response :not_found
+  end
+
   test "show lists the errors thrown during the request" do
     trace = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
     txn = @project.transactions.create!(
