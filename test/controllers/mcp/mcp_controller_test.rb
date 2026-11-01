@@ -793,6 +793,35 @@ module Mcp
       assert_match(/### Caused by NoMethodError\n\n.*\n\nSame stack trace as above\./, tool_text)
     end
 
+    # The web UI's event URLs carry the internal id (/projects/covers/events/3324179),
+    # and get_transaction's "Errors in this request" points at get_event with it.
+    test "get_event takes the internal id as well as the Sentry event_id" do
+      payload = {"message" => "found by row id", "timestamp" => Time.current.iso8601}
+      event = Event.create_from_sentry_payload!(SecureRandom.hex(16), payload, projects(:one))
+
+      [event.id.to_s, event.id].each do |id|
+        call_tool("get_event", {"event_id" => id})
+        refute JSON.parse(response.body).dig("result", "isError"), "get_event #{id.inspect} failed: #{tool_text}"
+        assert_match "found by row id", tool_text
+      end
+    end
+
+    # One Sentry event_id in about 3.4 million is all digits; it is still a
+    # UUID, not a row id.
+    test "get_event and get_transaction read an all-digit 32-character id as the Sentry one" do
+      project = projects(:one)
+      digits = "1" * 32
+      event = Event.create_from_sentry_payload!(digits, {"message" => "digits only", "timestamp" => Time.current.iso8601}, project)
+      Transaction.create!(project: project, transaction_id: digits, timestamp: Time.current,
+        transaction_name: "DigitsController#show", duration: 5)
+
+      call_tool("get_event", {"event_id" => event.event_id})
+      assert_match "digits only", tool_text
+
+      call_tool("get_transaction", {"transaction_id" => digits})
+      assert_match "DigitsController#show", tool_text
+    end
+
     test "get_issue counts the users an issue has reached" do
       IssueFacet.reset_throttle!
       payload = {"message" => "boom", "timestamp" => Time.current.iso8601, "user" => {"id" => 42}}
@@ -1187,6 +1216,7 @@ module Mcp
 
       {
         ["get_event", {"event_id" => event.event_id}] => "events",
+        ["get_event", {"event_id" => event.id.to_s}] => "events",
         ["get_transaction", {"transaction_id" => txn.transaction_id}] => "transactions",
         ["get_transaction", {"trace_id" => "plan-trace"}] => "transactions",
         ["get_transaction", {"trace_id" => "plan-trace", "project" => project.id}] => "transactions"

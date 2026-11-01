@@ -36,6 +36,15 @@ compression dictionaries are copied at boot into
 Litestream can't follow a new file every day; the backup tasks copy the day
 files (see README, Backup).
 
+### Fixed
+
+- **MCP's `get_event` takes the number from an event's URL.** It looked
+  events up by Sentry `event_id` only, so `/projects/covers/events/3324179`
+  pasted to an agent was a dead end, as was the id `get_transaction` lists
+  under "Errors in this request" for exactly that call. `get_event` and
+  `get_transaction` also read a 32-digit id as the Sentry one now, not a row
+  id; about one Sentry id in 3.4 million is all digits.
+
 ## 1.28.3 — 2026-10-24
 
 OTLP log batches sent gzipped, as pg01's collector sends them, are answered
