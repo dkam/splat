@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.29.3 — 2026-11-05
+
+sqlite3 2.10.2 and addressable 2.9.2, for eight advisories that failed
+bundler-audit on 1.29.2. sqlite3's (GHSA-4fqr-96q8-xrfx) could truncate a query
+on a string of 4 GiB or more. addressable's seven are denial of service in URI
+templates and normalization, a wrong path from dotted segments, and misleading
+hosts from `display_uri`. Same code otherwise.
+
 ## 1.29.2 — 2026-11-05
 
 Rails 8.1.4.1, for 21 advisories, released on 2026-11-04. It brings
