@@ -13,6 +13,15 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.29.2 — 2026-11-05
+
+Rails 8.1.4.1, for 21 advisories, released on 2026-11-04. It brings
+rails-html-sanitizer 1.7.2, loofah 2.25.3 and nokogiri 1.19.7 with it. One
+change to check before upgrading: a request whose `Forwarded` and
+`X-Forwarded-For` headers disagree now raises
+`ActionDispatch::RemoteIp::IpSpoofAttackError` on every route, ingest included,
+so have the proxy drop `Forwarded`. Same code otherwise.
+
 ## 1.29.1 — 2026-11-01
 
 rack 3.2.8, for four advisories published on 2026-10-31. The serious one
