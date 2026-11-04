@@ -55,7 +55,7 @@ gem "jwt"
 # Official MCP SDK — owns the JSON-RPC layer, protocol-version negotiation and
 # tool/prompt/resource plumbing behind /mcp. Replaced a hand-rolled server that
 # was pinned to the 2024-11-05 spec. See app/mcp/splat_mcp_server.rb.
-gem "mcp", "~> 1.6"
+gem "mcp", "~> 1.8"
 
 # Brotli compression support for Sentry envelopes. 0.9.1 bundles libbrotli
 # 1.2.1, the first without CVE-2026-111497, and won't build against an
