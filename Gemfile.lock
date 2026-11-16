@@ -149,7 +149,7 @@ GEM
     jbuilder (2.15.1)
       actionview (>= 7.0.0)
       activesupport (>= 7.0.0)
-    json (2.21.2)
+    json (3.1.0)
     json-jwt (1.17.2)
       activesupport (>= 4.2)
       aes_key_wrap
@@ -187,6 +187,7 @@ GEM
     mcp (1.8.1)
       json_schemer (>= 2.4)
     mini_mime (1.1.5)
+    mini_portile2 (2.8.9)
     minitest (6.0.6)
       drb (~> 2.0)
       prism (~> 1.5)
@@ -204,6 +205,9 @@ GEM
     net-smtp (0.5.2)
       net-protocol
     nio4r (2.7.5)
+    nokogiri (1.19.7)
+      mini_portile2 (~> 2.8.2)
+      racc (~> 1.4)
     nokogiri (1.19.7-aarch64-linux-gnu)
       racc (~> 1.4)
     nokogiri (1.19.7-aarch64-linux-musl)
@@ -230,7 +234,7 @@ GEM
       tzinfo
       validate_url
       webfinger (~> 2.0)
-    pagy (43.8.1)
+    pagy (43.8.2)
       json
       uri
       yaml
@@ -355,6 +359,8 @@ GEM
       activejob (>= 7.2)
       activerecord (>= 7.2)
       railties (>= 7.2)
+    sqlite3 (2.10.2)
+      mini_portile2 (~> 2.8.0)
     sqlite3 (2.10.2-aarch64-linux-gnu)
     sqlite3 (2.10.2-aarch64-linux-musl)
     sqlite3 (2.10.2-arm-linux-gnu)
@@ -456,7 +462,7 @@ DEPENDENCIES
   letter_opener
   mcp (~> 1.6)
   openid_connect
-  pagy (~> 43.6)
+  pagy (~> 43.8)
   propshaft
   puma (>= 5.0)
   rails (~> 8.1.4)
