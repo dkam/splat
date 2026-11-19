@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.29.4 — 2026-11-19
+
+Ruby 4.0.10, for seven memory-safety advisories in Onigmo and in String case
+conversion, published on 2026-11-18. Unlike 4.0.9's, they don't need a regexp
+compiled from outside input: two are heap overflows in `upcase` and `downcase`
+of a crafted string, and ingest downcases envelope fields such as
+`Content-Encoding` and log levels. Same code otherwise.
+
 ## 1.29.3 — 2026-11-05
 
 sqlite3 2.10.2 and addressable 2.9.2, for eight advisories that failed
