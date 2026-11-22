@@ -13,6 +13,14 @@ Releases before 1.16.0 predate this file — `git log v1.15.7` has them.
 
 ## Unreleased
 
+## 1.29.5 — 2026-11-23
+
+The image carries an SBOM: an SPDX list of every Debian package and gem in it,
+with versions, attached in the registry beside the provenance it already had.
+`docker buildx imagetools inspect ghcr.io/dkam/splat:v1.29.5 --format
+'{{ json .SBOM }}'` reads it, so an advisory can be checked against what runs
+without pulling the image. Same code otherwise.
+
 ## 1.29.4 — 2026-11-19
 
 Ruby 4.0.10, for seven memory-safety advisories in Onigmo and in String case
