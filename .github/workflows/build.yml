@@ -103,6 +103,10 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
+          # An SPDX list of every package in the image (Debian packages and gems,
+          # with versions), attached to it in the registry, so an advisory can be
+          # checked against what runs without opening the image.
+          sbom: true
           context: .
           platforms: ${{ matrix.platform }}
           # Read at boot by config/initializers/revision.rb, so a running
